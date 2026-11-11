@@ -166,7 +166,20 @@ recent_add:
     invoke wcscmp, rdi, r12
     test eax, eax
     jz .done
-    mov ebx, MAX_RECENT-2
+    ; an older entry for the same path is overwritten by the shift, so it moves to the top
+    mov ebx, 1
+.findk:
+    cmp ebx, MAX_RECENT-1
+    jae .gotk
+    invoke _snwprintf, rsi, 16, &f_r, rbx
+    invoke GetPrivateProfileStringW, &sec_recent, rsi, &s_empty, rdi, 520, &g_ini
+    invoke wcscmp, rdi, r12
+    test eax, eax
+    jz .gotk
+    inc ebx
+    jmp .findk
+.gotk:
+    dec ebx
 .shift:
     invoke _snwprintf, rsi, 16, &f_r, rbx
     invoke GetPrivateProfileStringW, &sec_recent, rsi, &s_empty, rdi, 520, &g_ini

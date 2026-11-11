@@ -16,10 +16,10 @@ extern DwmSetWindowAttribute
 extern GetCursorPos, ScreenToClient, TrackPopupMenu, DestroyMenu
 extern calloc, free, wcslen, wcscpy, wcsncpy, wcscmp, _wcsicmp, wcsrchr, _snwprintf, wcscat
 extern WritePrivateProfileStringW, GetPrivateProfileStringW, GetPrivateProfileIntW
-extern CreateFileW, WriteFile, CloseHandle
+extern CreateFileW, WriteFile, CloseHandle, DeleteFileW
 extern g_hinst, g_hframe, g_htab, g_hstatus, g_font, g_dpi, g_dark
 extern th_panelbrush
-extern mk, reg_class, scl, set_status, msgbox, browse_open, browse_save
+extern mk, reg_class, scl, set_status, msgbox, browse_open_as, browse_save_as
 extern theme_set, fonts_init, s_appname
 
 ; supplied by other modules
@@ -132,6 +132,17 @@ WSTR k_c, "C"
 WSTR k_out, "Out"
 WSTR k_opts, "Opts"
 WSTR k_count, "Count"
+WSTR k_active, "Active"
+WSTR s_de_bcs, "bcs"
+WSTR s_de_bcw, "bcw"
+flt_open_sess: dw __utf16__("세션 (*.bcs)"), 0, __utf16__("*.bcs"), 0, __utf16__("워크스페이스 (*.bcw)"), 0, __utf16__("*.bcw"), 0, __utf16__("모든 파일 (*.*)"), 0, __utf16__("*.*"), 0, 0
+flt_open_ws:   dw __utf16__("워크스페이스 (*.bcw)"), 0, __utf16__("*.bcw"), 0, __utf16__("세션 (*.bcs)"), 0, __utf16__("*.bcs"), 0, __utf16__("모든 파일 (*.*)"), 0, __utf16__("*.*"), 0, 0
+flt_save_sess: dw __utf16__("세션 (*.bcs)"), 0, __utf16__("*.bcs"), 0, __utf16__("모든 파일 (*.*)"), 0, __utf16__("*.*"), 0, 0
+flt_save_ws:   dw __utf16__("워크스페이스 (*.bcw)"), 0, __utf16__("*.bcw"), 0, __utf16__("모든 파일 (*.*)"), 0, __utf16__("*.*"), 0, 0
+WSTR s_home_nosave, "홈 탭은 세션으로 저장할 수 없습니다. 저장할 비교 탭을 선택한 뒤 다시 시도하세요."
+WSTR s_ws_empty, "저장할 탭이 없습니다. 비교 탭을 하나 이상 연 뒤 다시 시도하세요."
+WSTR f_open_fail, `열 수 없습니다:\n%s\n\n세션(.bcs) 또는 워크스페이스(.bcw) 파일이 아니거나, 탭을 더 열 수 없습니다.`
+WSTR f_save_fail, `저장하지 못했습니다:\n%s\n\n이 위치에 쓸 수 있는지 확인하세요.`
 WSTR sw_report, "/report"
 WSTR sw_sync, "/sync"
 WSTR sw_exit, "/exit"
@@ -1157,97 +1168,167 @@ session_read:
     invoke GetPrivateProfileStringW, r13, &k_out, &s_empty, &rbx+SS_PATHO, 519, r12
     invoke GetPrivateProfileStringW, r13, &k_opts, &s_empty, &rbx+SS_OPTS, 1023, r12
     invoke sess_open, rbx
+    test rax, rax
+    jnz .ret
+    invoke free, rbx
+    xor eax, eax
+.ret:
     EPILOG 160
 .fail:
     xor eax, eax
     EPILOG 160
 
-; ensure_ext(rcx=path buffer(520), rdx=ext): append ext when the name has no '.'
-ensure_ext:
+; path_ext(rcx=path) -> rax = the file name's extension (".xxx"), or 0 when it has none
+path_ext:
     PROLOG 64
     mov rsi, rcx
-    mov rdi, rdx
     invoke wcsrchr, rsi, '.'
+    mov rbx, rax
     test rax, rax
-    jnz .d
-    invoke wcscat, rsi, rdi
+    jz .d
+    invoke wcsrchr, rsi, 92          ; a dot before the last backslash belongs to a folder name
+    cmp rax, rbx
+    jb .d
+    xor ebx, ebx
 .d:
+    mov rax, rbx
     EPILOG 64
+
+; file_msg(rcx=format with one %s, rdx=path): warning box; silent in unattended runs
+file_msg:
+    PROLOG 1648
+    test qword [g_batch], 4
+    jnz .d
+    mov r12, rcx
+    mov r13, rdx
+    lea rdi, [rsp+96]
+    invoke _snwprintf, rdi, 759, r12, r13
+    mov word [rdi+1518], 0
+    invoke msgbox, [g_hframe], rdi, MB_OK|MB_ICONWARNING
+.d:
+    EPILOG 1648
 
 ; save_session_dlg
 save_session_dlg:
     PROLOG 1200
     call cur_index
     test rax, rax
-    jz .d
+    jnz .has
+    invoke msgbox, [g_hframe], &s_home_nosave, MB_OK|MB_ICONINFO
+    jmp .d
+.has:
     lea rcx, [g_sess]
     mov rbx, [rcx+rax*8]
     lea rdi, [rsp+96]
     mov word [rdi], 0
-    invoke browse_save, [g_hframe], rdi
+    invoke browse_save_as, [g_hframe], rdi, &flt_save_sess, &s_de_bcs
     test eax, eax
     jz .d
-    invoke ensure_ext, rdi, &x_bcs
+    invoke DeleteFileW, rdi          ; replace, do not merge into an older file
     invoke SendMessageW, [rbx+SS_HVIEW], BC_COLLECT, 0, 0
     invoke session_write, rbx, rdi, &sec_session
+    test eax, eax
+    jz .fail
     invoke recent_add, rdi
+    jmp .d
+.fail:
+    invoke file_msg, &f_save_fail, rdi
 .d:
     EPILOG 1200
 
-; open_file_dlg : .bcs session or .bcw workspace
+; open_file_dlg(rcx = 0 session first / 1 workspace first in the file type list)
 open_file_dlg:
     PROLOG 1200
+    lea rbx, [flt_open_sess]
+    test ecx, ecx
+    jz .go
+    lea rbx, [flt_open_ws]
+.go:
     lea rdi, [rsp+96]
     mov word [rdi], 0
-    invoke browse_open, [g_hframe], rdi
+    invoke browse_open_as, [g_hframe], rdi, rbx
     test eax, eax
     jz .d
     invoke open_any_file, rdi
 .d:
     EPILOG 1200
 
-; open_any_file(rcx=path)
+; open_any_file(rcx=path) -> eax 1 when something was opened
+; The extension picks what to try first; the other kind is tried when that finds nothing.
 open_any_file:
     PROLOG 64
     mov rsi, rcx
-    invoke wcsrchr, rsi, '.'
+    xor r12d, r12d                   ; 0 = session, 1 = workspace
+    invoke path_ext, rsi
     test rax, rax
-    jz .d
-    mov rbx, rax
-    invoke _wcsicmp, rbx, &x_bcw
+    jz .try
+    invoke _wcsicmp, rax, &x_bcw
     test eax, eax
-    jz .ws
+    jnz .try
+    mov r12d, 1
+.try:
+    mov r13d, 2
+.again:
+    test r12d, r12d
+    jnz .ws
     invoke session_read, rsi, &sec_session
-    invoke recent_add, rsi
-    jmp .d
+    jmp .chk
 .ws:
     invoke workspace_read, rsi
-.d:
+.chk:
+    test rax, rax
+    jnz .ok
+    xor r12d, 1
+    dec r13d
+    jnz .again
+    invoke file_msg, &f_open_fail, rsi
+    xor eax, eax
+    EPILOG 64
+.ok:
+    invoke recent_add, rsi
+    mov eax, 1
     EPILOG 64
 
 ; save_workspace_dlg
 save_workspace_dlg:
     PROLOG 1200
+    cmp qword [g_nsess], 1
+    ja .has
+    invoke msgbox, [g_hframe], &s_ws_empty, MB_OK|MB_ICONINFO
+    jmp .d
+.has:
     lea rdi, [rsp+96]
     mov word [rdi], 0
-    invoke browse_save, [g_hframe], rdi
+    invoke browse_save_as, [g_hframe], rdi, &flt_save_ws, &s_de_bcw
     test eax, eax
     jz .d
-    invoke ensure_ext, rdi, &x_bcw
     invoke workspace_write, rdi
+    test eax, eax
+    jz .fail
+    invoke recent_add, rdi
+    jmp .d
+.fail:
+    invoke file_msg, &f_save_fail, rdi
 .d:
     EPILOG 1200
 
-; workspace_write(rcx=file)
+; workspace_write(rcx=file) -> eax nonzero when every value was written
+; Replaces the file: [Workspace] Count / Active (tab index, 0 = Home) and one [TabN] per tab.
 workspace_write:
     PROLOG 192
     mov r12, rcx
+    invoke DeleteFileW, r12
     invoke ini_prepare, r12
     lea rdi, [rsp+96]
     mov rax, [g_nsess]
     dec rax
     invoke _snwprintf, rdi, 16, &f_int, rax
     invoke WritePrivateProfileStringW, &sec_ws, &k_count, rdi, r12
+    mov r14d, eax                    ; stays nonzero while writes succeed
+    call cur_index
+    lea rdi, [rsp+96]
+    invoke _snwprintf, rdi, 16, &f_int, rax
+    invoke WritePrivateProfileStringW, &sec_ws, &k_active, rdi, r12
     mov ebx, 1
 .l:
     cmp rbx, [g_nsess]
@@ -1259,17 +1340,31 @@ workspace_write:
     invoke SendMessageW, [r13+SS_HVIEW], BC_COLLECT, 0, 0
     lea rdi, [rsp+96]
     invoke session_write, r13, r12, rdi
+    test eax, eax
+    jnz .wok
+    xor r14d, r14d
+.wok:
     inc rbx
     jmp .l
 .done:
+    mov eax, r14d
     EPILOG 192
 
-; workspace_read(rcx=file)
+; workspace_read(rcx=file) -> rax = number of tabs opened
+; The tabs are added after the ones already open; the saved active tab is selected again.
 workspace_read:
     PROLOG 192
     mov r12, rcx
     invoke GetPrivateProfileIntW, &sec_ws, &k_count, 0, r12
-    mov r13, rax
+    mov r13d, eax
+    cmp r13, MAX_SESS
+    jbe .cok
+    mov r13d, MAX_SESS
+.cok:
+    invoke GetPrivateProfileIntW, &sec_ws, &k_active, 0, r12
+    mov r15d, eax
+    xor r14d, r14d                   ; session of the saved active tab
+    xor ebp, ebp                     ; tabs opened
     mov ebx, 1
 .l:
     cmp rbx, r13
@@ -1278,9 +1373,31 @@ workspace_read:
     invoke _snwprintf, rdi, 16, &f_tab, rbx
     lea rdi, [rsp+96]
     invoke session_read, r12, rdi
+    test rax, rax
+    jz .n
+    inc ebp
+    cmp rbx, r15
+    jne .n
+    mov r14, rax
+.n:
     inc rbx
     jmp .l
 .done:
+    test r14, r14
+    jz .ret
+    xor ebx, ebx
+.find:
+    cmp rbx, [g_nsess]
+    jae .ret
+    lea rax, [g_sess]
+    cmp [rax+rbx*8], r14
+    je .sel
+    inc rbx
+    jmp .find
+.sel:
+    invoke select_tab, rbx
+.ret:
+    mov eax, ebp
     EPILOG 192
 
 ; ---------------------------------------------------------------- command line
@@ -1381,6 +1498,7 @@ save_requested:
     cmp word [g_save_path], 0
     je .ws
     invoke SendMessageW, [rbx+SS_HVIEW], BC_COLLECT, 0, 0
+    invoke DeleteFileW, &g_save_path
     invoke session_write, rbx, &g_save_path, &sec_session
 .ws:
     cmp word [g_savews_path], 0
@@ -1602,7 +1720,7 @@ frame_proc:
     cmp eax, IDM_OPEN_SESS
     je .c_open
     cmp eax, IDM_OPEN_WS
-    je .c_open
+    je .c_openws
     cmp eax, IDM_SAVE_SESS
     je .c_save
     cmp eax, IDM_SAVE_WS
@@ -1650,6 +1768,11 @@ frame_proc:
     invoke msgbox, rsi, &s_shell_off, MB_OK|MB_ICONINFO
     jmp .ok0
 .c_open:
+    xor ecx, ecx
+    call open_file_dlg
+    jmp .ok0
+.c_openws:
+    mov ecx, 1
     call open_file_dlg
     jmp .ok0
 .c_save:
