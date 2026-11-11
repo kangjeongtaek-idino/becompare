@@ -13,7 +13,7 @@ extern FillRect, DragAcceptFiles, DragQueryFileW, DragFinish, GetDlgItem, SetWin
 extern InvalidateRect, RedrawWindow, GetWindowTextW, GetFileAttributesW
 extern GetCommandLineW, CommandLineToArgvW, LocalFree
 extern DwmSetWindowAttribute
-extern GetCursorPos, ScreenToClient
+extern GetCursorPos, ScreenToClient, TrackPopupMenu, DestroyMenu
 extern calloc, free, wcslen, wcscpy, wcsncpy, wcscmp, _wcsicmp, wcsrchr, _snwprintf, wcscat
 extern WritePrivateProfileStringW, GetPrivateProfileStringW, GetPrivateProfileIntW
 extern CreateFileW, WriteFile, CloseHandle
@@ -77,6 +77,11 @@ WSTR m_ow, "워크스페이스 열기..."
 WSTR m_sw, "워크스페이스 저장..."
 WSTR m_ct, `탭 닫기\tCtrl+W`
 WSTR m_ex, "종료"
+WSTR tm_close, "닫기"
+WSTR tm_others, "다른 탭 닫기"
+WSTR tm_all, "모든 탭 닫기"
+WSTR tm_unmod, "수정되지 않은 탭 닫기"
+WSTR tm_right, "오른쪽 탭 닫기"
 WSTR m_li, "라이트 모드"
 WSTR m_dk, "다크 모드"
 WSTR m_rn, `비교 실행\tF5`
@@ -177,6 +182,8 @@ section .bss
 alignb 8
 g_close_tab: resq 1
 g_close_all: resq 1
+g_bulk_mode: resq 1                  ; BULK_* while a "close several tabs" command runs
+g_bulk_ref:  resq 1                  ; the session the tab menu was opened on
 g_nsess:    resq 1
 g_sess:     resq MAX_SESS
 g_batch:    resq 1
@@ -187,6 +194,13 @@ g_snap_path: resw 520
 g_savews_path: resw 520
 
 section .text
+
+; tab context menu commands (TrackPopupMenu return values); TM_CLOSE+n is BULK mode n
+%define TM_CLOSE     1
+%define BULK_OTHERS  1
+%define BULK_ALL     2
+%define BULK_UNMOD   3
+%define BULK_RIGHT   4
 
 ; ---------------------------------------------------------------- WinMain
 WinMain:
@@ -769,6 +783,131 @@ close_current_tab:
     invoke select_tab, rax
     call layout_frame
 .done:
+    EPILOG 64
+
+; tab_menu: right-click menu of the tab under the cursor
+tab_menu:
+    PROLOG 160
+    lea rbx, [rsp+96]                ; TCHITTESTINFO (client pt, flags)
+    lea rdi, [rsp+120]               ; screen pt
+    invoke GetCursorPos, rdi
+    mov rax, [rdi]
+    mov [rbx], rax
+    invoke ScreenToClient, [g_htab], rbx
+    invoke SendMessageW, [g_htab], TCM_HITTEST, 0, rbx
+    movsxd r14, eax                  ; tab index
+    test r14, r14
+    js .d
+    cmp r14, [g_nsess]
+    jae .d
+    lea rax, [g_sess]
+    mov r15, [rax+r14*8]
+    call CreatePopupMenu
+    mov r12, rax
+    xor r13d, r13d                   ; Close: not for Home
+    test r14, r14
+    jnz .a1
+    mov r13d, MF_GRAYED
+.a1:
+    invoke AppendMenuW, r12, r13, TM_CLOSE, &tm_close
+    mov rax, [g_nsess]               ; Close others: needs a closable tab besides this one
+    dec rax
+    test r14, r14
+    jz .a2
+    dec rax
+.a2:
+    xor r13d, r13d
+    test rax, rax
+    jg .a3
+    mov r13d, MF_GRAYED
+.a3:
+    invoke AppendMenuW, r12, r13, TM_CLOSE+BULK_OTHERS, &tm_others
+    xor r13d, r13d                   ; Close all / unmodified: need any tab besides Home
+    cmp qword [g_nsess], 1
+    ja .a4
+    mov r13d, MF_GRAYED
+.a4:
+    invoke AppendMenuW, r12, r13, TM_CLOSE+BULK_ALL, &tm_all
+    invoke AppendMenuW, r12, r13, TM_CLOSE+BULK_UNMOD, &tm_unmod
+    xor r13d, r13d                   ; Close to the right: needs a tab after this one
+    lea rax, [r14+1]
+    cmp rax, [g_nsess]
+    jb .a5
+    mov r13d, MF_GRAYED
+.a5:
+    invoke AppendMenuW, r12, r13, TM_CLOSE+BULK_RIGHT, &tm_right
+    invoke TrackPopupMenu, r12, TPM_RETURNCMD|TPM_RIGHTBUTTON, #[rdi], #[rdi+4], 0, [g_hframe], 0
+    mov ebx, eax
+    invoke DestroyMenu, r12
+    cmp ebx, TM_CLOSE
+    jb .d
+    je .one
+    sub ebx, TM_CLOSE
+    mov [g_bulk_mode], rbx
+    mov [g_bulk_ref], r15
+    call bulk_run
+    jmp .d
+.one:
+    invoke select_tab, r14
+    call close_current_tab
+.d:
+    EPILOG 160
+
+; bulk_run: close every tab that g_bulk_mode selects, last tab first. Home always stays.
+; A tab whose user answers Cancel ends the run. A tab that is still stopping its worker
+; leaves g_bulk_mode set; the frame's close timer calls back in here once it is gone.
+bulk_run:
+    PROLOG 64
+    mov r12, [g_nsess]
+.next:
+    dec r12
+    test r12, r12
+    jle .finish
+    cmp r12, [g_nsess]
+    jae .next
+    lea rax, [g_sess]
+    mov rbx, [rax+r12*8]
+    mov rax, [g_bulk_mode]
+    cmp rax, BULK_ALL
+    je .do
+    cmp rax, BULK_UNMOD
+    je .unmod
+    cmp rbx, [g_bulk_ref]
+    jne .do
+    cmp rax, BULK_RIGHT
+    je .finish                       ; reached the tab itself: everything right of it is gone
+    jmp .next                        ; BULK_OTHERS skips it
+.unmod:
+    invoke SendMessageW, [rbx+SS_HVIEW], BC_ISDIRTY, 0, 0
+    test rax, rax
+    jnz .next
+.do:
+    invoke select_tab, r12
+    call close_current_tab
+    cmp r12, [g_nsess]
+    jae .next
+    lea rax, [g_sess]
+    cmp [rax+r12*8], rbx
+    jne .next
+    cmp qword [g_close_tab], 0       ; still there: waiting for its worker, or cancelled
+    jne .d
+    mov qword [g_bulk_mode], 0
+    jmp .d
+.finish:
+    mov qword [g_bulk_mode], 0
+    mov rbx, [g_bulk_ref]            ; back to the tab the menu was opened on, if it survived
+    xor r12d, r12d
+.find:
+    cmp r12, [g_nsess]
+    jae .d
+    lea rax, [g_sess]
+    cmp [rax+r12*8], rbx
+    je .sel
+    inc r12
+    jmp .find
+.sel:
+    invoke select_tab, r12
+.d:
     EPILOG 64
 
 ; layout_frame
@@ -1414,12 +1553,17 @@ frame_proc:
     jne .def
     cmp dword [r13+NMH_CODE], NM_CLICK
     je .tabclick
+    cmp dword [r13+NMH_CODE], NM_RCLICK
+    je .tabmenu
     cmp dword [r13+NMH_CODE], TCN_SELCHANGE
     jne .def
     call cur_index
     invoke select_tab, rax
     xor eax, eax
     EPILOG 256
+.tabmenu:
+    call tab_menu
+    jmp .ok0
 .tabclick:
     ; a click on the close mark at the right end of a tab closes that tab
     lea rbx, [rsp+96]                ; TCHITTESTINFO (pt, flags)
@@ -1573,6 +1717,9 @@ frame_proc:
 .close_timer_done:
     invoke KillTimer, rsi, 91
     invoke EnableWindow, rsi, 1
+    cmp qword [g_bulk_mode], 0
+    je .ok0
+    call bulk_run                    ; carry on with the remaining tabs
     jmp .ok0
 .close:
     cmp qword [g_close_all], 0
