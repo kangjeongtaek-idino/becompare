@@ -13,6 +13,7 @@ extern FillRect, DragAcceptFiles, DragQueryFileW, DragFinish, GetDlgItem, SetWin
 extern InvalidateRect, RedrawWindow, GetWindowTextW, GetFileAttributesW
 extern GetCommandLineW, CommandLineToArgvW, LocalFree
 extern DwmSetWindowAttribute
+extern GetCursorPos, ScreenToClient
 extern calloc, free, wcslen, wcscpy, wcsncpy, wcscmp, _wcsicmp, wcsrchr, _snwprintf, wcscat
 extern WritePrivateProfileStringW, GetPrivateProfileStringW, GetPrivateProfileIntW
 extern CreateFileW, WriteFile, CloseHandle
@@ -140,6 +141,7 @@ WSTR sec_ui, "UI"
 WSTR k_dark, "Dark"
 WSTR f_tab, "Tab%d"
 WSTR f_int, "%d"
+WSTR f_closable, "%s  ×"
 WSTR x_bcs, ".bcs"
 WSTR x_bcw, ".bcw"
 WSTR e_png, ".png"
@@ -606,6 +608,7 @@ sess_open:
     mov rax, [rax+r12*8]
     mov [rdi+TCI_TEXT], rax
     invoke SendMessageW, [g_htab], TCM_INSERTITEMW, r13, rdi
+    invoke set_tab_title, rbx, [rdi+TCI_TEXT]        ; adds the close mark
     invoke layout_frame
     invoke select_tab, r13
     cmp qword [rbx+SS_AUTO], 0
@@ -639,8 +642,9 @@ add_session:
     EPILOG 64
 
 ; set_tab_title(sess, title)
+; Every tab but Home gets a trailing close mark; frame_proc's NM_CLICK closes on it.
 set_tab_title:
-    PROLOG 160
+    PROLOG 704
     mov rbx, rcx
     mov r12, rdx
     xor r13d, r13d
@@ -653,13 +657,20 @@ set_tab_title:
     inc r13
     jmp .find
 .found:
+    test r13, r13
+    jz .set
+    lea rdi, [rsp+144]
+    invoke _snwprintf, rdi, 259, &f_closable, r12
+    mov word [rdi+518], 0
+    mov r12, rdi
+.set:
     lea rdi, [rsp+96]
     invoke memzero40, rdi
     mov dword [rdi+TCI_MASK], TCIF_TEXT
     mov [rdi+TCI_TEXT], r12
     invoke SendMessageW, [g_htab], TCM_SETITEMW, r13, rdi
 .done:
-    EPILOG 160
+    EPILOG 704
 
 ; select_tab(rcx=index)
 select_tab:
@@ -1135,6 +1146,7 @@ workspace_read:
 
 ; ---------------------------------------------------------------- command line
 ; usage:  bcgui <type> [A] [B] [Base] [Out] [/report file.html] [/sync update|mirror|twoway] [/exit]
+;         (/report file.xlsx or file.docx writes an Excel / Word export instead of HTML)
 ;         bcgui file.bcs | file.bcw
 ; parse_switches(argv, start, argc)
 parse_switches:
@@ -1400,12 +1412,37 @@ frame_proc:
     mov rax, [r13+NMH_FROM]
     cmp rax, [g_htab]
     jne .def
+    cmp dword [r13+NMH_CODE], NM_CLICK
+    je .tabclick
     cmp dword [r13+NMH_CODE], TCN_SELCHANGE
     jne .def
     call cur_index
     invoke select_tab, rax
     xor eax, eax
     EPILOG 256
+.tabclick:
+    ; a click on the close mark at the right end of a tab closes that tab
+    lea rbx, [rsp+96]                ; TCHITTESTINFO (pt, flags)
+    invoke GetCursorPos, rbx
+    invoke ScreenToClient, [g_htab], rbx
+    invoke SendMessageW, [g_htab], TCM_HITTEST, 0, rbx
+    movsxd r14, eax
+    test r14, r14
+    jle .ok0                         ; outside the tabs, or Home
+    call cur_index
+    cmp rax, r14
+    jne .ok0
+    lea rdi, [rsp+112]
+    invoke SendMessageW, [g_htab], TCM_GETITEMRECT, r14, rdi
+    mov ecx, 22
+    call scl
+    mov edx, [rdi+RC_R]
+    sub edx, eax
+    cmp [rbx], edx
+    jl .ok0
+    ; posted: the tab control is still inside its own mouse handling here
+    invoke PostMessageW, rsi, WM_COMMAND, IDM_CLOSE_TAB, 0
+    jmp .ok0
 
 .command:
     movzx eax, r12w

@@ -29,6 +29,7 @@ rich_create:
     invoke SendMessageW, rbx, WM_SETFONT, [g_mono], 1
     invoke SendMessageW, rbx, EM_SETEVENTMASK, 0, 0x80004          ; ENM_SCROLL | ENM_SELCHANGE
     invoke SendMessageW, rbx, EM_EXLIMITTEXT, 0, 0x7FFFFFF0
+    invoke SendMessageW, rbx, EM_SETMODIFY, 0, 0
 .d:
     mov rax, rbx
     EPILOG 64
@@ -108,9 +109,12 @@ rich_fg:
     EPILOG 224
 
 ; rich_theme(h): background + default text colour
+; Recolouring is not an edit: SCF_ALL raises the modify flag, so it is put back afterwards.
 rich_theme:
     PROLOG 224
     mov rbx, rcx
+    invoke SendMessageW, rbx, EM_GETMODIFY, 0, 0
+    mov r12, rax
     invoke SendMessageW, rbx, EM_SETBKGNDCOLOR, 0, #[th_bg]
     invoke memset, &rsp+104, 0, CF_SIZE
     mov dword [rsp+104], CF_SIZE
@@ -119,6 +123,7 @@ rich_theme:
     mov [rsp+104+CF_TEXTCOLOR], eax
     invoke SendMessageW, rbx, EM_SETCHARFORMAT, 0, &rsp+104          ; default format
     invoke SendMessageW, rbx, EM_SETCHARFORMAT, SCF_ALL, &rsp+104
+    invoke SendMessageW, rbx, EM_SETMODIFY, r12, 0
     EPILOG 224
 
 ; rich_len(h) -> number of characters

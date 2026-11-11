@@ -143,6 +143,7 @@
 %define LVN_ITEMCHANGED (-101)
 %define LVN_COLUMNCLICK (-108)
 %define LVN_KEYDOWN     (-155)
+%define NM_CLICK        (-2)
 %define NM_DBLCLK       (-3)
 %define NM_RCLICK       (-5)
 %define NM_CUSTOMDRAW   (-12)
@@ -158,6 +159,8 @@
 ; ---- tab control
 %define TCM_GETITEMCOUNT 0x1304
 %define TCM_DELETEITEM  0x1308
+%define TCM_GETITEMRECT 0x130A
+%define TCM_HITTEST     0x130D
 %define TCM_GETCURSEL   0x130B
 %define TCM_SETCURSEL   0x130C
 %define TCM_ADJUSTRECT  0x1328
