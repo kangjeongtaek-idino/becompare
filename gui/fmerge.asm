@@ -8,7 +8,8 @@
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem, EnableWindow
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetWindowTextW, SetWindowTextW, InvalidateRect, SetWindowTheme
 extern FindFirstFileW, FindNextFileW, FindClose, CreateDirectoryW, CopyFileW, GetFileAttributesExW, GetFileAttributesW, SHCreateDirectoryExW, SetCursor, LoadCursorW
-extern malloc, calloc, realloc, free, memset, memcpy, wcslen, wcscpy, wcscat, wcsrchr, wcsncpy, _wcsicmp, _snwprintf, qsort
+extern malloc, calloc, realloc, free, memset, memcpy, wcslen, wcscpy, wcscat, wcsrchr, wcsncpy, _wcsicmp, _wcsnicmp, _snwprintf, qsort
+extern GetFullPathNameW, CreateFileW, ReadFile, CloseHandle
 extern g_hinst, g_dark, th_bg, th_fg, th_panel, th_diff, th_lonly, th_ronly, th_same, th_conf, th_type, th_panelbrush
 extern mk, reg_class, scl, set_status, msgbox
 extern mk_btn, mk_chk, mk_lbl, mk_edit, get_chk, ctl_color, theme_checks, lv_dark_header
@@ -35,7 +36,8 @@ global fmerge_register, fmerge_create
 
 ; FE (64 bytes)
 %define FE_NAME   0
-%define FE_FLAGS  8
+%define FE_FLAGS  8                  ; bit 0-2 exists on left/right/base, 4-6 is a folder there,
+                                     ; 8-10 CRC known, 12-14 content could not be read
 %define FE_ACT    12
 %define FE_SZ     16                 ; 3 qwords
 %define FE_CRC    40                 ; 3 dwords
@@ -92,7 +94,11 @@ WSTR f_opts, "%d"
 WSTR f_done, "병합 완료: 복사 %d · 병합 파일 %d · 제외 %d · 미해결 충돌 %d · 복사 실패 %d"
 WSTR s_nopath, "왼쪽과 오른쪽 폴더를 입력하세요."
 WSTR s_noout, "출력 폴더를 입력하세요."
-WSTR s_outsame, "출력 폴더는 입력 폴더(왼쪽·오른쪽·Base)와 달라야 합니다."
+WSTR s_outsame, "출력 폴더는 입력 폴더(왼쪽·오른쪽·Base)와 같거나 그 안에 있으면 안 됩니다. 다른 폴더를 지정하세요."
+WSTR s_nocmp, "먼저 [비교]를 실행해 병합할 항목을 확인하세요."
+WSTR s_out_used, "출력 폴더가 비어 있지 않습니다. 같은 이름의 파일은 덮어쓰고, 그 밖의 기존 파일은 그대로 남습니다. 계속할까요?"
+WSTR f_nodir, `폴더를 찾을 수 없습니다:\n%s`
+WSTR f_star, "%s\*"
 WSTR s_nosel, "먼저 목록에서 항목을 선택하세요."
 WSTR s_noopen, "텍스트 병합은 양쪽에 모두 있는 파일에서만 열 수 있습니다."
 WSTR s_dash, "—"
@@ -106,6 +112,7 @@ WSTR fst5, "오른쪽만 추가"
 WSTR fst6, "삭제됨"
 WSTR fst7, "폴더"
 WSTR fst8, "양쪽 삭제"
+WSTR fst9, "읽을 수 없음"
 WSTR ac0, "—"
 WSTR ac1, "왼쪽 채택"
 WSTR ac2, "오른쪽 채택"
@@ -117,7 +124,7 @@ align 8
 col_text: dq h_name, h_stat, h_act, h_sa, h_sb, h_sc
 col_w:    dd 320, 110, 120, 110, 110, 110
 col_fmt:  dd 0, 0, 0, 1, 1, 1
-st_names: dq fst0, fst1, fst2, fst3, fst4, fst5, fst6, fst7, fst8
+st_names: dq fst0, fst1, fst2, fst3, fst4, fst5, fst6, fst7, fst8, fst9
 ac_names: dq ac0, ac1, ac2, ac3, ac4, ac5
 
 section .text
@@ -317,7 +324,8 @@ fm_scan:
     EPILOG 128
 
 ; ---------------------------------------------------------------- compare / decide
-; fm_crc(fm, e, side) -> eax
+; fm_crc(fm, e, side) -> eax : CRC32 of the file, read in blocks (any size); cached in the entry.
+; A file that cannot be opened or read sets the "unreadable" flag instead.
 fm_crc:
     PROLOG 2400
     mov rbx, rcx
@@ -331,18 +339,42 @@ fm_crc:
     imul eax, r12d, 1040
     lea rdi, [rbx+FM_ROOT+rax]
     invoke _snwprintf, &rsp+96, 1090, &f_full, rdi, [rsi+FE_NAME]
-    invoke read_file_bytes, &rsp+96, &rsp+2300
-    xor r13d, r13d
-    test rax, rax
-    jz .store
+    xor r13d, r13d                    ; crc
+    xor r15d, r15d                    ; block buffer
+    invoke CreateFileW, &rsp+96, GENERIC_READ, 3, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0
+    cmp rax, -1
+    je .bad
     mov r14, rax
-    xor ecx, ecx
-    mov rdx, rax
-    mov r8, [rsp+2300]
+    invoke malloc, 262144
+    mov r15, rax
+    test rax, rax
+    jz .badclose
+.rd:
+    mov dword [rsp+2300], 0
+    invoke ReadFile, r14, r15, 262144, &rsp+2300, 0
+    test eax, eax
+    jz .badclose
+    mov r8d, [rsp+2300]
+    test r8d, r8d
+    jz .eof
+    mov ecx, r13d
+    mov rdx, r15
     call crc32_update
     mov r13d, eax
-    invoke free, r14
+    jmp .rd
+.badclose:
+    invoke CloseHandle, r14
+.bad:
+    xor r13d, r13d
+    mov eax, 0x1000
+    mov ecx, r12d
+    shl eax, cl
+    or [rsi+FE_FLAGS], eax
+    jmp .store
+.eof:
+    invoke CloseHandle, r14
 .store:
+    invoke free, r15
     mov [rsi+FE_CRC+r12*4], r13d
     mov eax, 0x100
     mov ecx, r12d
@@ -369,6 +401,15 @@ fm_eq:
     invoke fm_crc, rbx, rsi, r13
     cmp eax, r14d
     jne .no
+    mov eax, 0x1000                   ; unknown content is never "the same"
+    mov ecx, r12d
+    shl eax, cl
+    mov edx, 0x1000
+    mov ecx, r13d
+    shl edx, cl
+    or eax, edx
+    test [rsi+FE_FLAGS], eax
+    jnz .no
 .yes:
     mov eax, 1
     EPILOG 64
@@ -393,6 +434,18 @@ fm_decide:
     jne .conflict                     ; folder on one side, file on another
     test r13d, 3
     jz .nothing
+    test r13d, 4
+    jz .dirkeep
+    mov eax, r13d
+    and eax, 3
+    cmp eax, 3
+    je .dirkeep
+    ; in Base but gone on one side: removed. Files the other side added below it
+    ; still create their folders when they are copied.
+    mov dword [rsi+FE_ST], 6
+    mov dword [rsi+FE_ACT], ACT_DEL
+    jmp .done
+.dirkeep:
     mov dword [rsi+FE_ST], 7
     mov dword [rsi+FE_ACT], ACT_A
     test r13d, 1
@@ -462,6 +515,11 @@ fm_decide:
     mov dword [rsi+FE_ACT], ACT_CONF
     mov dword [rsi+FE_ST], 3
 .done:
+    test dword [rsi+FE_FLAGS], 0x7000
+    jz .ret
+    mov dword [rsi+FE_ACT], ACT_CONF
+    mov dword [rsi+FE_ST], 9
+.ret:
     EPILOG 64
 
 ; fm_vis(fm, onlyconf): visible list, conflict / automatic counters
@@ -527,9 +585,130 @@ fm_refresh:
     invoke SetWindowTextW, rax, &rsp+96
     EPILOG 256
 
+; fm_norm(rcx = path buffer wchar[520]): full path without a trailing backslash (drive roots keep it)
+fm_norm:
+    PROLOG 1200
+    mov rbx, rcx
+    cmp word [rbx], 0
+    je .d
+    lea rdi, [rsp+96]
+    invoke GetFullPathNameW, rbx, 519, rdi, 0
+    test eax, eax
+    jz .d
+    cmp eax, 519
+    jae .d
+    mov ecx, eax
+.s:
+    cmp ecx, 3
+    jbe .cp
+    cmp word [rdi+rcx*2-2], 0x5C
+    jne .cp
+    dec ecx
+    mov word [rdi+rcx*2], 0
+    jmp .s
+.cp:
+    invoke wcscpy, rbx, rdi
+.d:
+    EPILOG 1200
+
+; fm_under(path, root) -> eax 1 when path is root itself or lies inside it (both normalized)
+fm_under:
+    PROLOG 64
+    mov rsi, rcx
+    mov rdi, rdx
+    cmp word [rsi], 0
+    je .no
+    cmp word [rdi], 0
+    je .no
+    invoke wcslen, rdi
+    mov rbx, rax
+    invoke _wcsnicmp, rsi, rdi, rbx
+    test eax, eax
+    jnz .no
+    movzx eax, word [rsi+rbx*2]
+    test eax, eax
+    jz .yes
+    cmp eax, 0x5C
+    je .yes
+    cmp word [rdi+rbx*2-2], 0x5C      ; root is a drive root such as C:\
+    jne .no
+.yes:
+    mov eax, 1
+    EPILOG 64
+.no:
+    xor eax, eax
+    EPILOG 64
+
+; fm_outcheck(hwnd, fm) -> eax 1 when the output folder is set and is not one of the inputs
+fm_outcheck:
+    PROLOG 64
+    mov rsi, rcx
+    mov rbx, rdx
+    invoke fm_norm, &rbx+FM_OUT
+    cmp word [rbx+FM_OUT], 0
+    je .noout
+    xor edi, edi
+.chk:
+    cmp edi, 3
+    jae .ok
+    imul eax, edi, 1040
+    lea rdx, [rbx+FM_ROOT+rax]
+    lea rcx, [rbx+FM_OUT]
+    call fm_under
+    test eax, eax
+    jnz .same
+    inc edi
+    jmp .chk
+.ok:
+    mov eax, 1
+    EPILOG 64
+.noout:
+    invoke msgbox, rsi, &s_noout, MB_OK|MB_ICONINFORMATION
+    xor eax, eax
+    EPILOG 64
+.same:
+    invoke msgbox, rsi, &s_outsame, MB_OK|MB_ICONWARNING
+    xor eax, eax
+    EPILOG 64
+
+; fm_used(rcx = folder) -> eax 1 when it already holds something
+fm_used:
+    PROLOG 2912
+    mov r13, rcx
+    invoke _snwprintf, &rsp+96, 1090, &f_star, r13
+    invoke FindFirstFileW, &rsp+96, &rsp+2300
+    cmp rax, -1
+    je .no
+    mov rbx, rax
+    xor r12d, r12d
+.n:
+    lea rsi, [rsp+2300+FD_NAME]
+    cmp word [rsi], '.'
+    jne .hit
+    cmp word [rsi+2], 0
+    je .skip
+    cmp word [rsi+2], '.'
+    jne .hit
+    cmp word [rsi+4], 0
+    je .skip
+.hit:
+    mov r12d, 1
+    jmp .close
+.skip:
+    invoke FindNextFileW, rbx, &rsp+2300
+    test eax, eax
+    jnz .n
+.close:
+    invoke FindClose, rbx
+    mov eax, r12d
+    EPILOG 2912
+.no:
+    xor eax, eax
+    EPILOG 2912
+
 ; fm_compare(hwnd, fm, sess)
 fm_compare:
-    PROLOG 256
+    PROLOG 1648
     mov rsi, rcx
     mov rbx, rdx
     mov r12, r8
@@ -550,6 +729,9 @@ fm_compare:
     imul ecx, edi, 1040
     lea rdx, [rbx+FM_ROOT+rcx]
     invoke GetWindowTextW, rax, rdx, 519
+    imul ecx, edi, 1040
+    lea rcx, [rbx+FM_ROOT+rcx]
+    call fm_norm
     inc edi
     jmp .get
 .out:
@@ -559,6 +741,33 @@ fm_compare:
     je .nopath
     cmp word [rbx+FM_ROOT+1040], 0
     je .nopath
+    ; every folder that was entered must exist: a mistyped one would read as "everything deleted"
+    xor edi, edi
+.exist:
+    cmp edi, 3
+    jae .scan
+    imul eax, edi, 1040
+    lea r13, [rbx+FM_ROOT+rax]
+    inc edi
+    cmp word [r13], 0
+    je .exist
+    invoke GetFileAttributesW, r13
+    cmp eax, -1
+    je .nodir
+    test eax, 0x10
+    jnz .exist
+.nodir:
+    invoke fm_clear, rbx
+    invoke fm_refresh, rsi, rbx
+    lea rdi, [rsp+96]
+    invoke _snwprintf, rdi, 759, &f_nodir, r13
+    mov word [rdi+1518], 0
+    invoke msgbox, rsi, rdi, MB_OK|MB_ICONWARNING
+    EPILOG 1648
+.scan:
+    invoke LoadCursorW, 0, 32514      ; IDC_WAIT
+    invoke SetCursor, rax
+    mov r14, rax
     invoke fm_scan, rbx
     xor edi, edi
 .dec:
@@ -571,19 +780,23 @@ fm_compare:
     inc rdi
     jmp .dec
 .refresh:
+    invoke SetCursor, r14
     invoke fm_refresh, rsi, rbx
     invoke wcsrchr, &rbx+FM_ROOT, 0x5C
     lea r13, [rbx+FM_ROOT]
     test rax, rax
     jz .t
+    cmp word [rax+2], 0
+    je .t
     lea r13, [rax+2]
 .t:
     invoke _snwprintf, &rsp+96, 50, &f_title, r13
+    mov word [rsp+96+100], 0
     invoke set_tab_title, r12, &rsp+96
-    EPILOG 256
+    EPILOG 1648
 .nopath:
     invoke msgbox, rsi, &s_nopath, MB_OK|MB_ICONINFORMATION
-    EPILOG 256
+    EPILOG 1648
 
 ; ---------------------------------------------------------------- actions
 ; fm_entry(fm, visible index) -> FE*
@@ -670,8 +883,9 @@ fm_openmerge:
     and eax, 0x73
     cmp eax, 3
     jne .noopen
-    cmp word [rbx+FM_OUT], 0
-    je .noout
+    invoke fm_outcheck, rsi, rbx
+    test eax, eax
+    jz .d
     invoke fm_path, rbx, r12, 0, &rsp+96
     invoke fm_path, rbx, r12, 1, &rsp+2300
     mov word [rsp+4500], 0
@@ -703,9 +917,6 @@ fm_openmerge:
     jmp .d
 .noopen:
     invoke msgbox, rsi, &s_noopen, MB_OK|MB_ICONINFORMATION
-    jmp .d
-.noout:
-    invoke msgbox, rsi, &s_noout, MB_OK|MB_ICONINFORMATION
 .d:
     EPILOG 9008
 
@@ -721,44 +932,26 @@ fm_mtime:
     mov rax, rcx
     EPILOG 128
 
-; fm_samepath(a, b) -> eax 1 when both are non-empty and equal
-fm_samepath:
-    PROLOG 64
-    mov rsi, rcx
-    mov rdi, rdx
-    cmp word [rsi], 0
-    je .no
-    cmp word [rdi], 0
-    je .no
-    invoke _wcsicmp, rsi, rdi
-    test eax, eax
-    jnz .no
-    mov eax, 1
-    EPILOG 64
-.no:
-    xor eax, eax
-    EPILOG 64
-
 ; fm_run(hwnd, fm): write the merge result into the output folder
 fm_run:
     PROLOG 4608
     mov rsi, rcx
     mov rbx, rdx
-    cmp word [rbx+FM_OUT], 0
-    je .noout
-    xor edi, edi
-.chk:
-    cmp edi, 3
-    jae .go
-    imul eax, edi, 1040
-    lea rcx, [rbx+FM_ROOT+rax]
-    lea rdx, [rbx+FM_OUT]
-    call fm_samepath
+    cmp qword [rbx+FM_ENT+8], 0
+    je .nocmp
+    invoke fm_outcheck, rsi, rbx
     test eax, eax
-    jnz .same
-    inc edi
-    jmp .chk
+    jz .ret
+    invoke fm_used, &rbx+FM_OUT
+    test eax, eax
+    jz .go
+    invoke msgbox, rsi, &s_out_used, MB_YESNO|MB_ICONWARNING
+    cmp eax, IDYES
+    jne .ret
 .go:
+    invoke LoadCursorW, 0, 32514      ; IDC_WAIT
+    invoke SetCursor, rax
+    mov [rsp+4576], rax
     xor r12d, r12d                    ; copied
     xor r13d, r13d                    ; merged (already written)
     xor r14d, r14d                    ; excluded
@@ -817,9 +1010,13 @@ fm_run:
     inc r12d
     jmp .e
 .excl:
+    test dword [rbp+FE_FLAGS], 0x70   ; folders are not counted as excluded files
+    jnz .e
     inc r14d
     jmp .e
 .conf:
+    test dword [rbp+FE_FLAGS], 0x70
+    jnz .unres
     ; a conflict counts as merged only when the output was written after both inputs last changed
     invoke fm_mtime, &rsp+2300
     mov [rsp+4560], rax
@@ -853,15 +1050,21 @@ fm_run:
 .summary:
     mov eax, [rsp+4512]
     mov [rsp+4572], eax
+    invoke SetCursor, [rsp+4576]
     invoke _snwprintf, &rsp+96, 120, &f_done, r12, r13, r14, r15, [rsp+4572]
+    mov word [rsp+96+240], 0
     invoke set_status, &rsp+96
-    invoke msgbox, rsi, &rsp+96, MB_OK|MB_ICONINFORMATION
+    mov r8d, MB_OK|MB_ICONINFORMATION ; unresolved conflicts or failed copies: a warning
+    mov eax, [rsp+4572]
+    or eax, r15d
+    jz .box
+    mov r8d, MB_OK|MB_ICONWARNING
+.box:
+    invoke msgbox, rsi, &rsp+96, r8
+.ret:
     EPILOG 4608
-.noout:
-    invoke msgbox, rsi, &s_noout, MB_OK|MB_ICONINFORMATION
-    EPILOG 4608
-.same:
-    invoke msgbox, rsi, &s_outsame, MB_OK|MB_ICONWARNING
+.nocmp:
+    invoke msgbox, rsi, &s_nocmp, MB_OK|MB_ICONINFORMATION
     EPILOG 4608
 
 ; ---------------------------------------------------------------- view
@@ -1253,6 +1456,8 @@ fm_proc:
     je .disp
     cmp eax, NM_CUSTOMDRAW
     je .cdraw
+    cmp eax, NM_DBLCLK
+    je .openm
     jmp .def
 .disp:
     test dword [r13+DI_MASK], LVIF_TEXT
@@ -1287,8 +1492,11 @@ fm_proc:
     mov ecx, [rax+FE_ST]
     mov edx, [th_bg]
     mov r8d, [th_fg]
+    cmp ecx, 9
+    je .cconf
     cmp ecx, 3
     jne .c1
+.cconf:
     mov edx, [th_conf]
     jmp .cset
 .c1:
