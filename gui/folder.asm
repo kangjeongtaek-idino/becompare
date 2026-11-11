@@ -25,6 +25,7 @@ extern g_hinst, g_font, g_dark, th_bg, th_fg, th_panel, th_diff, th_lonly, th_ro
 extern th_panelbrush, th_bgbrush
 extern mk, reg_class, scl, set_status, msgbox, browse_save
 extern lv_dark_header, theme_checks, mk_btn, mk_chk, mk_lbl, mk_edit, get_chk, ctl_color, pb_create, pb_layout, pb_load, pb_collect, pb_command
+extern GetWindowTextLengthW, excl_match2, tip_add
 extern vec_push, fmt_size, fmt_time, excl_match, sb_init, sb_append, sb_append_esc, sb_free, write_utf8
 extern NormalizeString, GetNamedSecurityInfoW, SetNamedSecurityInfoW, LocalFree, SetFileAttributesW, SetFileTime, icon_set, g_copyr, g_copyl, g_mover, g_movel, g_del, g_sync, g_pause, g_report, g_snap, g_expand, g_collapse, GetLastError, GetCurrentProcessId, MoveFileW, input_box, wcsncpy, wcstoul, GetSystemTimeAsFileTime, set_status_part, str_dup, add_session, set_tab_title, type_for_path, ext_launch, g_policy
 
@@ -127,6 +128,7 @@ extern g_batch, g_rep_path, g_exitcode, g_hframe, g_snap_path
 %define ID_BTN_SNAP 149
 %define ID_BTN_MOVELR 166
 %define ID_BTN_MOVERL 167
+%define ID_BTN_EXCL 177
 
 %define OP_COPYLR 1
 %define OP_COPYRL 2
@@ -189,7 +191,9 @@ WSTR s_ren_title, "이름 바꾸기 (양쪽에 있으면 양쪽 모두 바뀝니
 WSTR s_ren_bad, "이름이 비었거나 사용할 수 없는 문자가 있습니다."
 WSTR s_b_del, "삭제…"
 WSTR s_b_sync, "동기화…"
-WSTR s_b_report, "보고서(HTML)"
+WSTR s_b_report, "내보내기…"
+WSTR s_tip_report, "비교 결과 내보내기 (Excel / Word / HTML 보고서)"
+WSTR s_b_excl, "제외 선택…"
 WSTR s_b_expand, "모두 펼침"
 WSTR s_b_collap, "모두 접음"
 WSTR s_b_pause, "일시중지"
@@ -372,7 +376,7 @@ enum_dir:
     cmp word [rsi+4], 0
     je .next
 .nd:
-    invoke excl_match, &r12+F_EXCL, rsi
+    invoke fold_excluded, r12, r14, rsi
     test eax, eax
     jnz .next
     ; FC-04: excluded attributes
@@ -455,7 +459,7 @@ enum_dir:
     shl rax, 5
     add rax, [r15]
     mov rbx, rax
-    invoke excl_match, &r12+F_EXCL, [rbx]
+    invoke fold_excluded, r12, r14, [rbx]
     test eax, eax
     jz .vkeep
     invoke free, [rbx]
@@ -920,4 +924,6 @@ scan_thread:
 %include "ftp.inc"
 %include "sync_dlg.inc"
 %include "folder_rep.inc"
+%include "folder_exp.inc"
+%include "excl_dlg.inc"
 %include "folder_pair.inc"

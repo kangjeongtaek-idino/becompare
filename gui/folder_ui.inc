@@ -1540,7 +1540,7 @@ fold_batch:
     test qword [g_batch], 1
     jz .nr
     and qword [g_batch], ~1
-    invoke fold_report_path, rbx, &g_rep_path
+    invoke fold_report_any, rbx, &g_rep_path
     test eax, eax
     jnz .nr
     mov qword [g_exitcode], 2
@@ -1606,30 +1606,7 @@ fold_batch:
     EPILOG 64
 
 ; ---------------------------------------------------------------- HTML report
-; fold_report(hwnd, fold)
-fold_report:
-    PROLOG 1600
-    mov rsi, rcx
-    mov rbx, rdx
-    cmp qword [rbx+F_NENT], 0
-    je .norun
-    lea rdi, [rsp+400]               ; save path buffer (1040 bytes)
-    mov word [rdi], 0
-    invoke browse_save, rsi, rdi
-    test eax, eax
-    jz .d
-    ; add .html when no extension
-    invoke wcsrchr, rdi, '.'
-    test rax, rax
-    jnz .hasext
-    invoke wcscat, rdi, &s_html
-.hasext:
-    invoke fold_report_path, rbx, rdi
-.d:
-    EPILOG 1600
-.norun:
-    invoke msgbox, rsi, &s_norun, MB_OK|MB_ICONINFO
-    EPILOG 1600
+; fold_report(hwnd, fold) lives in folder_exp.inc (format menu: HTML / Excel / Word)
 
 ; fold_report_path(fold, path): build the HTML report and write it (UTF-8 with BOM)
 fold_report_path:
@@ -1834,6 +1811,7 @@ fold_layout:
     PLACE ID_CHK_ATTR, 60
     PLACE ID_LBL_EXCL, 40
     PLACE ID_EDIT_EXCL, 240
+    PLACE ID_BTN_EXCL, 84
     lea r13d, [r13+r15]
     add r13d, r14d                   ; y of row 3
     mov r12d, r14d
@@ -1850,7 +1828,7 @@ fold_layout:
     PLACE ID_BTN_DEL, 40
     PLACE ID_BTN_SYNC, 40
     PLACE ID_BTN_PAUSE, 40
-    PLACE ID_BTN_REPORT, 40
+    PLACE ID_BTN_REPORT, 96
     PLACE ID_BTN_SNAP, 40
     PLACE ID_BTN_EXPAND, 40
     PLACE ID_BTN_COLLAP, 40
@@ -1961,6 +1939,7 @@ fold_proc:
     invoke mk_chk, rsi, &s_c_attr, ID_CHK_ATTR, 0
     invoke mk_lbl, rsi, &s_excl, ID_LBL_EXCL
     invoke mk_edit, rsi, ID_EDIT_EXCL
+    invoke mk_btn, rsi, &s_b_excl, ID_BTN_EXCL
     invoke mk_lbl, rsi, &s_fsz, ID_LBL_FSZ
     invoke mk_edit, rsi, ID_EDIT_FMIN
     invoke mk_lbl, rsi, &s_fto, ID_LBL_FTO
@@ -1998,7 +1977,8 @@ fold_proc:
     invoke mk_btn, rsi, &s_b_del, ID_BTN_DEL
     invoke mk_btn, rsi, &s_b_sync, ID_BTN_SYNC
     invoke mk_btn, rsi, &s_b_pause, ID_BTN_PAUSE
-    invoke mk_btn, rsi, &s_b_report, ID_BTN_REPORT
+    invoke mk_btn, rsi, &s_b_report, ID_BTN_REPORT     ; a labelled button: an icon alone was not found as "export"
+    invoke tip_add, rax, &s_tip_report
     invoke mk_btn, rsi, &s_b_snap, ID_BTN_SNAP
     invoke mk_btn, rsi, &s_b_expand, ID_BTN_EXPAND
     invoke mk_btn, rsi, &s_b_collap, ID_BTN_COLLAP
@@ -2009,7 +1989,6 @@ fold_proc:
     invoke icon_set, rsi, ID_BTN_DEL, &g_del, &s_b_del
     invoke icon_set, rsi, ID_BTN_SYNC, &g_sync, &s_b_sync
     invoke icon_set, rsi, ID_BTN_PAUSE, &g_pause, &s_b_pause
-    invoke icon_set, rsi, ID_BTN_REPORT, &g_report, &s_b_report
     invoke icon_set, rsi, ID_BTN_SNAP, &g_snap, &s_b_snap
     invoke icon_set, rsi, ID_BTN_EXPAND, &g_expand, &s_b_expand
     invoke icon_set, rsi, ID_BTN_COLLAP, &g_collapse, &s_b_collap
@@ -2120,6 +2099,8 @@ fold_proc:
     je .b_col
     cmp ebx, ID_BTN_PAUSE
     je .b_pause
+    cmp ebx, ID_BTN_EXCL
+    je .b_excl
     jmp .def
 .b_lr:
     invoke fold_copy, rsi, r15, 0
@@ -2159,6 +2140,9 @@ fold_proc:
     jmp .zero
 .b_pause:
     invoke fold_pause, rsi, r15
+    jmp .zero
+.b_excl:
+    invoke fold_excl_dialog, rsi, r15
     jmp .zero
 
 .run:
@@ -2222,6 +2206,8 @@ fold_proc:
     je .dbl
     cmp eax, LVN_KEYDOWN
     je .keydown
+    cmp eax, NM_RCLICK
+    je .rclick
     jmp .def
 .disp:
     test dword [r13+DI_MASK], LVIF_TEXT
@@ -2277,6 +2263,9 @@ fold_proc:
 .cset:
     mov [r13+CD_CLRTEXTBK], edx
     mov [r13+CD_CLRTEXT], r8d
+    jmp .zero
+.rclick:
+    invoke fold_ctx, rsi, r15
     jmp .zero
 .dbl:
     mov eax, [r13+IA_ITEM]

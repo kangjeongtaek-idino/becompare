@@ -18,7 +18,7 @@ global th_card_bg, th_card_border, th_card_hover_bg, th_card_hover_border, th_ac
 global th_bgbrush, th_panelbrush
 global save_error
 global set_status_part
-global mk, reg_class, scl, set_status, msgbox, browse_folder, browse_open, browse_save
+global mk, reg_class, scl, set_status, msgbox, browse_folder, browse_open, browse_save, browse_save_as
 global theme_set, fonts_init, str_dup, s_appname, set_ctl_theme
 
 section .rdata
@@ -369,6 +369,26 @@ ofn_common:
     invoke GetOpenFileNameW, rdi
     EPILOG 320
 .save:
+    invoke GetSaveFileNameW, rdi
+    EPILOG 320
+
+; browse_save_as(hwnd, out wchar[520] (in: suggested name), filter, default extension) -> eax 1 if chosen
+browse_save_as:
+    PROLOG 320
+    mov r12, rcx
+    mov r13, rdx
+    mov r14, r8
+    mov r15, r9
+    lea rdi, [rsp+96]                 ; OPENFILENAMEW (152)
+    invoke memset, rdi, 0, OFN_SIZE
+    mov dword [rdi], OFN_SIZE
+    mov [rdi+8], r12
+    mov [rdi+24], r14
+    mov dword [rdi+44], 1
+    mov [rdi+48], r13
+    mov dword [rdi+56], 520
+    mov dword [rdi+96], OFN_OVERWRITEPROMPT|OFN_PATHMUSTEXIST
+    mov [rdi+104], r15
     invoke GetSaveFileNameW, rdi
     EPILOG 320
 

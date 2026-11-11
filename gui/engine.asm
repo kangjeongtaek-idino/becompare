@@ -6,7 +6,7 @@ extern realloc, malloc, free, wcslen, memcpy, _snwprintf
 extern FileTimeToLocalFileTime, FileTimeToSystemTime
 extern WideCharToMultiByte, MultiByteToWideChar, CreateFileW, WriteFile, CloseHandle, ReadFile, GetFileSizeEx
 
-global vec_push, fmt_size, fmt_time, wild_w, excl_match
+global vec_push, fmt_size, fmt_time, wild_w, excl_match, excl_match2
 extern GetFullPathNameW, GetTempFileNameW, GetFileAttributesW, GetLastError
 extern FlushFileBuffers, ReplaceFileW, MoveFileExW, DeleteFileW
 global safe_write2
@@ -235,6 +235,62 @@ excl_match:
     jmp .find
 .have:
     invoke wild_w, rsi, rbx, rdi
+    test eax, eax
+    jnz .yes
+    mov rsi, rbx
+    movzx eax, word [rsi]
+    test eax, eax
+    jz .no
+.skip:
+    add rsi, 2
+    jmp .seg
+.yes:
+    mov eax, 1
+    EPILOG 64
+.no:
+    xor eax, eax
+    EPILOG 64
+
+; excl_match2(rcx=pattern list, rdx=name, r8=anchored path such as <backslash>rel<backslash>name) -> eax 1 if any pattern matches
+;   a pattern containing a backslash is matched against the path, every other pattern against the name
+excl_match2:
+    PROLOG 64
+    mov rsi, rcx
+    mov rdi, rdx
+    mov r12, r8
+    test rsi, rsi
+    jz .no
+.seg:
+    movzx eax, word [rsi]
+    test eax, eax
+    jz .no
+    cmp eax, ';'
+    je .skip
+    cmp eax, ','
+    je .skip
+    mov rbx, rsi
+    xor r13d, r13d                   ; pattern has a backslash
+.find:
+    movzx eax, word [rbx]
+    test eax, eax
+    jz .have
+    cmp eax, ';'
+    je .have
+    cmp eax, ','
+    je .have
+    cmp eax, 0x5C
+    jne .nb
+    mov r13d, 1
+.nb:
+    add rbx, 2
+    jmp .find
+.have:
+    mov r8, rdi
+    test r13d, r13d
+    jz .m
+    mov r8, r12
+.m:
+    invoke wild_w, rsi, rbx, r8
     test eax, eax
     jnz .yes
     mov rsi, rbx

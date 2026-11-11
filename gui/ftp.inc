@@ -231,7 +231,7 @@ ftp_enum:
     cmp word [rsi+4], 0
     je .next
 .nd:
-    invoke excl_match, &r12+F_EXCL, rsi
+    invoke fold_excluded, r12, r14, rsi
     test eax, eax
     jnz .next
     invoke vec_push, r15, 32
