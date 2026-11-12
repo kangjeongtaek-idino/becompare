@@ -38,7 +38,7 @@ extern settings_show, policy_load, keys_load, g_keytab, update_check, update_sta
 global WinMain
 global add_session, sess_new, sess_open, set_tab_title, type_for_path, cur_view
 global tab_titles
-global g_sess, g_nsess, ini_prepare, apply_theme_all, type_names, open_any_file, g_batch, g_rep_path, g_exitcode, g_save_path, g_savews_path, g_snap_path
+global g_sess, g_nsess, ini_prepare, apply_theme_all, type_names, open_any_file, g_batch, g_rep_path, g_exitcode, g_save_path, g_savews_path, g_snap_path, g_xl_path, g_dx_path
 
 section .rdata
 WSTR s_unsaved_close, "저장하지 않은 변경 내용이 있습니다. 저장하시겠습니까? (예: 저장, 아니요: 버리기, 취소: 계속 편집)"
@@ -148,6 +148,8 @@ WSTR sw_sync, "/sync"
 WSTR sw_exit, "/exit"
 WSTR sw_save, "/save"
 WSTR sw_snap, "/snapshot"
+WSTR sw_xlsx, "/xlsx"
+WSTR sw_docx, "/docx"
 WSTR sw_savews, "/savews"
 WSTR sw_mirror, "mirror"
 WSTR sw_twoway, "twoway"
@@ -202,6 +204,8 @@ g_exitcode: resq 1
 g_rep_path: resw 520
 g_save_path: resw 520
 g_snap_path: resw 520
+g_xl_path: resw 520
+g_dx_path: resw 520
 g_savews_path: resw 520
 
 section .text
@@ -1477,12 +1481,34 @@ parse_switches:
 .n5:
     invoke _wcsicmp, rbx, &sw_savews
     test eax, eax
-    jnz .next
+    jnz .n6
     inc edi
     cmp edi, r12d
     jae .d
     mov rax, [rsi+rdi*8]
     invoke wcsncpy, &g_savews_path, rax, 519
+    jmp .next
+.n6:
+    invoke _wcsicmp, rbx, &sw_xlsx
+    test eax, eax
+    jnz .n7
+    inc edi
+    cmp edi, r12d
+    jae .d
+    mov rax, [rsi+rdi*8]
+    invoke wcsncpy, &g_xl_path, rax, 519
+    or qword [g_batch], 0x10|4
+    jmp .next
+.n7:
+    invoke _wcsicmp, rbx, &sw_docx
+    test eax, eax
+    jnz .next
+    inc edi
+    cmp edi, r12d
+    jae .d
+    mov rax, [rsi+rdi*8]
+    invoke wcsncpy, &g_dx_path, rax, 519
+    or qword [g_batch], 0x20|4
 .next:
     inc edi
     jmp .l

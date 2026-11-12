@@ -73,6 +73,8 @@ bcgui.exe /script file.bcscript             스크립트 실행 (화면 없음)
 | --- | --- |
 | `/report out.html` | 폴더 비교 결과를 HTML 보고서로 저장하고 종료. 변경된 텍스트 파일은 `out_files\N.html` 상세 비교 보고서로 링크. 종료 코드 0=동일, 1=차이, 2=오류 |
 | `/report out.xlsx` · `/report out.docx` | 확장자가 `.xlsx` / `.docx` 이면 같은 결과를 Excel 통합 문서 / Word 문서로 저장 (파일별 상세 보고서 링크는 HTML에만 있음) |
+| `/xlsx out.xlsx` | 텍스트·표·헥스 비교 결과를 Excel로 저장하고 종료 (폴더 비교는 `/report out.xlsx`) |
+| `/docx out.docx` | 텍스트 병합·폴더 병합·이미지·버전·레지스트리·미디어 비교 결과를 Word로 저장하고 종료 |
 | `/sync update\|mirror\|twoway` | 비교 후 동기화(확인 창 없음). 미러는 오른쪽에만 있는 항목을 휴지통으로 보냄 |
 | `/snapshot file.bcss` | 왼쪽 폴더의 스냅샷(상대 경로·크기·시각·CRC32)을 저장하고 종료 |
 | `/exit` | 작업이 끝나면 종료 |
@@ -130,6 +132,18 @@ git config --global mergetool.becompare.cmd 'bcgui.exe merge "$LOCAL" "$REMOTE" 
 - 결과 목록에서 **오른쪽 클릭**: 선택한 항목을 `이름으로 제외` / `확장자로 제외` / `이 위치만 제외`.
 - 패턴 규칙: `;` 로 구분, `*` `?` 사용 가능. 이름 패턴(`node_modules`, `*.log`)은 모든 하위 폴더에 적용되고, `\` 로 시작하는 패턴(`\src\build`)은 비교 루트 기준 그 위치의 항목만 제외합니다. 전체 길이는 255자까지입니다.
 - **보고서 · 내보내기** 버튼: Excel(.xlsx) / Word(.docx) / HTML 중에서 고릅니다. 상태 필터(같음·다름·왼쪽만·오른쪽만)에서 켜 둔 항목만 내보냅니다. xlsx는 머리글 고정·자동 필터·크기 숫자 서식, docx는 가로 A4 표입니다. 파일은 압축하지 않은 ZIP(OOXML)로 기록합니다.
+
+세션별 결과 내보내기 (`export_xml.asm`가 `export.asm`의 기록기 위에서 시트·문서 XML을 만듭니다):
+
+| 세션 | 형식 | 버튼 | 내용 |
+| --- | --- | --- | --- |
+| 텍스트 비교 | XLSX | 엑셀 저장 | 정렬된 행 단위(상태·줄 번호·내용), 변경/한쪽만 있는 줄 색상 |
+| 표 비교 | XLSX | 엑셀 저장 | 화면 목록과 같은 행·열(변경 셀은 `A → B`), 차이만 보기 반영 |
+| 헥스 비교 | XLSX | 엑셀 저장 | 오프셋·16바이트 헥스/ASCII·다른 바이트 수와 위치, 화면에 보이는 행(최대 100,000행) |
+| 텍스트 병합 | DOCX | 워드 저장 | 요약·충돌 목록·병합 결과(충돌 구간 색상) |
+| 폴더 병합 | DOCX | 워드 저장 | 항목별 상태·동작·크기, 상태별 색상 |
+| 이미지 비교 | DOCX | 워드 저장 | 파일·크기·허용 오차·다른 픽셀 수/비율 (이미지 자체는 포함하지 않음) |
+| 버전 / 레지스트리 / 미디어 | DOCX | 워드 저장 | 항목·A·B·상태 표 (다른 항목만 보기 반영) |
 
 설정 / 정책 / 외부 도구 (CU-01·CU-02·EX-01):
 
@@ -207,6 +221,7 @@ gui/
   rich.asm      RichEdit 헬퍼 (배경색/글자색)
   folder.asm + folder_ui.inc/_vfs.inc/ftp.inc/sync_dlg.inc/folder_rep.inc   폴더 비교·동기화·VFS·FTP·보고서
   folder_exp.inc / excl_dlg.inc / export.asm   Excel·Word 내보내기(무압축 ZIP 기록기), 제외 선택 대화상자·오른쪽 클릭 메뉴
+  export_xml.asm + text_xl/table_xl/hex_xl.inc, merge_doc/fmerge_doc/pic_doc/props_doc.inc   세션별 Excel·Word 내보내기
   fmerge.asm                   폴더 병합 (3-way)
   text.asm   + text_ui.inc/_gutter.inc/_syn.inc/_align.inc/edit_ui.inc   텍스트 비교·구문 강조·수동 정렬·편집
   merge.asm  + merge_ui.inc    텍스트 병합 (diff3)

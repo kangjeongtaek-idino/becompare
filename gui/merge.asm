@@ -3,7 +3,9 @@
 %include "inc/macros.inc"
 %include "inc/win.inc"
 %include "inc/app.inc"
+%include "inc/export.inc"
 
+extern PostMessageW, g_batch, g_dx_path, g_exitcode, g_hframe
 extern icon_set, g_prev, g_next, g_usel, g_user, g_both, g_save
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetWindowTextW, SetWindowTextW
@@ -62,6 +64,7 @@ global merge_register, merge_create
 %define ID_LBL_OUT  652
 %define ID_BTN_ALN  653
 %define ID_BTN_ALC  654
+%define ID_BTN_DOC  655
 
 section .rdata
 WSTR cn_merge, "BCMerge"
@@ -776,3 +779,4 @@ mg_merge:
     EPILOG 512
 
 %include "merge_ui.inc"
+%include "merge_doc.inc"

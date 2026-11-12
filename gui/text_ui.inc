@@ -579,6 +579,18 @@ text_compare:
     je .ok
     invoke tv_goto, rsi, rbx, 0
 .ok:
+    test qword [g_batch], 0x10        ; /xlsx file: export the first compare and close
+    jz .ok2
+    and qword [g_batch], ~0x10
+    invoke text_xlsx_path, rbx, &g_xl_path
+    test eax, eax
+    jnz .okx
+    mov qword [g_exitcode], 2
+.okx:
+    test qword [g_batch], 4
+    jz .ok2
+    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+.ok2:
     mov eax, 1
     EPILOG 448
 .err:
@@ -894,6 +906,7 @@ tv_layout:
     PLACE ID_BTN_SVR, 100
     PLACE ID_BTN_ALN, 100
     PLACE ID_BTN_ALC, 100
+    PLACE ID_BTN_XLS, 90
     lea r13d, [r13+r15]
     add r13d, r14d
     mov r12d, r14d
@@ -1108,6 +1121,7 @@ tv_proc:
     invoke mk_btn, rsi, &s_b_svr, ID_BTN_SVR
     invoke mk_btn, rsi, &s_b_aln, ID_BTN_ALN
     invoke mk_btn, rsi, &s_b_alc, ID_BTN_ALC
+    invoke mk_btn, rsi, &s_b_xls, ID_BTN_XLS
     invoke icon_set, rsi, ID_BTN_PREV, &g_prev, &s_b_prev
     invoke icon_set, rsi, ID_BTN_NEXT, &g_next, &s_b_next
     invoke icon_set, rsi, ID_BTN_CLR, &g_copyr, &s_b_clr
@@ -1226,6 +1240,8 @@ tv_proc:
     je .b_aln
     cmp ebx, ID_BTN_ALC
     je .b_alc
+    cmp ebx, ID_BTN_XLS
+    je .b_xls
     cmp ebx, ID_CHK_SYN
     je .b_syn
     cmp ebx, ID_ED_NEXT
@@ -1300,6 +1316,9 @@ tv_proc:
     jmp .zero
 .b_alc:
     invoke tv_align_clear, rsi, r15, r14
+    jmp .zero
+.b_xls:
+    invoke text_export, rsi, r15
     jmp .zero
 .rich:
     cmp ebp, EN_VSCROLL

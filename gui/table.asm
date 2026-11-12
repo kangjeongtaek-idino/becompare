@@ -2,6 +2,7 @@
 %include "inc/macros.inc"
 %include "inc/win.inc"
 %include "inc/app.inc"
+%include "inc/export.inc"
 
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetWindowTextW, SetWindowTextW
@@ -11,6 +12,7 @@ extern g_hinst, g_dark, th_bg, th_fg, th_panel, th_diff, th_lonly, th_ronly, th_
 extern mk, reg_class, scl, set_status, msgbox
 extern lv_dark_header, mk_btn, mk_chk, mk_lbl, mk_edit, get_chk, ctl_color, theme_checks
 extern pb_create, pb_layout, pb_load, pb_collect, pb_command
+extern sb_init, sb_append, sb_free, PostMessageW, g_batch, g_xl_path, g_exitcode, g_hframe
 extern text_load, vec_push, lower_w, set_tab_title, malloc
 
 global table_register, table_create
@@ -57,6 +59,7 @@ global table_register, table_create
 %define ID_CHK_TRIM  313
 %define ID_CHK_DIFF  314
 %define ID_CHK_SORT  315
+%define ID_BTN_XLS   316
 %define ID_LBL_KEY   320
 %define ID_EDIT_KEY  331
 %define ID_LBL_TOL   321
@@ -1301,6 +1304,18 @@ tb_compare:
 .tb:
     invoke _snwprintf, &rsp+96, 60, &f_title, r13, r14
     invoke set_tab_title, r12, &rsp+96
+    test qword [g_batch], 0x10        ; /xlsx file: export the first compare and close
+    jz .okb
+    and qword [g_batch], ~0x10
+    invoke tb_xlsx_path, rbx, &g_xl_path
+    test eax, eax
+    jnz .okx
+    mov qword [g_exitcode], 2
+.okx:
+    test qword [g_batch], 4
+    jz .okb
+    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+.okb:
     EPILOG 256
 .err:
     invoke msgbox, rsi, &s_cantread, MB_OK|MB_ICONWARNING
@@ -1357,6 +1372,7 @@ tb_layout:
     PLACE ID_CHK_TRIM, 120
     PLACE ID_CHK_DIFF, 100
     PLACE ID_CHK_SORT, 90
+    PLACE ID_BTN_XLS, 90
     lea r13d, [r13+r15]
     add r13d, r14d
     mov r12d, r14d
@@ -1555,6 +1571,7 @@ tb_proc:
     invoke mk_chk, rsi, &s_c_trim, ID_CHK_TRIM, 0
     invoke mk_chk, rsi, &s_c_diff, ID_CHK_DIFF, 0
     invoke mk_chk, rsi, &s_c_sort, ID_CHK_SORT, 1
+    invoke mk_btn, rsi, &s_b_xls, ID_BTN_XLS
     invoke mk_lbl, rsi, &s_l_key, ID_LBL_KEY
     invoke mk_edit, rsi, ID_EDIT_KEY
     invoke GetDlgItem, rsi, ID_EDIT_KEY
@@ -1605,6 +1622,8 @@ tb_proc:
     je .browse
     cmp ebx, ID_CHK_DIFF
     je .refresh
+    cmp ebx, ID_BTN_XLS
+    je .xls
     cmp ebx, ID_CHK_HDR
     jb .def
     cmp ebx, ID_CHK_SORT
@@ -1614,6 +1633,9 @@ tb_proc:
     jmp .run
 .browse:
     invoke pb_command, rsi, rbx, 0
+    jmp .zero
+.xls:
+    invoke tb_export, rsi, r15
     jmp .zero
 .refresh:
     invoke tb_refresh, rsi, r15
@@ -1730,3 +1752,4 @@ tb_proc:
     EPILOG 640
 %include "xlsx.inc"
 %include "table_date.inc"
+%include "table_xl.inc"

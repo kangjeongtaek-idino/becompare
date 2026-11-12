@@ -509,6 +509,18 @@ hx_compare:
 .tb:
     invoke _snwprintf, &rsp+96, 60, &f_title, r13, r14
     invoke set_tab_title, r12, &rsp+96
+    test qword [g_batch], 0x10        ; /xlsx file: export the first compare and close
+    jz .okb
+    and qword [g_batch], ~0x10
+    invoke hx_xlsx_path, rbx, &g_xl_path
+    test eax, eax
+    jnz .okx
+    mov qword [g_exitcode], 2
+.okx:
+    test qword [g_batch], 4
+    jz .okb
+    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+.okb:
     EPILOG 256
 .err:
     invoke msgbox, rsi, &s_cantread, MB_OK|MB_ICONWARNING
@@ -651,6 +663,7 @@ hx_layout:
     PLACE ID_CHK_ONLY, 130
     PLACE ID_BTN_SVA, 90
     PLACE ID_BTN_SVB, 100
+    PLACE ID_BTN_XLS, 90
     lea r13d, [r13+r15]
     add r13d, r14d
     mov r12d, r14d
@@ -747,6 +760,7 @@ hx_proc:
     invoke mk_chk, rsi, &s_c_only, ID_CHK_ONLY, 0
     invoke mk_btn, rsi, &s_b_sva, ID_BTN_SVA
     invoke mk_btn, rsi, &s_b_svb, ID_BTN_SVB
+    invoke mk_btn, rsi, &s_b_xls, ID_BTN_XLS
     invoke mk_lbl, rsi, &s_l_find, ID_LBL_FIND
     invoke mk_edit, rsi, ID_EDIT_FIND
     invoke mk_btn, rsi, &s_b_find, ID_BTN_FIND
@@ -824,6 +838,8 @@ hx_proc:
     je .b_sva
     cmp ebx, ID_BTN_SVB
     je .b_svb
+    cmp ebx, ID_BTN_XLS
+    je .b_xls
     cmp ebx, ID_CHK_ONLY
     je .b_only
     jmp .def
@@ -850,6 +866,9 @@ hx_proc:
     jmp .zero
 .b_svb:
     invoke hx_save, rsi, r15, 1
+    jmp .zero
+.b_xls:
+    invoke hx_export, rsi, r15
     jmp .zero
 .b_only:
     cmp qword [r15+HX_LOADED], 0

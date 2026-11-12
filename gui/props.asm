@@ -5,6 +5,7 @@
 %include "inc/macros.inc"
 %include "inc/win.inc"
 %include "inc/app.inc"
+%include "inc/export.inc"
 
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem, EnableWindow
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetWindowTextW, SetWindowTextW, InvalidateRect, SetWindowTheme
@@ -16,6 +17,7 @@ extern mk, reg_class, scl, set_status, msgbox
 extern mk_btn, mk_chk, mk_lbl, get_chk, ctl_color, theme_checks, lv_dark_header
 extern pb_create, pb_layout, pb_load, pb_collect, pb_command
 extern set_tab_title, str_dup, fmt_size, fmt_time, crc32_update
+extern sb_free, PostMessageW, g_batch, g_dx_path, g_exitcode, g_hframe
 extern GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW
 
 global props_register, props_create
@@ -40,6 +42,7 @@ global props_register, props_create
 %define ID_LST   700
 %define ID_CHKD  701
 %define ID_LBLI  702
+%define ID_BTN_DOC 703
 
 section .rdata
 WSTR cn_props, "BCProps"
@@ -192,6 +195,7 @@ pr_vis:
 %include "props_ver.inc"
 %include "props_reg.inc"
 %include "props_media.inc"
+%include "props_doc.inc"
 
 ; ---------------------------------------------------------------- view
 ; pp_layout(hwnd)
@@ -219,6 +223,12 @@ pp_layout:
     call scl
     mov ebx, eax
     MVID rsi, ID_CHKD, r12, r13, rbx, r15
+    lea r12d, [r12+rbx]
+    add r12d, r14d
+    mov ecx, 90
+    call scl
+    mov ebx, eax
+    MVID rsi, ID_BTN_DOC, r12, r13, rbx, r15
     lea r12d, [r12+rbx]
     add r12d, r14d
     mov ecx, 520
@@ -355,6 +365,18 @@ pp_compare:
     invoke pp_tail, r14
     invoke _snwprintf, &rsp+2200, 50, &f_title, r15, rax
     invoke set_tab_title, r12, &rsp+2200
+    test qword [g_batch], 0x20        ; /docx file: export the first compare and close
+    jz .okb
+    and qword [g_batch], ~0x20
+    invoke pp_docx_path, rsi, rbx, r12, &g_dx_path
+    test eax, eax
+    jnz .okx
+    mov qword [g_exitcode], 2
+.okx:
+    test qword [g_batch], 4
+    jz .okb
+    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+.okb:
     EPILOG 2304
 .nopath:
     invoke msgbox, rsi, &s_err_nopath, MB_OK|0x40
@@ -420,6 +442,7 @@ pp_proc:
     cmp word [r14+SS_OPTS], '1'
     sete r9b
     invoke mk_chk, rsi, &s_chk_diff, ID_CHKD, r9
+    invoke mk_btn, rsi, &s_b_doc, ID_BTN_DOC
     invoke mk_lbl, rsi, &s_empty, ID_LBLI
     invoke mk, rsi, &cn_listv, 0, LVS_REPORT|LVS_OWNERDATA|LVS_SHOWSELALWAYS|WS_TABSTOP|WS_BORDER, ID_LST
     mov [r15+P_HLIST], rax
@@ -487,6 +510,8 @@ pp_proc:
     je .run
     cmp ebx, ID_CHKD
     je .filter
+    cmp ebx, ID_BTN_DOC
+    je .doc
     cmp ebx, ID_BROWSE_A
     je .browse
     cmp ebx, ID_BROWSE_B
@@ -499,6 +524,9 @@ pp_proc:
     jmp .zero
 .filter:
     invoke pp_refill, rsi, r15
+    jmp .zero
+.doc:
+    invoke pp_export, rsi, r15, r14
     jmp .zero
 
 .notify:
