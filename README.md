@@ -38,7 +38,7 @@ powershell -File build.ps1          # src/bc.asm -> bc.exe (이전 단계의 콘
 ```powershell
 python tools/hazard.py              # invoke 인자 덮어쓰기 / 스택 프레임 16바이트 정렬 정적 검사 -> "hazards: 0" 이어야 함
 python tools/test_regressions.py    # 격리된 경로에서 재빌드 + 저장 오류·상태·화면 동작·명령줄 회귀 검사 233개
-powershell -File tools/t_smoke.ps1  # 세션 유형 14가지가 3초 이상 살아 있는지 확인 (실제 창을 띄움)
+powershell -File tools/manual/t_smoke.ps1  # 세션 유형 14가지가 3초 이상 살아 있는지 확인 (실제 창을 띄움, 수동 확인용)
 ```
 
 ### 자주 막히는 곳
@@ -46,7 +46,7 @@ powershell -File tools/t_smoke.ps1  # 세션 유형 14가지가 3초 이상 살�
 - `nasm`/`gcc`/`windres`를 찾지 못함: 설치 후 새 터미널을 열어 `PATH`를 다시 읽게 합니다.
 - `cannot open output file ..\bcgui.exe: Permission denied`: 실행 중인 `bcgui.exe`를 종료한 뒤 다시 빌드합니다.
 - `symbol ... not defined` (NASM): 새 상수·문자열을 추가한 파일에서 `extern`/`%define`을 확인합니다.
-- 화면 캡처형 시험 스크립트(`tools/t_*.ps1`)는 개발 PC의 임시 경로를 가정하므로 그대로 쓰지 말고 참고용으로 보세요.
+- 화면 캡처형 시험 스크립트(`tools/manual/t_*.ps1`)는 실제 창을 띄우고 화면 좌표·임시 폴더를 가정하므로 자동 검사에 쓰지 않습니다. 참고용이며 [tools/manual/README.md](tools/manual/README.md)에 설명이 있습니다.
 
 ## 실행
 
@@ -238,7 +238,7 @@ git config --global mergetool.becompare.cmd 'bcgui.exe merge "$LOCAL" "$REMOTE" 
 - 코드 변경 규칙: `gui/`를 고치는 변경은 `tools/test_*`의 검사를 함께 추가하거나 고칩니다. GitHub Actions(`.github/workflows/test.yml`)가 푸시와 PR마다 회귀 검사를 실행하고, PR에서 `gui/`만 바뀌고 테스트가 바뀌지 않았으면 설명에 `테스트 생략 사유:`가 적혀 있지 않은 한 실패합니다.
 - [2026-10-14 수정 결과](APP_FIXES_2026-10-14.md): 안전한 저장, 미저장 변경 보호, 작업 종료 대기, 자동화 종료 코드 수정.
 
-- `tools/ui.ps1` 로 실제 창을 띄워 컨트롤 ID로 클릭·입력·키 입력을 보내고, 화면 캡처와 결과 파일을 비교했습니다 (`tools/t_*.ps1` 시나리오).
+- 초기 개발 때는 `tools/manual/ui.ps1` 로 실제 창을 띄워 컨트롤 ID로 클릭·입력·키 입력을 보내고, 화면 캡처와 결과 파일을 비교했습니다 (`tools/manual/t_*.ps1` 시나리오).
 - 이번 단계에서 확인한 시나리오: 버전/레지스트리/미디어 비교(합성 MP3·FLAC 포함), 헥스 바꾸기 후 저장, 구문 강조, 수동 정렬, 텍스트 편집(바꾸기·저장·CRLF 보존), XLSX 표 비교(공유 문자열·한글·엔티티), 복합 키·날짜 허용 오차, 폴더 3-way 병합(자동 판정 + 실행 결과 파일 + 충돌 파일의 텍스트 병합 세션 열기), 설정 대화상자 저장, 외부 도구 실행, 스크립트(변수·run·if·goto·종료 코드), 탐색기 메뉴 등록/해제, 크기·날짜 필터, 파일별 HTML 보고서, 이동·이름 바꾸기.
 - 자동화로 검증하지 못한 것: 파일 끌어놓기(IN-03), 관리자 정책(HKLM/HKCU `Policies` 키는 일반 권한으로 쓸 수 없어 읽기 코드만 작성), 실제 FTP 서버(테스트 서버로만 확인), 10만 파일 이상의 규모.
 
@@ -268,7 +268,8 @@ gui/
   script.asm / shell.asm       스크립트 언어, 탐색기 통합
   inc/          매크로(invoke), Win32 상수, 앱 정의
 src/bc.asm      이전 단계의 콘솔 도구 (bc.exe)
-tools/          UI 자동 검증 스크립트, 정적 검사기(hazard.py), 테스트 서버·생성기, 크래시 로거(crash_debug.asm.txt)
+tools/          회귀 검사(test_regressions.py, test_*.c), 정적 검사기(hazard.py), 구문 강조 표 생성기(gen_syn.py), 크래시 로거(crash_debug.asm.txt)
+tools/manual/   수동 확인용 화면 시나리오(t_*.ps1, ui.ps1)와 시험 자료 생성기·시험용 FTP 서버
 ```
 
 `inc/macros.inc`의 `invoke` 매크로로 Win64 호출 규약(인자 레지스터, 섀도 공간, 스택 정렬)을 처리합니다.

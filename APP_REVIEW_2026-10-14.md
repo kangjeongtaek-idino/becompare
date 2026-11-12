@@ -19,7 +19,7 @@ GUI 소스 21개 모듈과 리소스를 별도 경로에 재빌드했고 tools/h
 - 실제 engine.obj/textlib.obj를 연결한 C 검사 프로그램에서 WriteFile만 ERROR_DISK_FULL 실패로 대체했습니다. 실제 디스크를 채우지는 않았습니다.
 - 원래 8바이트인 파일에 저장을 시도하면 UTF-8과 UTF-16 모두 성공(1)을 반환하면서 파일은 0바이트가 됐습니다.
 - CREATE_ALWAYS로 원본을 먼저 비운 뒤 WriteFile 반환값·실제 기록 바이트 수를 검사하지 않습니다. GUI는 성공 반환을 받아 수정 상태도 해제합니다.
-- 근거: [gui/engine.asm:364](C:/Users/charles/workspace/becompare/gui/engine.asm:364), [gui/textlib.asm:155](C:/Users/charles/workspace/becompare/gui/textlib.asm:155), [gui/text_ui.inc:819](C:/Users/charles/workspace/becompare/gui/text_ui.inc:819). 헥스 저장에도 같은 패턴이 있습니다: [gui/hex_ui.inc:600](C:/Users/charles/workspace/becompare/gui/hex_ui.inc:600).
+- 근거: [gui/engine.asm:364](gui/engine.asm#L364), [gui/textlib.asm:155](gui/textlib.asm#L155), [gui/text_ui.inc:819](gui/text_ui.inc#L819). 헥스 저장에도 같은 패턴이 있습니다: [gui/hex_ui.inc:600](gui/hex_ui.inc#L600).
 - 수정: 같은 볼륨의 임시 파일에 저장하고 모든 쓰기·flush 결과를 확인한 뒤 원본을 교체합니다. 실패 시 원본과 수정 상태를 유지하고 사용자에게 오류를 표시해야 합니다.
 
 ### 2. [P2] UTF-8 문서를 완전히 비워 저장할 수 없음
@@ -27,7 +27,7 @@ GUI 소스 21개 모듈과 리소스를 별도 경로에 재빌드했고 tools/h
 - text_save(path, L"", 0, UTF8)는 실패(0)를 반환했고 기존 8바이트 내용이 그대로 남았습니다.
 - 길이 0인 입력을 WideCharToMultiByte에 넘기면 0을 반환하는데 이를 변환 실패로 처리합니다.
 - 단일 파일 편집기에서 UTF-8 파일 내용을 모두 지우고 저장하는 흐름에 영향을 줍니다. UTF-8 BOM 경로도 같은 함수를 사용합니다.
-- 근거: [gui/engine.asm:348](C:/Users/charles/workspace/becompare/gui/engine.asm:348), [gui/edit_ui.inc:261](C:/Users/charles/workspace/becompare/gui/edit_ui.inc:261).
+- 근거: [gui/engine.asm:348](gui/engine.asm#L348), [gui/edit_ui.inc:261](gui/edit_ui.inc#L261).
 - 수정: 빈 문서를 정상 입력으로 처리해 BOM 정책에 맞는 빈 파일을 저장해야 합니다.
 
 ### 3. [P2] HTML 보고서 저장 실패인데 종료 코드 0
@@ -35,14 +35,14 @@ GUI 소스 21개 모듈과 리소스를 별도 경로에 재빌드했고 tools/h
 - 동일한 두 폴더에 /report를 실행하면서 존재하지 않는 상위 디렉터리 아래를 출력 경로로 지정했습니다.
 - 보고서가 생성되지 않았는데 프로세스는 0으로 종료했습니다. README의 오류 종료 코드 2와 다릅니다.
 - 보고서 함수가 write_utf8 결과를 무시하고 저장 완료 상태를 설정합니다. 배치 경로도 오류를 받지 않습니다.
-- 근거: [gui/folder_ui.inc:1612](C:/Users/charles/workspace/becompare/gui/folder_ui.inc:1612), [gui/folder_ui.inc:1401](C:/Users/charles/workspace/becompare/gui/folder_ui.inc:1401).
+- 근거: [gui/folder_ui.inc:1612](gui/folder_ui.inc#L1612), [gui/folder_ui.inc:1401](gui/folder_ui.inc#L1401).
 - 수정: 보고서 및 상세 보고서 쓰기 실패를 호출자에게 전달하고 자동화에서는 2로 종료합니다.
 
 ### 4. [P2] 잘못된 입력 폴더 때문에 자동화가 끝나지 않음
 
 - 존재하지 않는 최상위 폴더를 /report의 입력으로 지정했습니다. 처음 5초, 재확인 3초 모두 정상 종료하지 않아 검사 프로세스만 제한 시간 후 종료했습니다.
 - 최상위 경로 존재 검사는 있습니다. 그러나 실패하면 배치 실행에서도 모달 경고창을 띄우고 자동화 종료 처리를 하지 않습니다.
-- 근거: [gui/folder_vfs.inc:101](C:/Users/charles/workspace/becompare/gui/folder_vfs.inc:101), [gui/folder_ui.inc:423](C:/Users/charles/workspace/becompare/gui/folder_ui.inc:423).
+- 근거: [gui/folder_vfs.inc:101](gui/folder_vfs.inc#L101), [gui/folder_ui.inc:423](gui/folder_ui.inc#L423).
 - 수정: 배치 모드에서는 대화상자 없이 오류 로그를 기록하고 2로 종료합니다.
 
 ### 5. [P2] 한쪽에만 있는 빈 폴더를 종료 코드에서는 동일로 판정
@@ -50,7 +50,7 @@ GUI 소스 21개 모듈과 리소스를 별도 경로에 재빌드했고 tools/h
 - 왼쪽에만 only-left라는 빈 디렉터리를 만들고 비교했습니다.
 - HTML은 정확히 '왼쪽만'이라고 표시했지만 종료 코드는 0이었습니다. 기대 코드는 차이를 뜻하는 1입니다.
 - 디렉터리는 F_CNT 집계에서 제외되는데 배치 종료 코드는 이 집계만 봅니다.
-- 근거: [gui/folder.asm:718](C:/Users/charles/workspace/becompare/gui/folder.asm:718), [gui/folder_ui.inc:1430](C:/Users/charles/workspace/becompare/gui/folder_ui.inc:1430).
+- 근거: [gui/folder.asm:718](gui/folder.asm#L718), [gui/folder_ui.inc:1430](gui/folder_ui.inc#L1430).
 - 수정: 종료 판정에 디렉터리 차이 및 파일/디렉터리 종류 충돌도 반영합니다.
 
 ## 코드에서 확인한 문제 — GUI 직접 재현은 미실시
@@ -59,7 +59,7 @@ GUI 소스 21개 모듈과 리소스를 별도 경로에 재빌드했고 tools/h
 
 - Ctrl+W 경로는 DestroyWindow를 직접 호출합니다. 앱 메뉴의 종료도 동일하며 WM_CLOSE 별도 처리가 없습니다.
 - 텍스트 비교·편집·병합·헥스 뷰의 파괴 처리에서는 수정 내용 확인 없이 메모리를 해제합니다.
-- 근거: [gui/main.asm:653](C:/Users/charles/workspace/becompare/gui/main.asm:653), [gui/main.asm:1386](C:/Users/charles/workspace/becompare/gui/main.asm:1386), [gui/edit_ui.inc:620](C:/Users/charles/workspace/becompare/gui/edit_ui.inc:620), [gui/merge_ui.inc:631](C:/Users/charles/workspace/becompare/gui/merge_ui.inc:631).
+- 근거: [gui/main.asm:653](gui/main.asm#L653), [gui/main.asm:1386](gui/main.asm#L1386), [gui/edit_ui.inc:620](gui/edit_ui.inc#L620), [gui/merge_ui.inc:631](gui/merge_ui.inc#L631).
 - 수정: 공통 종료 전 확인 절차를 만들고 저장/버리기/취소 선택을 지원합니다. 저장 실패하면 닫지 않아야 합니다.
 
 ### 7. [P1] 동기화 중 탭 닫기가 해제된 메모리 접근으로 이어질 수 있음
@@ -67,7 +67,7 @@ GUI 소스 21개 모듈과 리소스를 별도 경로에 재빌드했고 tools/h
 - 폴더 뷰 파괴 시 취소 플래그를 세우지만 동기화 스레드 F_SYNCTHR 종료를 기다리지 않고 계획·버퍼·상태 구조체를 해제합니다.
 - sync_thread는 파일 작업에서 복귀한 후에도 같은 구조체를 읽고 씁니다. 스캔 스레드도 5초 대기 결과를 확인하지 않고 해제합니다.
 - 일시정지는 SuspendThread를 사용하므로 취소·종료 시 재개와 협력적 종료 처리가 필요합니다.
-- 근거: [gui/folder_ui.inc:2115](C:/Users/charles/workspace/becompare/gui/folder_ui.inc:2115), [gui/folder_ui.inc:1247](C:/Users/charles/workspace/becompare/gui/folder_ui.inc:1247), [gui/folder_ui.inc:1373](C:/Users/charles/workspace/becompare/gui/folder_ui.inc:1373).
+- 근거: [gui/folder_ui.inc:2115](gui/folder_ui.inc#L2115), [gui/folder_ui.inc:1247](gui/folder_ui.inc#L1247), [gui/folder_ui.inc:1373](gui/folder_ui.inc#L1373).
 - 영향: 작업 중 탭 닫기에서 충돌 또는 비정상 메모리 접근 가능성. 실제 충돌 재현은 하지 않았습니다.
 - 수정: 취소 요청→일시정지 해제→작업 종료 확인→핸들/메모리 해제 순서와 비동기 종료 대기를 적용합니다.
 
@@ -76,14 +76,14 @@ GUI 소스 21개 모듈과 리소스를 별도 경로에 재빌드했고 tools/h
 - text_side는 편집창의 변경 내용을 메모리로 가져오지만 text_compare 끝에서 양쪽 EM_SETMODIFY를 무조건 0으로 만듭니다.
 - Ctrl+S의 BC_SAVE 처리는 EM_GETMODIFY가 0이면 tv_save를 호출하지 않습니다.
 - 코드상 예상 절차: 텍스트 비교에서 수정→F5 재비교→Ctrl+S. 테마 변경도 재비교를 호출하므로 같은 영향을 받습니다.
-- 근거: [gui/text_ui.inc:369](C:/Users/charles/workspace/becompare/gui/text_ui.inc:369), [gui/text_ui.inc:532](C:/Users/charles/workspace/becompare/gui/text_ui.inc:532), [gui/text_ui.inc:1123](C:/Users/charles/workspace/becompare/gui/text_ui.inc:1123), [gui/text_ui.inc:1134](C:/Users/charles/workspace/becompare/gui/text_ui.inc:1134).
+- 근거: [gui/text_ui.inc:369](gui/text_ui.inc#L369), [gui/text_ui.inc:532](gui/text_ui.inc#L532), [gui/text_ui.inc:1123](gui/text_ui.inc#L1123), [gui/text_ui.inc:1134](gui/text_ui.inc#L1134).
 - 수정: 비교 화면 갱신과 파일 저장 여부를 별도로 관리하고, 실제 저장 성공 후에만 수정 상태를 해제합니다.
 
 ## 추가 확인이 필요한 위험
 
-- 디렉터리 열거 오류: FindFirstFileW 실패와 빈 디렉터리를 구분하지 않고 FindNextFileW 실패 원인도 확인하지 않습니다. 접근 거부 또는 스캔 중 연결 단절 때 하위 파일을 없다고 판정해 미러 삭제 계획에 넣을 위험이 있습니다. 최상위 경로 검사가 이 문제까지 막지는 못합니다. [gui/folder.asm:325](C:/Users/charles/workspace/becompare/gui/folder.asm:325), [gui/folder.asm:383](C:/Users/charles/workspace/becompare/gui/folder.asm:383), [gui/folder_ui.inc:1142](C:/Users/charles/workspace/becompare/gui/folder_ui.inc:1142). 실패한 스캔에서는 동기화를 금지하고 오류 항목을 표시해야 합니다. 접근 거부·네트워크 장애 재현은 미실시입니다.
-- ZIP/FTP 추출 경로 충돌: 임시 경로가 세션/상대 경로를 구분하지 않고 A 또는 B 아래의 파일명만 사용합니다. 서로 다른 디렉터리의 동명 파일이나 여러 세션이 같은 임시 파일을 덮어쓸 수 있습니다. [gui/folder_vfs.inc:194](C:/Users/charles/workspace/becompare/gui/folder_vfs.inc:194). 세션마다 고유한 임시 루트와 상대 경로 보존이 필요합니다. 동시 세션 재현은 미실시입니다.
-- 폴더 병합 결과 신뢰성: 출력 위치에 같은 이름의 파일이 존재하기만 하면 충돌을 이미 병합한 것으로 집계하며, CopyFileW 실패는 오류 집계 없이 넘어갑니다. 이전 작업 결과가 남은 출력 폴더나 복사 불가 조건을 추가 검증해야 합니다. [gui/fmerge.asm:798](C:/Users/charles/workspace/becompare/gui/fmerge.asm:798), [gui/fmerge.asm:807](C:/Users/charles/workspace/becompare/gui/fmerge.asm:807).
+- 디렉터리 열거 오류: FindFirstFileW 실패와 빈 디렉터리를 구분하지 않고 FindNextFileW 실패 원인도 확인하지 않습니다. 접근 거부 또는 스캔 중 연결 단절 때 하위 파일을 없다고 판정해 미러 삭제 계획에 넣을 위험이 있습니다. 최상위 경로 검사가 이 문제까지 막지는 못합니다. [gui/folder.asm:325](gui/folder.asm#L325), [gui/folder.asm:383](gui/folder.asm#L383), [gui/folder_ui.inc:1142](gui/folder_ui.inc#L1142). 실패한 스캔에서는 동기화를 금지하고 오류 항목을 표시해야 합니다. 접근 거부·네트워크 장애 재현은 미실시입니다.
+- ZIP/FTP 추출 경로 충돌: 임시 경로가 세션/상대 경로를 구분하지 않고 A 또는 B 아래의 파일명만 사용합니다. 서로 다른 디렉터리의 동명 파일이나 여러 세션이 같은 임시 파일을 덮어쓸 수 있습니다. [gui/folder_vfs.inc:194](gui/folder_vfs.inc#L194). 세션마다 고유한 임시 루트와 상대 경로 보존이 필요합니다. 동시 세션 재현은 미실시입니다.
+- 폴더 병합 결과 신뢰성: 출력 위치에 같은 이름의 파일이 존재하기만 하면 충돌을 이미 병합한 것으로 집계하며, CopyFileW 실패는 오류 집계 없이 넘어갑니다. 이전 작업 결과가 남은 출력 폴더나 복사 불가 조건을 추가 검증해야 합니다. [gui/fmerge.asm:798](gui/fmerge.asm#L798), [gui/fmerge.asm:807](gui/fmerge.asm#L807).
 
 ## 향상할 기능과 우선순위
 
@@ -108,9 +108,9 @@ GUI 소스 21개 모듈과 리소스를 별도 경로에 재빌드했고 tools/h
 | 입력 최상위 폴더 없음 | 오류 종료 2 | 시간 제한까지 종료 안 함 | 실패 |
 | 왼쪽에만 빈 폴더 | 차이 종료 1 | 종료 0, HTML에는 왼쪽만 | 실패 |
 
-- [저장 검사 소스](C:/Users/charles/workspace/becompare/build/review-20261014/io_probe.c)
-- [저장 검사 출력](C:/Users/charles/workspace/becompare/build/review-20261014/io-results.txt)
-- [명령줄 검사 출력](C:/Users/charles/workspace/becompare/build/review-20261014/cli-results.json)
-- [빈 폴더 차이 보고서](C:/Users/charles/workspace/becompare/build/review-20261014/fixtures/dir-only.html)
+- [저장 검사 소스](build/review-20261014/io_probe.c)
+- [저장 검사 출력](build/review-20261014/io-results.txt)
+- [명령줄 검사 출력](build/review-20261014/cli-results.json)
+- [빈 폴더 차이 보고서](build/review-20261014/fixtures/dir-only.html)
 
 저장 검사는 실제 재빌드한 engine.obj와 textlib.obj에 연결했습니다. WriteFile 실패만 GNU linker의 --wrap=WriteFile로 주입했습니다. 그 외 변환·파일 열기·원본 잘라내기·정상 쓰기 동작은 실제 구현입니다.

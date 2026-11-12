@@ -1,5 +1,5 @@
 import os
-os.chdir(r'C:\Users\charles\workspace\becompare\gui')
+os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'gui'))
 exts = {
  1: "c h cpp hpp cc cxx hxx cs java js mjs ts jsx tsx go rs php swift kt kts scala dart m mm css scss less",
  2: "py pyw sh bash zsh yml yaml toml rb pl pm ps1 psm1 cmake r conf properties gitignore",

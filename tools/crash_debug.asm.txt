@@ -6,7 +6,7 @@ extern g_hinst
 global crash_install
 
 section .rdata
-s_path: db "C:\Users\charles\AppData\Local\Temp\bc_crash.txt", 0
+s_path: db "C:\Temp\bc_crash.txt", 0
 f_head: db "code=%08x addr=%llx rip=%llx rsp=%llx base=%llx", 10, "rax=%llx rcx=%llx rdx=%llx rbx=%llx", 10, "rbp=%llx rsi=%llx rdi=%llx r8=%llx", 10, "r12=%llx r13=%llx r14=%llx r15=%llx", 10, 0
 f_q: db "%llx", 10, 0
 
