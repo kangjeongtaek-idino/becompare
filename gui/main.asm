@@ -421,6 +421,14 @@ pre_key:
     je .nextdiff
     jmp .prevdiff
 .fixed:
+    cmp edi, 0x76                    ; VK_F7 / Shift+F7: next / previous difference (IntelliJ)
+    jne .nof7
+    test ebp, 1
+    jnz .nof7
+    test ebp, 2
+    jnz .prevdiff
+    jmp .nextdiff
+.nof7:
     cmp edi, VK_ESCAPE
     je .esc
     cmp edi, VK_RETURN

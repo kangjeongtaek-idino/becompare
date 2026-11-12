@@ -247,6 +247,7 @@ sum_len:
 
 %include "text_ui.inc"
 %include "text_xl.inc"
+%include "text_word.inc"
 %include "text_gutter.inc"
 %include "text_syn.inc"
 %include "text_align.inc"

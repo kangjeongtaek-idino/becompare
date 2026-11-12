@@ -275,6 +275,10 @@ tv_color:
     mov r8, [rsp+128]
     add r8, rbp
     invoke rich_bk, [r12+TV_HB], rbp, r8, #[th_tc_mod]
+    ; word level changes (IntelliJ style); long lines fall back to the prefix / suffix span below
+    invoke tv_wordhl, r12, &rsp+104, rdi, rbp
+    test eax, eax
+    jnz .adv
     ; common prefix of the two lines
     mov rdx, [rsp+104]
     mov r8, [rsp+120]

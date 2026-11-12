@@ -117,6 +117,57 @@ gt_paint:
     invoke FillRect, rdi, &rsp+P_BR, [rsp+P_BR+16]
     invoke DeleteObject, [rsp+P_BR+16]
 .notint:
+    ; the current block (F7 / F8, click) gets a 1 px outline above and below its rows
+    mov eax, [rbp+12]
+    cmp eax, -1
+    je .nocur
+    cmp rax, [r12+TV_CUR]
+    jne .nocur
+    mov ecx, [th_tc_modb]
+    mov edx, [rbp]
+    cmp edx, 1
+    je .ocol
+    mov ecx, [th_tc_delb]
+    cmp edx, 2
+    je .ocol
+    mov ecx, [th_tc_insb]
+.ocol:
+    invoke CreateSolidBrush, rcx
+    mov [rsp+P_BR+16], rax
+    mov rcx, [r12+TV_BLK]
+    mov eax, [rbp+12]
+    mov edx, [rcx+rax*8]             ; first row of the block
+    mov r8d, [rcx+rax*8+4]           ; end row (exclusive)
+    cmp r14d, edx
+    jne .onotop
+    mov dword [rsp+P_BR], 0
+    mov [rsp+P_BR+4], r15d
+    mov eax, [rsp+P_RC+8]
+    mov [rsp+P_BR+8], eax
+    lea eax, [r15+1]
+    mov [rsp+P_BR+12], eax
+    invoke FillRect, rdi, &rsp+P_BR, [rsp+P_BR+16]
+    mov rcx, [r12+TV_BLK]
+    mov eax, [rbp+12]
+    mov r8d, [rcx+rax*8+4]
+.onotop:
+    lea eax, [r14+1]
+    cmp eax, r8d
+    jne .onobot
+    mov dword [rsp+P_BR], 0
+    mov eax, r15d
+    add eax, [rsp+P_H]
+    dec eax
+    mov [rsp+P_BR+4], eax
+    mov eax, [rsp+P_RC+8]
+    mov [rsp+P_BR+8], eax
+    mov eax, r15d
+    add eax, [rsp+P_H]
+    mov [rsp+P_BR+12], eax
+    invoke FillRect, rdi, &rsp+P_BR, [rsp+P_BR+16]
+.onobot:
+    invoke DeleteObject, [rsp+P_BR+16]
+.nocur:
     invoke bm_has, r12, r14
     test eax, eax
     jz .nobm
