@@ -13,7 +13,7 @@ extern mk, reg_class, scl, set_status, msgbox
 extern lv_dark_header, mk_btn, mk_chk, mk_lbl, mk_edit, get_chk, ctl_color, theme_checks
 extern pb_create, pb_layout, pb_load, pb_collect, pb_command
 extern sb_init, sb_append, sb_free, PostMessageW, g_batch, g_xl_path, g_exitcode, g_hframe, batch_done
-extern text_load, vec_push, lower_w, set_tab_title, malloc
+extern text_load, vec_push, lower_w, set_tab_title, malloc, GetFileAttributesW
 
 global table_register, table_create
 
@@ -1233,11 +1233,45 @@ tb_info:
     EPILOG 320
 
 ; tb_load_side(path, SIDE*) -> eax
+;   "book.xlsx#Name" or "book.xlsx#2" reads that sheet of the workbook (by name, or by position among the
+;   tabs). The part after '#' is a selector only when no file has the whole text as its name.
+%define TL_PATH 200                  ; wchar[520]: the path without its selector -> 1240
 tb_load_side:
-    PROLOG 192
+    PROLOG 1296
     mov r12, rcx
     mov rbx, rdx
     invoke side_free, rbx
+    xor r14d, r14d                   ; sheet selector
+    invoke GetFileAttributesW, r12
+    cmp eax, -1
+    jne .plain
+    invoke wcsrchr, r12, '#'
+    test rax, rax
+    jz .plain
+    mov r15, rax
+    mov rax, r15
+    sub rax, r12
+    cmp rax, 1036
+    ja .plain
+    invoke wcscpy, &rsp+TL_PATH, r12
+    mov rax, r15
+    sub rax, r12
+    mov word [rsp+TL_PATH+rax], 0
+    invoke wcsrchr, &rsp+TL_PATH, '.'
+    test rax, rax
+    jz .plain
+    mov r13, rax
+    invoke _wcsicmp, r13, &xl_ext
+    test eax, eax
+    jz .sel
+    invoke _wcsicmp, r13, &xl_extm
+    test eax, eax
+    jnz .plain
+.sel:
+    lea r14, [r15+2]
+    lea r12, [rsp+TL_PATH]
+    jmp .xlsx
+.plain:
     invoke wcsrchr, r12, '.'
     test rax, rax
     jz .csv
@@ -1249,8 +1283,8 @@ tb_load_side:
     test eax, eax
     jnz .csv
 .xlsx:
-    invoke xlsx_load, r12, rbx
-    EPILOG 192
+    invoke xlsx_load, r12, rbx, r14
+    EPILOG 1296
 .csv:
     invoke text_load, r12, &rsp+96             ; TXT at [rsp+96]: text, len, enc, crlf, eol
     test eax, eax
@@ -1260,10 +1294,10 @@ tb_load_side:
     invoke csv_detect, r13
     invoke csv_parse, r13, rax, rbx
     mov eax, 1
-    EPILOG 192
+    EPILOG 1296
 .fail:
     xor eax, eax
-    EPILOG 192
+    EPILOG 1296
 
 ; tb_compare(hwnd, tb, sess)
 tb_compare:

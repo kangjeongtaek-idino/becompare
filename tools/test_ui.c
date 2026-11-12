@@ -2,9 +2,12 @@
    controls (kept hidden), and a second thread inspects what a user would see:
    row colours, word level highlight, F7 / Shift+F7 navigation, the light and dark palettes.
    "test_ui merge" opens the same two files as a merge session and checks the colours of its panes.
+   "test_ui fmerge" runs a folder merge into an output folder and checks what it reports and writes.
    WinMain of main.asm is linked as bc_winmain. Set BC_UITEST_SHOW=1 to watch the window. */
 #include <windows.h>
 #include <richedit.h>
+#include <commctrl.h>
+#include <shlobj.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -23,10 +26,12 @@ extern uint32_t th_lonly, th_ronly, th_conf;
 #define ID_RL 601
 #define ID_RR 603
 #define ID_RM 610
+#define ID_BTN_RUNM 710
 #define IDM_LIGHT 1030
 #define IDM_DARK 1031
 
-static int checks, failed, shiftDown, boxes, mergeMode;
+static int checks, failed, shiftDown, boxes, mergeMode, fmergeMode, expectBoxes, shownBoxes;
+static wchar_t lastBox[400];
 static DWORD mainTid;
 static HWND frame, ra, rb, view;
 static wchar_t cmdline[1200];
@@ -45,7 +50,9 @@ SHORT WINAPI __wrap_GetKeyState(int vk){
  if(vk==VK_CONTROL||vk==VK_MENU)return 0;
  return __real_GetKeyState(vk);
 }
-int WINAPI __wrap_MessageBoxW(HWND h,LPCWSTR t,LPCWSTR c,UINT f){(void)h;(void)c;boxes++;printf("unexpected message box (flags %u, %d characters)\n",f,(int)wcslen(t));return (f&15)?IDNO:IDOK;}
+int WINAPI __wrap_MessageBoxW(HWND h,LPCWSTR t,LPCWSTR c,UINT f){(void)h;(void)c;
+ if(expectBoxes){shownBoxes++;wcsncpy(lastBox,t,399);lastBox[399]=0;return (f&15)==MB_YESNO?IDYES:IDOK;}   /* the test answers Yes */
+ boxes++;printf("unexpected message box (flags %u, %d characters)\n",f,(int)wcslen(t));return (f&15)?IDNO:IDOK;}
 void __wrap_update_start(void){}                      /* no network access from a test */
 
 /* ---- reading the screen */
@@ -154,12 +161,65 @@ static void mergeChecks(void){
  check(!(GetWindowLongPtrW(m,GWL_STYLE)&ES_READONLY),"output pane stays editable");
  SendMessageW(m,EM_SETMODIFY,0,0);                    /* nothing to save: no question on close */
 }
+/* ---- folder merge: left, right, base and an output folder that already holds two files
+   c1: conflict, the output file is older than the inputs   -> still an unresolved conflict
+   c2: conflict, the output file was written after the inputs -> counts as merged
+   n : only on the left                                       -> copied */
+static void putfile(const wchar_t*path,const char*text){FILE*f=_wfopen(path,L"wb");if(f){fputs(text,f);fclose(f);}}
+static void stamp(const wchar_t*path,int minutes){
+ HANDLE h=CreateFileW(path,FILE_WRITE_ATTRIBUTES,7,NULL,OPEN_EXISTING,0,NULL);FILETIME ft;GetSystemTimeAsFileTime(&ft);
+ ULARGE_INTEGER u;u.LowPart=ft.dwLowDateTime;u.HighPart=ft.dwHighDateTime;u.QuadPart+=(LONGLONG)minutes*600000000LL;
+ ft.dwLowDateTime=u.LowPart;ft.dwHighDateTime=u.HighPart;SetFileTime(h,NULL,NULL,&ft);CloseHandle(h);
+}
+static int holds(const wchar_t*path,const char*text){char b[64]={0};FILE*f=_wfopen(path,L"rb");if(!f)return 0;size_t n=fread(b,1,63,f);fclose(f);return n==strlen(text)&&!memcmp(b,text,n);}
+static void fmergeFixture(void){
+ CreateDirectoryW(L"fm",NULL);CreateDirectoryW(L"fm\\L",NULL);CreateDirectoryW(L"fm\\R",NULL);CreateDirectoryW(L"fm\\B",NULL);CreateDirectoryW(L"fm\\O",NULL);
+ putfile(L"fm\\B\\c1.txt","base");putfile(L"fm\\L\\c1.txt","L");putfile(L"fm\\R\\c1.txt","R");
+ putfile(L"fm\\B\\c2.txt","base");putfile(L"fm\\L\\c2.txt","L2");putfile(L"fm\\R\\c2.txt","R2");
+ putfile(L"fm\\L\\n.txt","new");DeleteFileW(L"fm\\O\\n.txt");
+ putfile(L"fm\\O\\c1.txt","stale");stamp(L"fm\\O\\c1.txt",-3*24*60);
+ putfile(L"fm\\O\\c2.txt","fresh");stamp(L"fm\\O\\c2.txt",10);
+}
+static HWND wantedClass(const wchar_t*cls,int id);
+static const wchar_t*wantCls;
+static BOOL CALLBACK onClass(HWND h,LPARAM l){(void)l;wchar_t c[40];GetClassNameW(h,c,40);if(!wcscmp(c,wantCls)&&(wantedId<0||GetDlgCtrlID(h)==wantedId)){wanted=h;return FALSE;}return TRUE;}
+static HWND wantedClass(const wchar_t*cls,int id){wanted=NULL;wantCls=cls;wantedId=id;EnumChildWindows(frame,onClass,0);return wanted;}
+static void fmergeChecks(void){
+ HWND list=NULL,run=NULL;
+ for(int i=0;i<200;i++){
+  run=wantedClass(L"Button",ID_BTN_RUNM);
+  if(run){list=FindWindowExW(GetParent(run),NULL,L"SysListView32",NULL);if(list&&SendMessageW(list,LVM_GETITEMCOUNT,0,0)>=3)break;}
+  Sleep(50);
+ }
+ check(run&&list&&SendMessageW(list,LVM_GETITEMCOUNT,0,0)==3,"folder merge lists the three files");
+ if(!run||!list)return;
+ expectBoxes=1;lastBox[0]=0;
+ SendMessageW(run,BM_CLICK,0,0);                      /* asks about the non-empty output folder, then reports */
+ expectBoxes=0;
+ printf("summary has %d characters, %d boxes shown\n",(int)wcslen(lastBox),shownBoxes);
+ check(shownBoxes==2,"one question about the output folder and one summary");
+ check(wcsstr(lastBox,L"\xBCD1\xD569 \xD30C\xC77C 1")!=NULL,"an output file newer than the inputs counts as merged");
+ check(wcsstr(lastBox,L"\xBBF8\xD574\xACB0 \xCDA9\xB3CC 1")!=NULL,"an output file older than the inputs is still a conflict");
+ check(wcsstr(lastBox,L"\xBCF5\xC0AC \xC2E4\xD328 0")!=NULL,"no failed copies");
+ check(holds(L"fm\\O\\n.txt","new"),"the file only on the left was copied to the output");
+ check(holds(L"fm\\O\\c1.txt","stale")&&holds(L"fm\\O\\c2.txt","fresh"),"conflicting files in the output were not overwritten");
+ check(holds(L"fm\\L\\c1.txt","L")&&holds(L"fm\\R\\c1.txt","R")&&holds(L"fm\\B\\c1.txt","base"),"the inputs were not changed");
+}
+/* ---- temporary files: what this process left under %TEMP%\\BeCompareAsm is gone when WinMain returns */
+static wchar_t ownTemp[600];
+static void tempFixture(void){
+ wchar_t t[400],d[600];GetTempPathW(400,t);
+ swprintf(ownTemp,600,L"%lsBeCompareAsm\\%X_TEST",t,(unsigned)GetCurrentProcessId());
+ swprintf(d,600,L"%ls\\A\\sub",ownTemp);SHCreateDirectoryExW(NULL,d,NULL);
+ wcscat(d,L"\\f.txt");putfile(d,"extracted");
+}
 static DWORD WINAPI watcher(void*arg){
  (void)arg;
  for(int i=0;i<200&&!frame;i++){EnumThreadWindows(mainTid,onTop,0);if(!frame)Sleep(50);}
  check(frame!=NULL,"frame window created");
  if(!frame){PostThreadMessageW(mainTid,WM_QUIT,0,0);return 0;}
  if(mergeMode){mergeChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
+ if(fmergeMode){fmergeChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
  for(int i=0;i<200;i++){
   EnumChildWindows(frame,onChild,0);
   if(ra&&rb){view=GetParent(ra);if(info(L"차이 4개"))break;}
@@ -225,15 +285,24 @@ static DWORD WINAPI watchdog(void*arg){(void)arg;Sleep(60000);printf("FAIL timed
 int main(int argc,char**argv){
  wchar_t a[400],b[400];
  mergeMode=argc>1&&!strcmp(argv[1],"merge");
+ fmergeMode=argc>1&&!strcmp(argv[1],"fmerge");
+ tempFixture();
+ check(GetFileAttributesW(ownTemp)!=INVALID_FILE_ATTRIBUTES,"temporary folder of this process exists before the run");
  fixture();
  GetFullPathNameW(L"ui_a.c",400,a,NULL);GetFullPathNameW(L"ui_b.c",400,b,NULL);
  swprintf(cmdline,1200,L"bcgui.exe %ls \"%ls\" \"%ls\"",mergeMode?L"merge":L"text",a,b);
+ if(fmergeMode){
+  wchar_t l[400],r[400],bs[400],o[400];fmergeFixture();
+  GetFullPathNameW(L"fm\\L",400,l,NULL);GetFullPathNameW(L"fm\\R",400,r,NULL);GetFullPathNameW(L"fm\\B",400,bs,NULL);GetFullPathNameW(L"fm\\O",400,o,NULL);
+  swprintf(cmdline,1200,L"bcgui.exe foldermerge \"%ls\" \"%ls\" \"%ls\" \"%ls\"",l,r,bs,o);
+ }
  mainTid=GetCurrentThreadId();
  CloseHandle(CreateThread(NULL,0,watchdog,NULL,0,NULL));
  HANDLE w=CreateThread(NULL,0,watcher,NULL,0,NULL);
  bc_winmain(GetModuleHandleW(NULL));
  check(WaitForSingleObject(w,5000)==WAIT_OBJECT_0,"application closed normally");
  check(boxes==0,"no message box appeared");
+ check(GetFileAttributesW(ownTemp)==INVALID_FILE_ATTRIBUTES,"temporary folder of this process is removed on exit");
  printf("%d checks, %d failures\n",checks,failed);fflush(stdout);
  ExitProcess(failed?1:0);
 }

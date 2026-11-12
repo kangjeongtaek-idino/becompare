@@ -5,6 +5,9 @@
 
 extern OpenClipboard, CloseClipboard, GetClipboardData, GlobalLock, GlobalUnlock
 extern GetTempPathW, CreateDirectoryW, GetTickCount, CreateFileW, WriteFile, CloseHandle
+extern GetCurrentProcessId, OpenProcess, WaitForSingleObject, GetLastError, memset
+extern FindFirstFileW, FindNextFileW, FindClose, SHFileOperationW
+global temp_cleanup
 extern malloc, free, wcslen, wcscat, _snwprintf, memcpy
 extern read_file_bytes, write_utf8, add_session, browse_open, msgbox, set_status
 
@@ -14,6 +17,9 @@ extern wcsncpy
 section .rdata
 WSTR s_tmpdir, "BeCompareAsm\"
 WSTR f_clip, "clipboard_%X.txt"
+WSTR f_own, "%X_x\"                  ; this process's own folder in the BeCompareAsm folder
+WSTR f_all, "%s*"
+WSTR f_join, "%s%s"
 WSTR f_pl, "patch_%X_old.txt"
 WSTR f_pr, "patch_%X_new.txt"
 WSTR s_empty, ""
@@ -23,7 +29,9 @@ WSTR s_cantwrite, "임시 파일을 만들 수 없습니다."
 
 section .text
 
-; tc_tmp(out wchar[520], format, id) : %TEMP%\BeCompareAsm\<formatted name>
+; tc_tmp(out wchar[520], format, id) : %TEMP%\BeCompareAsm\<process id>_x\<formatted name>
+; Everything this process stores under BeCompareAsm\ is in a folder that starts with its process id
+; (the folder sessions use <process id>_<session>), so temp_cleanup can remove it all on exit.
 tc_tmp:
     PROLOG 64
     mov rbx, rcx
@@ -34,8 +42,101 @@ tc_tmp:
     invoke CreateDirectoryW, rbx, 0
     invoke wcslen, rbx
     lea r12, [rbx+rax*2]
+    call GetCurrentProcessId
+    mov r13d, eax
+    invoke _snwprintf, r12, 20, &f_own, r13
+    invoke CreateDirectoryW, rbx, 0
+    invoke wcslen, rbx
+    lea r12, [rbx+rax*2]
     invoke _snwprintf, r12, 60, rsi, rdi
     EPILOG 64
+
+; temp_cleanup(): called when the application ends. Under %TEMP%\BeCompareAsm\ it removes the folders
+; named <process id>_... of this process, and those of processes that no longer exist (left behind by
+; earlier versions, a crash or a kill). Folders of a process that is still running are not touched, and
+; neither is anything whose name does not start with hexadecimal digits and an underscore.
+%define TC_DIR  96                   ; wchar[420] -> 936
+%define TC_FD   944                  ; WIN32_FIND_DATAW (592) -> 1536
+%define TC_DEL  1536                 ; wchar[700] -> 2936
+%define TC_OP   2944                 ; SHFILEOPSTRUCTW (56) -> 3000
+temp_cleanup:
+    PROLOG 3008
+    invoke GetTempPathW, 400, &rsp+TC_DIR
+    test eax, eax
+    jz .d
+    cmp eax, 400
+    jae .d
+    invoke wcscat, &rsp+TC_DIR, &s_tmpdir
+    invoke _snwprintf, &rsp+TC_DEL, 600, &f_all, &rsp+TC_DIR
+    invoke FindFirstFileW, &rsp+TC_DEL, &rsp+TC_FD
+    cmp rax, -1
+    je .d
+    mov rbx, rax
+    call GetCurrentProcessId
+    mov r13d, eax
+.e:
+    lea rsi, [rsp+TC_FD+44]          ; cFileName
+    xor edi, edi                     ; process id in the name
+    xor ecx, ecx                     ; digits read
+.h:
+    movzx eax, word [rsi+rcx*2]
+    cmp eax, '_'
+    je .hd
+    cmp eax, '0'
+    jb .next
+    cmp eax, '9'
+    jbe .dg
+    or eax, 0x20
+    cmp eax, 'a'
+    jb .next
+    cmp eax, 'f'
+    ja .next
+    sub eax, 'a'-10-'0'
+.dg:
+    sub eax, '0'
+    cmp ecx, 8
+    jae .next
+    shl edi, 4
+    or edi, eax
+    inc ecx
+    jmp .h
+.hd:
+    test ecx, ecx
+    jz .next
+    test edi, edi
+    jz .next
+    cmp edi, r13d
+    je .del
+    invoke OpenProcess, 0x00100000, 0, rdi        ; SYNCHRONIZE
+    test rax, rax
+    jnz .opened
+    call GetLastError
+    cmp eax, 87                      ; ERROR_INVALID_PARAMETER: no process has this id
+    jne .next                        ; anything else (access denied): assume it is running
+    jmp .del
+.opened:
+    mov r14, rax
+    invoke WaitForSingleObject, r14, 0
+    mov r15d, eax
+    invoke CloseHandle, r14
+    test r15d, r15d                  ; signalled = the process has ended
+    jnz .next
+.del:
+    invoke memset, &rsp+TC_DEL, 0, 1400            ; the list of paths ends with two zeros
+    invoke _snwprintf, &rsp+TC_DEL, 690, &f_join, &rsp+TC_DIR, rsi
+    invoke memset, &rsp+TC_OP, 0, 56
+    mov dword [rsp+TC_OP+8], 3       ; FO_DELETE
+    lea rax, [rsp+TC_DEL]
+    mov [rsp+TC_OP+16], rax
+    mov word [rsp+TC_OP+32], 0x0414  ; no confirmation, no progress window, no error window; not to the bin
+    invoke SHFileOperationW, &rsp+TC_OP
+.next:
+    invoke FindNextFileW, rbx, &rsp+TC_FD
+    test eax, eax
+    jnz .e
+    invoke FindClose, rbx
+.d:
+    EPILOG 3008
 
 ; clip_compare(owner): a new text session whose right side is the clipboard text
 clip_compare:

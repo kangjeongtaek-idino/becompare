@@ -1,5 +1,6 @@
 ; xlsx.inc - TB-01/TB-03 Excel workbooks: unzip (vtab/inflate), read sharedStrings + first worksheet into a SIDE grid
 
+extern wcschr, wcscmp, wcscpy, _wcsicmp, GetCurrentProcessId
 extern zip_open, zip_extract, vt_free, GetTempPathW, DeleteFileW, MultiByteToWideChar, read_file_bytes, wcsstr, wcscat, _wcsnicmp, free
 
 ; VT / VE layout of vtab.asm
@@ -30,6 +31,17 @@ WSTR xl_sheet1, "xl\worksheets\sheet1.xml"
 WSTR xl_pre, "xl\worksheets\sheet"
 WSTR xl_tmp1, "bcxl_sst.xml"
 WSTR xl_tmp2, "bcxl_sheet.xml"
+WSTR xl_tmp3, "bcxl_book.xml"
+WSTR xl_wb, "xl\workbook.xml"
+WSTR xl_wbrels, "xl\_rels\workbook.xml.rels"
+WSTR xl_dir, "xl\"
+WSTR xk_sheet, "<sheet "
+WSTR xk_rel, "<Relationship "
+WSTR xk_name, ` name="`
+WSTR xk_rid, ` r:id="`
+WSTR xk_id, ` Id="`
+WSTR xk_target, ` Target="`
+WSTR f_xl_tmp, "%X_%s"                ; temporary names carry the process id: two instances do not collide
 WSTR xn_si, "si"
 WSTR xn_t, "t"
 WSTR xn_rph, "rPh"
@@ -691,6 +703,175 @@ xl_sheet:
 .d:
     EPILOG 64
 
+; xl_attr(element text (ends at its '>'), key such as ` name="`, out, capacity in chars) -> eax 1 when found
+xl_attr:
+    PROLOG 64
+    mov rsi, rcx
+    mov rbx, rdx
+    mov rdi, r8
+    mov r12, r9
+    invoke wcsstr, rsi, rbx
+    test rax, rax
+    jz .no
+    mov rsi, rax
+    invoke wcslen, rbx
+    lea rsi, [rsi+rax*2]
+    xor ecx, ecx
+.c:
+    movzx eax, word [rsi+rcx*2]
+    test eax, eax
+    jz .no
+    cmp eax, '"'
+    je .end
+    cmp rcx, r12
+    jae .no
+    mov [rdi+rcx*2], ax
+    inc rcx
+    jmp .c
+.end:
+    mov word [rdi+rcx*2], 0
+    mov eax, 1
+    EPILOG 64
+.no:
+    xor eax, eax
+    EPILOG 64
+
+; xl_pick(VT*, selector) -> VE* of the worksheet the selector names, or 0
+;   selector: digits = position among the sheet tabs (1 = first), anything else = sheet name (case ignored).
+;   The workbook lists the sheets in tab order with a relationship id; the relationships give the part.
+%define XP_RID  96                   ; wchar[64] -> 224
+%define XP_NAME 224                  ; wchar[260] -> 744
+%define XP_PART 744                  ; wchar[220] -> 1184
+xl_pick:
+    PROLOG 1216
+    mov rbx, rcx
+    mov r12, rdx
+    xor r13d, r13d                   ; wanted position, 0 = by name
+    xor ecx, ecx
+.num:
+    movzx eax, word [r12+rcx*2]
+    test eax, eax
+    jz .numd
+    sub eax, '0'
+    cmp eax, 9
+    ja .byname0
+    imul r13d, r13d, 10
+    add r13d, eax
+    inc ecx
+    cmp ecx, 6
+    jb .num
+.byname0:
+    xor r13d, r13d
+.numd:
+    xor r14d, r14d
+    invoke xl_find, rbx, &xl_wb
+    test rax, rax
+    jz .no
+    invoke xl_read, rbx, rax, &xl_tmp3
+    test rax, rax
+    jz .no
+    mov r14, rax                     ; workbook text
+    mov rsi, r14
+    xor r15d, r15d                   ; sheets seen
+.s:
+    invoke wcsstr, rsi, &xk_sheet
+    test rax, rax
+    jz .nf
+    mov rsi, rax
+    invoke wcschr, rsi, '>'
+    test rax, rax
+    jz .nf
+    mov rdi, rax
+    mov word [rdi], 0
+    inc r15d
+    test r13d, r13d
+    jz .byname
+    cmp r15d, r13d
+    jne .snext
+    jmp .smatch
+.byname:
+    invoke xl_attr, rsi, &xk_name, &rsp+XP_NAME, 258
+    test eax, eax
+    jz .snext
+    invoke _wcsicmp, &rsp+XP_NAME, r12
+    test eax, eax
+    jnz .snext
+.smatch:
+    invoke xl_attr, rsi, &xk_rid, &rsp+XP_RID, 62
+    mov word [rdi], '>'
+    test eax, eax
+    jz .nf
+    jmp .rels
+.snext:
+    mov word [rdi], '>'
+    lea rsi, [rdi+2]
+    jmp .s
+.rels:
+    invoke free, r14
+    xor r14d, r14d
+    invoke xl_find, rbx, &xl_wbrels
+    test rax, rax
+    jz .no
+    invoke xl_read, rbx, rax, &xl_tmp3
+    test rax, rax
+    jz .no
+    mov r14, rax
+    mov rsi, r14
+.r:
+    invoke wcsstr, rsi, &xk_rel
+    test rax, rax
+    jz .nf
+    mov rsi, rax
+    invoke wcschr, rsi, '>'
+    test rax, rax
+    jz .nf
+    mov rdi, rax
+    mov word [rdi], 0
+    invoke xl_attr, rsi, &xk_id, &rsp+XP_NAME, 62
+    test eax, eax
+    jz .rnext
+    invoke wcscmp, &rsp+XP_NAME, &rsp+XP_RID
+    test eax, eax
+    jnz .rnext
+    invoke xl_attr, rsi, &xk_target, &rsp+XP_NAME, 200
+    mov word [rdi], '>'
+    test eax, eax
+    jz .nf
+    ; part name: "/xl/worksheets/x.xml" is absolute, "worksheets/x.xml" is relative to the xl folder
+    lea rsi, [rsp+XP_NAME]
+    mov word [rsp+XP_PART], 0
+    cmp word [rsi], '/'
+    jne .relp
+    add rsi, 2
+    jmp .cat
+.relp:
+    invoke wcscpy, &rsp+XP_PART, &xl_dir
+.cat:
+    invoke wcscat, &rsp+XP_PART, rsi
+    lea rax, [rsp+XP_PART]
+.sl:
+    cmp word [rax], 0
+    je .sld
+    cmp word [rax], '/'
+    jne .sln
+    mov word [rax], 0x5C
+.sln:
+    add rax, 2
+    jmp .sl
+.sld:
+    invoke free, r14
+    invoke xl_find, rbx, &rsp+XP_PART
+    EPILOG 1216
+.rnext:
+    mov word [rdi], '>'
+    lea rsi, [rdi+2]
+    jmp .r
+.nf:
+    invoke free, r14
+.no:
+    xor eax, eax
+    EPILOG 1216
+
 ; xl_read(VT*, VE*, tmp name) -> malloc'd UTF-16 text or 0
 xl_read:
     PROLOG 1216
@@ -698,7 +879,11 @@ xl_read:
     mov rsi, rdx
     mov r12, r8
     invoke GetTempPathW, 520, &rsp+96
-    invoke wcscat, &rsp+96, r12
+    invoke wcslen, &rsp+96
+    lea r13, [rsp+96+rax*2]
+    call GetCurrentProcessId
+    mov r14d, eax
+    invoke _snwprintf, r13, 60, &f_xl_tmp, r14, r12
     invoke zip_extract, rbx, rsi, &rsp+96
     test eax, eax
     jz .no
@@ -742,16 +927,27 @@ xl_read:
     xor eax, eax
     EPILOG 1216
 
-; xlsx_load(path, SIDE*) -> eax 1 ok
+; xlsx_load(path, SIDE*, sheet selector or 0) -> eax 1 ok
+;   without a selector the first worksheet part is read (sheet1.xml), as before
 xlsx_load:
     PROLOG 192
     mov r12, rcx
     mov r13, rdx
+    mov [rsp+144], r8
     invoke memset, &rsp+96, 0, XV_STRUCT
     invoke zip_open, r12, &rsp+96
     test eax, eax
     jz .fail
+    mov rax, [rsp+144]
+    test rax, rax
+    jz .first
+    cmp word [rax], 0
+    je .first
+    invoke xl_pick, &rsp+96, rax
+    jmp .picked
+.first:
     invoke xl_sheet, &rsp+96
+.picked:
     test rax, rax
     jz .closefail
     mov rsi, rax

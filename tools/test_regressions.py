@@ -54,15 +54,23 @@ for name in ["test_safe_save","test_view_state"]:
 for d in ["left","right","emptyA","emptyB","dirLeft/only-left","dirRight","local-app-data","detail_files/0.html","syncLeft","syncRight"]:
     (fixtures/d).mkdir(parents=True,exist_ok=True)
 (fixtures/"ui/local-app-data").mkdir(parents=True)
-r=run([OUT/"test_ui.exe"],fixtures/"ui",timeout=90,env=dict(os.environ,LOCALAPPDATA=str(fixtures/"ui/local-app-data")))
-(fixtures/"test_ui.log").write_text(r.stdout,encoding="utf-8")
-ui_checks=int(re.search(r"(\d+) checks, 0 failures",r.stdout).group(1))
-r=run([OUT/"test_ui.exe","merge"],fixtures/"ui",timeout=90,env=dict(os.environ,LOCALAPPDATA=str(fixtures/"ui/local-app-data")))
-(fixtures/"test_ui_merge.log").write_text(r.stdout,encoding="utf-8")
-ui_checks+=int(re.search(r"(\d+) checks, 0 failures",r.stdout).group(1))
+# every run gets its own temporary folder too: the application cleans %TEMP%\\BeCompareAsm when it ends
+tmp=fixtures/"tmp"; tmp.mkdir()
+ui_env=dict(os.environ,LOCALAPPDATA=str(fixtures/"ui/local-app-data"),TEMP=str(tmp),TMP=str(tmp))
+ui_checks=0
+for mode in ["text","merge","fmerge"]:
+    r=run([OUT/"test_ui.exe",mode],fixtures/"ui",timeout=90,env=ui_env)
+    (fixtures/("test_ui_"+mode+".log")).write_text(r.stdout,encoding="utf-8")
+    ui_checks+=int(re.search(r"(\d+) checks, 0 failures",r.stdout).group(1))
 (fixtures/"left/file.txt").write_text("left",encoding="utf-8")
 (fixtures/"right/file.txt").write_text("different",encoding="utf-8")
-env=dict(os.environ,LOCALAPPDATA=str(fixtures/"local-app-data"))
+env=dict(os.environ,LOCALAPPDATA=str(fixtures/"local-app-data"),TEMP=str(tmp),TMP=str(tmp))
+# leftovers under %TEMP%\\BeCompareAsm: of a process that is gone (removed by the next run that ends),
+# of a process that is running (this script: kept), and files that are not process folders (kept)
+bct=tmp/"BeCompareAsm"
+gone=bct/"FFFFFFF0_1A2B"/"A"/"sub"; gone.mkdir(parents=True); (gone/"x.txt").write_text("stale")
+alive=bct/f"{os.getpid():X}_1A2B"/"B"; alive.mkdir(parents=True); (alive/"y.txt").write_text("in use")
+(bct/"clipboard_12AB.txt").write_text("old layout"); (bct/"notes").mkdir()
 def cli(name,args,expected):
     r=run([OUT/"bcgui.exe",*args],fixtures,timeout=10,expected=expected,env=env)
     LOG.append(dict(name=name,exit=r.returncode,pass_=True))
@@ -77,6 +85,24 @@ for name,left,right,output,expected in [
 ]:
     cli(name,["folder",str(fixtures/left),str(fixtures/right),"/report",str(fixtures/output)],expected)
 assert not (fixtures/"absent/out.html").exists()
+assert not (bct/"FFFFFFF0_1A2B").exists(), "temporary folder of a process that is gone was not removed"
+assert (alive/"y.txt").exists() and (bct/"clipboard_12AB.txt").exists() and (bct/"notes").exists()
+print("PASS temporary folders: stale removed, running process and other names kept")
+# a folder that cannot be listed makes the scan incomplete: no synchronisation, exit code 2
+lk=fixtures/"locked"
+for d in ["A/ok","A/shut","B/ok","B/shut"]: (lk/d).mkdir(parents=True)
+for side in "AB":
+    (lk/side/"ok/f.txt").write_text("x"); (lk/side/"shut/g.txt").write_text("y")
+(lk/"B/only.txt").write_text("extra")
+subprocess.run(["icacls",str(lk/"A/shut"),"/deny","*S-1-1-0:(OI)(CI)(RX)"],capture_output=True,check=True)
+try:
+    try:
+        os.listdir(lk/"A/shut"); print("SKIP unreadable folder: this account can list it anyway")
+    except PermissionError:
+        cli("mirror with an unreadable folder",["folder",str(lk/"A"),str(lk/"B"),"/sync","mirror"],2)
+        assert (lk/"B/only.txt").exists() and (lk/"B/shut/g.txt").exists(), "an incomplete scan must not delete anything"
+finally:
+    subprocess.run(["icacls",str(lk/"A/shut"),"/remove:d","*S-1-1-0"],capture_output=True)
 assert "only-left" in (fixtures/"dirs.html").read_text(encoding="utf-8-sig")
 cli("snapshot output failure",["folder",str(fixtures/"emptyA"),str(fixtures/"emptyB"),"/snapshot",str(fixtures/"absent/snapshot.bcss")],2)
 (fixtures/"syncLeft/new.txt").write_text("sync fixture",encoding="utf-8")
@@ -107,6 +133,30 @@ def bmp(path,v):  # 2x2 24-bit bitmap whose last pixel is (v,v,v)
 def many(n,word): return "\r\n".join(f"value {i} = compute({i}, {word if i%10==0 else 'base'}); // row {i}" for i in range(n)).encode()+b"\r\n"
 for n in (8000,20000):
     (ex/f"many{n}a.txt").write_bytes(many(n,"left")); (ex/f"many{n}b.txt").write_bytes(many(n,"right"))
+# workbooks with two sheets; the tab order (Summary, Data) is the reverse of the part numbers
+def book(path,summary,data):
+    def sheet(rows,strings):
+        out=[]
+        for r,row in enumerate(rows,1):
+            cells=[]
+            for c,v in enumerate(row):
+                ref=chr(65+c)+str(r)
+                if isinstance(v,int): cells.append(f'<c r="{ref}"><v>{v}</v></c>')
+                else:
+                    if v not in strings: strings.append(v)
+                    cells.append(f'<c r="{ref}" t="s"><v>{strings.index(v)}</v></c>')
+            out.append(f'<row r="{r}">{"".join(cells)}</row>')
+        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+"".join(out)+'</sheetData></worksheet>'
+    strings=[]; s1=sheet(data,strings); s2=sheet(summary,strings)
+    ns='xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+    with zipfile.ZipFile(path,"w",zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml",'<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+        z.writestr("xl/workbook.xml",f'<?xml version="1.0" encoding="UTF-8"?><workbook {ns}><bookViews><workbookView/></bookViews><sheets><sheet name="요약 Summary" sheetId="2" r:id="rId7"/><sheet name="Data" sheetId="1" r:id="rId3"/></sheets></workbook>')
+        z.writestr("xl/_rels/workbook.xml.rels",'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Target="/xl/worksheets/sheet2.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Id="rId7"/></Relationships>')
+        z.writestr("xl/sharedStrings.xml",'<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+"".join(f"<si><t>{t}</t></si>" for t in strings)+"</sst>")
+        z.writestr("xl/worksheets/sheet1.xml",s1); z.writestr("xl/worksheets/sheet2.xml",s2)
+book(ex/"book1.xlsx",[["항목","합계"],["전체",60]],[["id","name"],[1,"apple"],[2,"banana"]])
+book(ex/"book2.xlsx",[["항목","합계"],["전체",60]],[["id","name"],[1,"apple"],[2,"cherry"]])
 bmp(ex/"p1.bmp",100); bmp(ex/"p1same.bmp",100); bmp(ex/"p2.bmp",200)
 for d,t in [("fa","left"),("fb","right"),("fc","base"),("fsame1","same"),("fsame2","same")]:
     (ex/d).mkdir(); (ex/d/"x.txt").write_text(t,encoding="utf-8")
@@ -129,6 +179,14 @@ for name,args,expected in [
     # /exit alone: the first run ends the app with the same exit codes
     ("exit text different",["text","a.txt","b.txt","/exit"],1),
     ("exit text same",["text","a.txt","same.txt","/exit"],0),
+    # a sheet of a workbook: by name, by position among the tabs, and none (the first worksheet part)
+    ("xlsx sheet by name, same",["table","book1.xlsx#요약 Summary","book2.xlsx#요약 Summary","/exit"],0),
+    ("xlsx sheet by name, different",["table","book1.xlsx#data","book2.xlsx#Data","/exit"],1),
+    ("xlsx sheet by position 1",["table","book1.xlsx#1","book2.xlsx#1","/exit"],0),
+    ("xlsx sheet by position 2",["table","book1.xlsx#2","book2.xlsx#2","/exit"],1),
+    ("xlsx without a sheet",["table","book1.xlsx","book2.xlsx","/exit"],1),
+    ("xlsx sheet that does not exist",["table","book1.xlsx#없음","book2.xlsx#없음","/exit"],2),
+    ("xlsx sheet position past the end",["table","book1.xlsx#3","book2.xlsx#3","/exit"],2),
     ("exit text with 800 changed rows",["text","many8000a.txt","many8000b.txt","/exit"],1),
     ("xlsx text with 2,000 changed rows",["text","many20000a.txt","many20000b.txt","/xlsx","many.xlsx"],1),
     ("exit text missing input",["text","nope1.txt","nope2.txt","/exit"],2),
@@ -169,4 +227,4 @@ assert not any((ex/f).exists() for f in ["w1.xlsx","w2.docx","w3.xlsx","w4.xlsx"
 assert not any((ex/f).exists() for f in ["e4.docx","e7.docx"])
 print("PASS export file contents")
 (fixtures/"cli-results.json").write_text(json.dumps(LOG,indent=2),encoding="utf-8")
-print("All regression checks passed: 44 save + 19 state/worker +",ui_checks,"UI +",len(LOG),"CLI cases")
+print("All regression checks passed: 44 save + 19 state/worker +",ui_checks,"UI +",len(LOG),"CLI cases + 1 temporary-folder check")

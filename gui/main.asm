@@ -33,6 +33,7 @@ extern merge_register, merge_create
 extern props_register, props_create, edit_create
 extern fmerge_register, fmerge_create
 extern script_check, shell_early, shell_pending, shell_install
+extern temp_cleanup
 extern settings_show, policy_load, keys_load, g_keytab, update_check, update_start, clip_compare, patch_open, patch_cmd
 
 global WinMain
@@ -305,6 +306,7 @@ WinMain:
     invoke DispatchMessageW, rbx
     jmp .loop
 .exit:
+    call temp_cleanup                ; extracted ZIP / FTP files, clipboard and patch texts
     mov rax, [g_exitcode]
     EPILOG 256
 
