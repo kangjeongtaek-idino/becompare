@@ -16,7 +16,7 @@ extern mk, reg_class, scl, set_status, msgbox
 extern mk_btn, mk_chk, mk_lbl, mk_edit, get_chk, ctl_color, theme_checks, lv_dark_header
 extern pb_create, pb_layout, pb_load, pb_collect, pb_command
 extern set_tab_title, str_dup, fmt_size, vec_push, read_file_bytes, crc32_update, browse_folder
-extern sb_free, PostMessageW, g_batch, g_dx_path, g_exitcode, g_hframe
+extern sb_free, PostMessageW, g_batch, g_dx_path, g_exitcode, g_hframe, batch_done
 extern sess_new, sess_open
 extern icon_set, g_usel, g_user, g_base, g_del, g_edit, g_run
 
@@ -1364,17 +1364,33 @@ fm_proc:
     jmp .zero
 .run:
     invoke fm_compare, rsi, r15, r14
-    test qword [g_batch], 0x20        ; /docx file: export the first compare and close
+    test qword [g_batch], 4           ; unattended: the first compare ends the run
     jz .zero
+    cmp qword [g_exitcode], 2         ; a folder could not be read: no report of an empty compare
+    je .bdx_ok
+    test qword [g_batch], 0x20        ; /docx file: export it first
+    jz .bdx_ok
     and qword [g_batch], ~0x20
     invoke fm_docx_path, rsi, r15, &g_dx_path
     test eax, eax
     jnz .bdx_ok
     mov qword [g_exitcode], 2
 .bdx_ok:
-    test qword [g_batch], 4
-    jz .zero
-    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+    xor eax, eax                      ; exit code: 0 no conflict, 1 conflicts left, 2 error
+    mov rcx, [r15+FM_ENT+8]
+    mov rdx, [r15+FM_ENT]
+.bdx_c:
+    test rcx, rcx
+    jz .bdx_d
+    cmp dword [rdx+FE_ACT], ACT_CONF
+    jne .bdx_n
+    mov eax, 1
+.bdx_n:
+    add rdx, 64
+    dec rcx
+    jmp .bdx_c
+.bdx_d:
+    invoke batch_done, rax
     jmp .zero
 .doc:
     invoke fm_export, rsi, r15

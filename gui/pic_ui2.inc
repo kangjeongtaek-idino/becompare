@@ -353,26 +353,20 @@ pv_proc:
     jmp .zero
 .run:
     invoke pv_compare, rsi, r15, r14
-    test qword [g_batch], 0x20        ; /docx file: export the first compare and close
+    test qword [g_batch], 4           ; unattended: the first compare ends the run
     jz .zero
-    and qword [g_batch], ~0x20
-    cmp qword [r15+PX_LOADED], 0
+    cmp qword [r15+PX_LOADED], 0      ; nothing was compared: an error whatever was asked for
     je .bdx_fail
+    test qword [g_batch], 0x20        ; /docx file: export it first
+    jz .bdx_ok
+    and qword [g_batch], ~0x20
     invoke px_docx_path, rsi, r15, &g_dx_path
     test eax, eax
     jnz .bdx_ok
 .bdx_fail:
     mov qword [g_exitcode], 2
 .bdx_ok:
-    cmp qword [r15+PX_NDIFF], 0       ; exit code like /report: 0 same, 1 different, 2 error
-    je .bdx_q
-    cmp qword [g_exitcode], 2
-    je .bdx_q
-    mov qword [g_exitcode], 1
-.bdx_q:
-    test qword [g_batch], 4
-    jz .zero
-    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+    invoke batch_done, [r15+PX_NDIFF] ; exit code like /report: 0 same, 1 different, 2 error
     jmp .zero
 .doc:
     invoke px_export, rsi, r15

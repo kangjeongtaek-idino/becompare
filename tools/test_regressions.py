@@ -89,6 +89,12 @@ ex=fixtures/"export"; ex.mkdir()
 # cell references get longer from row 100,000 on (the cell start used to be cut there)
 (ex/"bigA.txt").write_bytes("".join(f"line {i}\r\n" for i in range(1,100011)).encode())
 (ex/"bigB.txt").write_bytes("".join((f"LINE {i} changed\r\n" if i%50000==0 else f"line {i}\r\n") for i in range(1,100011)).encode())
+def bmp(path,v):  # 2x2 24-bit bitmap whose last pixel is (v,v,v)
+    head=bytes([0x42,0x4D,70,0,0,0,0,0,0,0,54,0,0,0,40,0,0,0,2,0,0,0,2,0,0,0,1,0,24,0,0,0,0,0,16,0,0,0,0x13,0x0B,0,0,0x13,0x0B,0,0,0,0,0,0,0,0,0,0])
+    path.write_bytes(head+bytes([10,20,30,40,50,60,0,0,70,80,90,v,v,v,0,0]))
+bmp(ex/"p1.bmp",100); bmp(ex/"p1same.bmp",100); bmp(ex/"p2.bmp",200)
+for d,t in [("fa","left"),("fb","right"),("fc","base"),("fsame1","same"),("fsame2","same")]:
+    (ex/d).mkdir(); (ex/d/"x.txt").write_text(t,encoding="utf-8")
 for name,args,expected in [
     ("xlsx text same",["text","a.txt","same.txt","/xlsx","t0.xlsx"],0),
     ("xlsx text different",["text","a.txt","b.txt","/xlsx","t1.xlsx"],1),
@@ -98,7 +104,26 @@ for name,args,expected in [
     ("xlsx hex different",["hex","a.bin","b.bin","/xlsx","h1.xlsx"],1),
     ("xlsx characters XML cannot hold",["text","odd.txt","a.txt","/xlsx","odd.xlsx"],1),
     ("xlsx beyond row 100,000",["text","bigA.txt","bigB.txt","/xlsx","big.xlsx"],1),
-    ("docx merge",["merge","a.txt","b.txt","/docx","m.docx"],0),
+    ("docx merge with conflicts",["merge","a.txt","b.txt","/docx","m.docx"],1),
+    ("docx merge without conflicts",["merge","a.txt","same.txt","/docx","m0.docx"],0),
+    ("docx picture same",["picture","p1.bmp","p1same.bmp","/docx","p0.docx"],0),
+    ("docx picture different",["picture","p1.bmp","p2.bmp","/docx","p1.docx"],1),
+    ("docx folder merge with a conflict",["foldermerge","fa","fb","fc","/docx","f1.docx"],1),
+    ("docx folder merge without conflicts",["foldermerge","fsame1","fsame2","/docx","f0.docx"],0),
+    ("docx missing folder merge input",["foldermerge","nodir1","nodir2","/docx","e7.docx"],2),
+    # /exit alone: the first run ends the app with the same exit codes
+    ("exit text different",["text","a.txt","b.txt","/exit"],1),
+    ("exit text same",["text","a.txt","same.txt","/exit"],0),
+    ("exit text missing input",["text","nope1.txt","nope2.txt","/exit"],2),
+    ("exit with nothing to run",["text","a.txt","/exit"],0),
+    ("exit editor",["edit","a.txt","/exit"],0),
+    ("exit merge leaves no save prompt",["merge","a.txt","b.txt","/exit"],1),
+    ("exit picture different",["picture","p1.bmp","p2.bmp","/exit"],1),
+    ("exit folder different",["folder","fa","fb","/exit"],1),
+    ("exit folder same",["folder","fsame1","fsame2","/exit"],0),
+    # a job that cannot start must not leave a window behind
+    ("switch without a session",["/xlsx","w5.xlsx"],2),
+    ("report without both folders",["folder","fa","/report","w6.html"],2),
     ("xlsx output failure",["text","a.txt","b.txt","/xlsx","absent/o.xlsx"],2),
     ("xlsx missing text input",["text","nope1.txt","nope2.txt","/xlsx","e1.xlsx"],2),
     ("xlsx missing table input",["table","nope1.csv","nope2.csv","/xlsx","e2.xlsx"],2),
@@ -118,7 +143,9 @@ big=part(ex/"big.xlsx","xl/worksheets/sheet1.xml")
 assert big.count("<row ")==100011
 row=re.search(r'<row r="100001">.*?</row>',big).group(0)
 assert re.findall(r'<t xml:space="preserve">(.*?)</t>',row)==["변경","line 100000","LINE 100000 changed"], row
-assert not any((ex/f).exists() for f in ["w1.xlsx","w2.docx","w3.xlsx","w4.xlsx"])
+assert not any((ex/f).exists() for f in ["w1.xlsx","w2.docx","w3.xlsx","w4.xlsx","w5.xlsx","w6.html"])
+# a compare that could not read its inputs leaves no report of an empty result
+assert not any((ex/f).exists() for f in ["e4.docx","e7.docx"])
 print("PASS export file contents")
 (fixtures/"cli-results.json").write_text(json.dumps(LOG,indent=2),encoding="utf-8")
 print("All regression checks passed: 30 save + 19 state/worker +",len(LOG),"CLI cases")

@@ -38,6 +38,7 @@ extern settings_show, policy_load, keys_load, g_keytab, update_check, update_sta
 global WinMain
 global add_session, sess_new, sess_open, set_tab_title, type_for_path, cur_view
 global tab_titles
+global batch_done
 global g_sess, g_nsess, ini_prepare, apply_theme_all, type_names, open_any_file, g_batch, g_rep_path, g_exitcode, g_save_path, g_savews_path, g_snap_path, g_xl_path, g_dx_path
 
 section .rdata
@@ -1523,6 +1524,22 @@ parse_switches:
 .d:
     EPILOG 64
 
+; batch_done(rcx = nonzero when the compare found differences): end of a session's first run.
+; In an unattended run this sets the exit code (0 same, 1 different; an error's 2 stays) and closes the app.
+batch_done:
+    PROLOG 32
+    test qword [g_batch], 4
+    jz .d
+    test rcx, rcx
+    jz .post
+    cmp qword [g_exitcode], 2
+    je .post
+    mov qword [g_exitcode], 1
+.post:
+    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+.d:
+    EPILOG 32
+
 ; save_requested(sess): /save file writes the session, /savews file the whole workspace
 save_requested:
     PROLOG 64
@@ -1584,9 +1601,9 @@ parse_cmdline:
 .bytype:
     invoke type_from_name, rsi
     cmp eax, -1
-    je .free
+    je .nosess
     cmp eax, T_HOME
-    je .free
+    je .nosess
     mov r14d, eax
     xor edx, edx
     xor r8d, r8d
@@ -1615,13 +1632,23 @@ parse_cmdline:
     ; /xlsx and /docx are served by the session's first compare. Without both inputs, or on a session type
     ; that has no such export, nothing would ever consume the switch and the minimized window would stay
     ; open for good: end with exit code 2 instead.
+    ; The same goes for any unattended job (/report, /sync, /snapshot) on a session that will not run by
+    ; itself because an input is missing. With /exit alone there is no job: open, then close.
+    xor edi, edi                      ; 1 = nothing will run, close after opening
     mov rax, [g_batch]
-    test eax, 0x30
+    test eax, 4
     jz .openok
     cmp word [r15+SS_PATHA], 0
-    je .badsw
+    je .norun
+    cmp r14d, T_EDIT
+    je .norun
     cmp word [r15+SS_PATHB], 0
-    je .badsw
+    jne .ckxlsx
+.norun:
+    mov edi, 1
+    test eax, 0x3B                    ; report, sync, snapshot, xlsx, docx
+    jnz .badsw
+.ckxlsx:
     test eax, 0x10
     jz .ckdocx
     cmp r14d, T_TEXT
@@ -1652,6 +1679,18 @@ parse_cmdline:
 .openok:
     invoke sess_open, r15
     invoke save_requested, r15
+    test edi, edi
+    jz .free
+    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+    jmp .free
+.nosess:
+    ; switches without a session to run them on (for example "/xlsx out.xlsx" alone): an unattended
+    ; run has nothing to do, so do not leave a window behind
+    invoke parse_switches, rbx, 1, r13
+    test qword [g_batch], 4
+    jz .free
+    mov qword [g_exitcode], 2
+    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
     jmp .free
 .file:
     invoke parse_switches, rbx, r12, r13

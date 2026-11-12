@@ -17,7 +17,7 @@ extern mk, reg_class, scl, set_status, msgbox
 extern mk_btn, mk_chk, mk_lbl, get_chk, ctl_color, theme_checks, lv_dark_header
 extern pb_create, pb_layout, pb_load, pb_collect, pb_command
 extern set_tab_title, str_dup, fmt_size, fmt_time, crc32_update
-extern sb_free, PostMessageW, g_batch, g_dx_path, g_exitcode, g_hframe
+extern sb_free, PostMessageW, g_batch, g_dx_path, g_exitcode, g_hframe, batch_done
 extern GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW
 
 global props_register, props_create
@@ -365,17 +365,28 @@ pp_compare:
     invoke pp_tail, r14
     invoke _snwprintf, &rsp+2200, 50, &f_title, r15, rax
     invoke set_tab_title, r12, &rsp+2200
-    test qword [g_batch], 0x20        ; /docx file: export the first compare and close
+    test qword [g_batch], 4           ; unattended: the first compare ends the run
     jz .okb
+    test qword [g_batch], 0x20        ; /docx file: export it first
+    jz .okx
     and qword [g_batch], ~0x20
     invoke pp_docx_path, rsi, rbx, r12, &g_dx_path
     test eax, eax
     jnz .okx
     mov qword [g_exitcode], 2
 .okx:
-    test qword [g_batch], 4
-    jz .okb
-    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+    xor eax, eax                      ; exit code like /report: 0 same, 1 different, 2 error
+    mov rcx, [rbx+P_N]
+    mov rdx, [rbx+P_ROWS]
+.okc:
+    test rcx, rcx
+    jz .okd
+    or eax, [rdx+R_ST]
+    add rdx, 32
+    dec rcx
+    jmp .okc
+.okd:
+    invoke batch_done, rax
 .okb:
     EPILOG 2304
 .nopath:

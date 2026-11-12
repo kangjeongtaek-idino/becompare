@@ -509,23 +509,17 @@ hx_compare:
 .tb:
     invoke _snwprintf, &rsp+96, 60, &f_title, r13, r14
     invoke set_tab_title, r12, &rsp+96
-    test qword [g_batch], 0x10        ; /xlsx file: export the first compare and close
+    test qword [g_batch], 4           ; unattended: the first compare ends the run
     jz .okb
+    test qword [g_batch], 0x10        ; /xlsx file: export it first
+    jz .okx
     and qword [g_batch], ~0x10
     invoke hx_xlsx_path, rbx, &g_xl_path
     test eax, eax
     jnz .okx
     mov qword [g_exitcode], 2
 .okx:
-    cmp qword [rbx+HX_NDIFF], 0       ; exit code like /report: 0 same, 1 different, 2 error
-    je .okq
-    cmp qword [g_exitcode], 2
-    je .okq
-    mov qword [g_exitcode], 1
-.okq:
-    test qword [g_batch], 4
-    jz .okb
-    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+    invoke batch_done, [rbx+HX_NDIFF] ; exit code like /report: 0 same, 1 different, 2 error
 .okb:
     EPILOG 256
 .err:

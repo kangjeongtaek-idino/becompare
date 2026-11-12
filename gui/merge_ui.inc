@@ -635,18 +635,26 @@ mg_proc:
     mov dword [rax+2880], 0           ; TV_NANC
     invoke mg_merge, rsi, r15, r14
     invoke mg_layout, rsi, r15
-    test qword [g_batch], 0x20        ; /docx file: export the first merge and close
+    test qword [g_batch], 4           ; unattended: the first merge ends the run
     jz .zero
+    cmp qword [g_exitcode], 2         ; an input could not be read: no report of an empty merge
+    je .bdx_end
+    test qword [g_batch], 0x20        ; /docx file: export it first
+    jz .bdx_ok
     and qword [g_batch], ~0x20
     invoke mg_docx_path, rsi, r15, r14, &g_dx_path
     test eax, eax
     jnz .bdx_ok
     mov qword [g_exitcode], 2
+    jmp .bdx_end
 .bdx_ok:
-    test qword [g_batch], 4
-    jz .zero
-    invoke SendMessageW, [r15+MG_HM], EM_SETMODIFY, 0, 0   ; unattended: do not ask to save the merge output
-    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+    invoke SendMessageW, [r15+MG_HM], EM_SETMODIFY, 0, 0   ; do not ask to save the merge output
+    invoke mg_scan, r15
+    invoke batch_done, [r15+MG_CONF+8]                     ; exit code: 0 merged cleanly, 1 conflicts left, 2 error
+    jmp .zero
+.bdx_end:
+    invoke SendMessageW, [r15+MG_HM], EM_SETMODIFY, 0, 0
+    invoke batch_done, 0
     jmp .zero
 .collect:
     invoke pb_collect, rsi, r14

@@ -10,7 +10,7 @@ extern InvalidateRect, SetWindowTheme, GetDC, ReleaseDC, SelectObject, GetTextMe
 extern BeginPaint, EndPaint, TextOutW, SetBkColor, SetTextColor, SetBkMode, SetScrollInfo, GetScrollInfo
 extern GetSysColor, GetKeyState, SetCapture
 extern safe_write2
-extern sb_free, PostMessageW, g_batch, g_xl_path, g_exitcode, g_hframe
+extern sb_free, PostMessageW, g_batch, g_xl_path, g_exitcode, g_hframe, batch_done
 extern CreateFileW, WriteFile, CloseHandle
 extern malloc, calloc, realloc, free, memset, memcpy, wcslen, wcsrchr, _snwprintf
 extern g_hinst, g_mono, th_bg, th_fg, th_panel, th_diff, th_lonly, th_ronly, th_same, th_panelbrush, th_bgbrush

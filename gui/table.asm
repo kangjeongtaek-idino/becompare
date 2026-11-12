@@ -12,7 +12,7 @@ extern g_hinst, g_dark, th_bg, th_fg, th_panel, th_diff, th_lonly, th_ronly, th_
 extern mk, reg_class, scl, set_status, msgbox
 extern lv_dark_header, mk_btn, mk_chk, mk_lbl, mk_edit, get_chk, ctl_color, theme_checks
 extern pb_create, pb_layout, pb_load, pb_collect, pb_command
-extern sb_init, sb_append, sb_free, PostMessageW, g_batch, g_xl_path, g_exitcode, g_hframe
+extern sb_init, sb_append, sb_free, PostMessageW, g_batch, g_xl_path, g_exitcode, g_hframe, batch_done
 extern text_load, vec_push, lower_w, set_tab_title, malloc
 
 global table_register, table_create
@@ -1304,8 +1304,10 @@ tb_compare:
 .tb:
     invoke _snwprintf, &rsp+96, 60, &f_title, r13, r14
     invoke set_tab_title, r12, &rsp+96
-    test qword [g_batch], 0x10        ; /xlsx file: export the first compare and close
+    test qword [g_batch], 4           ; unattended: the first compare ends the run
     jz .okb
+    test qword [g_batch], 0x10        ; /xlsx file: export it first
+    jz .okx
     and qword [g_batch], ~0x10
     invoke tb_xlsx_path, rbx, &g_xl_path
     test eax, eax
@@ -1315,14 +1317,7 @@ tb_compare:
     mov rax, [rbx+TB_CNT]             ; exit code like /report: 0 same, 1 different, 2 error
     or rax, [rbx+TB_CNT+16]
     or rax, [rbx+TB_CNT+24]
-    jz .okq
-    cmp qword [g_exitcode], 2
-    je .okq
-    mov qword [g_exitcode], 1
-.okq:
-    test qword [g_batch], 4
-    jz .okb
-    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+    invoke batch_done, rax
 .okb:
     EPILOG 256
 .err:

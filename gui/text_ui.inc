@@ -583,23 +583,17 @@ text_compare:
     je .ok
     invoke tv_goto, rsi, rbx, 0
 .ok:
-    test qword [g_batch], 0x10        ; /xlsx file: export the first compare and close
+    test qword [g_batch], 4           ; unattended: the first compare ends the run
     jz .ok2
+    test qword [g_batch], 0x10        ; /xlsx file: export it first
+    jz .okx
     and qword [g_batch], ~0x10
     invoke text_xlsx_path, rbx, &g_xl_path
     test eax, eax
     jnz .okx
     mov qword [g_exitcode], 2
 .okx:
-    cmp qword [rbx+TV_NBLK], 0        ; exit code like /report: 0 same, 1 different, 2 error
-    je .okq
-    cmp qword [g_exitcode], 2
-    je .okq
-    mov qword [g_exitcode], 1
-.okq:
-    test qword [g_batch], 4
-    jz .ok2
-    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+    invoke batch_done, [rbx+TV_NBLK]  ; exit code like /report: 0 same, 1 different, 2 error
 .ok2:
     mov eax, 1
     EPILOG 448

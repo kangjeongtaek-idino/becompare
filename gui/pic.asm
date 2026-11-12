@@ -4,7 +4,7 @@
 %include "inc/app.inc"
 %include "inc/export.inc"
 
-extern sb_free, PostMessageW, wcscpy, g_batch, g_dx_path, g_exitcode, g_hframe
+extern sb_free, PostMessageW, wcscpy, g_batch, g_dx_path, g_exitcode, g_hframe, batch_done
 extern icon_set, g_rot, g_flh, g_flv, g_zout, g_zin, g_fit
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetWindowTextW, SetWindowTextW

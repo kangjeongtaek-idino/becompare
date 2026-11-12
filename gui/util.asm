@@ -154,14 +154,26 @@ set_status_part:
 ; msgbox(hwnd, text, flags) -> id
 ; In an unattended run (/report, /sync, /xlsx, /docx, /snapshot, /exit) nobody can dismiss a notice, and the
 ; minimized window would wait forever. A plain OK box there means the job cannot go on: record the error
-; (exit code 2) and close instead. Boxes that ask a question are still shown.
+; (exit code 2) and close instead. A question gets the answer that writes nothing: No, or Cancel when there
+; is no No (for the "save changes?" prompt on close that means the window closes without saving).
 msgbox:
     PROLOG 64
     mov rbx, r8
     test qword [g_batch], 4
     jz .show
-    test ebx, 0x0F
-    jnz .show
+    mov eax, ebx
+    and eax, 0x0F
+    jz .notice
+    cmp eax, 3                        ; MB_YESNOCANCEL
+    je .no
+    cmp eax, MB_YESNO
+    je .no
+    mov eax, 2                        ; IDCANCEL
+    EPILOG 64
+.no:
+    mov eax, 7                        ; IDNO
+    EPILOG 64
+.notice:
     mov qword [g_exitcode], 2
     cmp qword [g_hframe], 0
     je .quiet

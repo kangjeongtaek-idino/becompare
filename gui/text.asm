@@ -6,7 +6,7 @@
 %include "inc/export.inc"
 
 extern PostMessageW
-extern g_batch, g_xl_path, g_exitcode, g_hframe
+extern g_batch, g_xl_path, g_exitcode, g_hframe, batch_done
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetFocus, GetWindowTextW, SetWindowTextW
 extern InvalidateRect, SetWindowTheme
