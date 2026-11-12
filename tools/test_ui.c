@@ -1,6 +1,7 @@
 /* UI behaviour test: the whole application runs in this process with its real windows and RichEdit
    controls (kept hidden), and a second thread inspects what a user would see:
    row colours, word level highlight, F7 / Shift+F7 navigation, the light and dark palettes.
+   "test_ui merge" opens the same two files as a merge session and checks the colours of its panes.
    WinMain of main.asm is linked as bc_winmain. Set BC_UITEST_SHOW=1 to watch the window. */
 #include <windows.h>
 #include <richedit.h>
@@ -11,16 +12,21 @@
 #include <wchar.h>
 extern int bc_winmain(HINSTANCE);
 extern uint64_t g_dark;
+extern uint32_t th_lonly, th_ronly, th_conf;
 
 #define ID_RA 201
 #define ID_RB 202
 #define ID_BTN_PREV 241
 #define ID_BTN_NEXT 242
 #define ID_LBL_INFO 250
+#define ID_CHK_SYN 215
+#define ID_RL 601
+#define ID_RR 603
+#define ID_RM 610
 #define IDM_LIGHT 1030
 #define IDM_DARK 1031
 
-static int checks, failed, shiftDown, boxes;
+static int checks, failed, shiftDown, boxes, mergeMode;
 static DWORD mainTid;
 static HWND frame, ra, rb, view;
 static wchar_t cmdline[1200];
@@ -74,6 +80,13 @@ static void row(HWND h,int r,const wchar_t*text,const char*pat,const char*name){
  }
  check(1,name);
 }
+/* text colour of one character */
+static COLORREF fore(HWND h,int row,int col){
+ LONG base=(LONG)SendMessageW(h,EM_LINEINDEX,row,0);
+ CHARRANGE r={base+col,base+col+1};SendMessageW(h,EM_EXSETSEL,0,(LPARAM)&r);
+ CHARFORMAT2W f;memset(&f,0,sizeof f);f.cbSize=sizeof f;SendMessageW(h,EM_GETCHARFORMAT,SCF_SELECTION,(LPARAM)&f);
+ return (f.dwEffects&CFE_AUTOCOLOR)?0xFF000000:f.crTextColor;
+}
 static int caretRow(HWND h){CHARRANGE r;SendMessageW(h,EM_EXGETSEL,0,(LPARAM)&r);return (int)SendMessageW(h,EM_LINEFROMCHAR,r.cpMin,0);}
 static void caretTo(int r){for(int i=0;i<2;i++){HWND h=i?rb:ra;LRESULT p=SendMessageW(h,EM_LINEINDEX,r,0);SendMessageW(h,EM_SETSEL,p,p);}}
 static int bothAt(int r){
@@ -96,8 +109,8 @@ static void fixture(void){
  *a=*b=*pa=*pb=0;
  for(int i=0;i<700;i++){wLongA[i]=(unsigned char)longA[i];wLongB[i]=(unsigned char)longB[i];}
  char t[2000];
- sprintf(t,"same line\r\nint count = 10; // total\r\nmid\r\nremoved line\r\ntail\r\nend\r\n%s\r\n",longA);put("ui_a.txt",t);
- sprintf(t,"same line\r\nint total = 10; // sum\r\nmid\r\ntail\r\nadded line\r\nend\r\n%s\r\n",longB);put("ui_b.txt",t);
+ sprintf(t,"same line\r\nint count = 10; // total\r\nmid\r\nremoved line\r\ntail\r\nend\r\n%s\r\n",longA);put("ui_a.c",t);
+ sprintf(t,"same line\r\nint total = 10; // sum\r\nmid\r\ntail\r\nadded line\r\nend\r\n%s\r\n",longB);put("ui_b.c",t);
 }
 /* rows: 0 same, 1 modified, 2 same, 3 only left, 4 same, 5 only right, 6 same, 7 modified (long) */
 static void colours(const char*theme){
@@ -116,11 +129,37 @@ static void colours(const char*theme){
  ROW(rb,7,wLongB,patB,"long line highlights the span between prefix and suffix (right)");
 #undef ROW
 }
+/* ---- merge session: the side panes are read-only, the output pane holds the conflict blocks */
+static HWND wanted;static int wantedId;
+static BOOL CALLBACK onId(HWND h,LPARAM l){(void)l;if(GetDlgCtrlID(h)==wantedId){wchar_t c[32];GetClassNameW(h,c,32);if(!wcscmp(c,L"RICHEDIT50W")){wanted=h;return FALSE;}}return TRUE;}
+static HWND pane(int id){wanted=NULL;wantedId=id;EnumChildWindows(frame,onId,0);return wanted;}
+static int is(HWND h,int r,int col,COLORREF want){COLORREF c=0;int has=back(h,r,col,&c);if(!has||c!=want)printf("row %d column %d: expected %06X, got %s%06X\n",r,col,(unsigned)want,has?"":"none ",(unsigned)c);return has&&c==want;}
+static int none(HWND h,int r,int col){COLORREF c=0;return !back(h,r,col,&c);}
+static void mergeChecks(void){
+ HWND l=NULL,r=NULL,m=NULL;wchar_t t[1024];
+ for(int i=0;i<200;i++){l=pane(ID_RL);r=pane(ID_RR);m=pane(ID_RM);if(l&&r&&m&&lineText(m,1,t,1024)>0)break;Sleep(50);}
+ check(l&&r&&m,"merge session has its panes");
+ if(!l||!r||!m)return;
+ lineText(m,1,t,1024);check(!wcsncmp(t,L"<<<<<<<",7),"merge ran: the output starts its first conflict on row 1");
+ /* left: rows 1, 3, 6 differ; right: rows 1, 4, 6 */
+ check(is(l,1,0,th_lonly)&&is(l,1,20,th_lonly)&&is(l,3,0,th_lonly)&&is(l,6,5,th_lonly),"left pane: changed lines have the left colour");
+ check(none(l,0,0)&&none(l,2,0)&&none(l,4,0),"left pane: other lines have no background");
+ check(is(r,1,0,th_ronly)&&is(r,4,0,th_ronly)&&is(r,6,5,th_ronly),"right pane: changed lines have the right colour");
+ check(none(r,0,0)&&none(r,2,0)&&none(r,3,0),"right pane: other lines have no background");
+ /* output: same line / <<<<<<< / left line / ======= / right line / >>>>>>> / mid */
+ check(is(m,1,0,th_conf)&&is(m,3,0,th_conf)&&is(m,5,0,th_conf),"output pane: marker lines have the conflict colour");
+ check(is(m,2,0,th_lonly)&&is(m,4,0,th_ronly),"output pane: the two sides of a conflict have their colours");
+ check(none(m,0,0)&&none(m,6,0),"output pane: lines outside a conflict have no background");
+ check((GetWindowLongPtrW(l,GWL_STYLE)&ES_READONLY)&&(GetWindowLongPtrW(r,GWL_STYLE)&ES_READONLY),"side panes are read-only again after colouring");
+ check(!(GetWindowLongPtrW(m,GWL_STYLE)&ES_READONLY),"output pane stays editable");
+ SendMessageW(m,EM_SETMODIFY,0,0);                    /* nothing to save: no question on close */
+}
 static DWORD WINAPI watcher(void*arg){
  (void)arg;
  for(int i=0;i<200&&!frame;i++){EnumThreadWindows(mainTid,onTop,0);if(!frame)Sleep(50);}
  check(frame!=NULL,"frame window created");
  if(!frame){PostThreadMessageW(mainTid,WM_QUIT,0,0);return 0;}
+ if(mergeMode){mergeChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
  for(int i=0;i<200;i++){
   EnumChildWindows(frame,onChild,0);
   if(ra&&rb){view=GetParent(ra);if(info(L"차이 4개"))break;}
@@ -129,6 +168,7 @@ static DWORD WINAPI watcher(void*arg){
  check(ra&&rb,"text session has both panes");
  if(!ra||!rb){PostMessageW(frame,WM_CLOSE,0,0);return 0;}
  check(info(L"차이 4개"),"compare ran and reports 4 differences");
+ check(!SendMessageW(ra,EM_CANUNDO,0,0)&&!SendMessageW(rb,EM_CANUNDO,0,0),"colouring is not an undo step");
  check(!IsWindowVisible(frame)||getenv("BC_UITEST_SHOW"),"window stays hidden during the test");
 
  SendMessageW(frame,WM_COMMAND,IDM_LIGHT,0);
@@ -137,6 +177,22 @@ static DWORD WINAPI watcher(void*arg){
  check(g_dark==1,"dark theme selected");palette(1);colours("dark");
  SendMessageW(frame,WM_COMMAND,IDM_LIGHT,0);
  check(g_dark==0,"back to the light theme");palette(0);colours("light again");
+
+ /* syntax colours (the files are .c): a keyword and a comment get their own text colour on both panes,
+    the backgrounds stay, and switching it off returns the plain text colour */
+ {HWND syn=GetDlgItem(view,ID_CHK_SYN);
+  if(SendMessageW(syn,BM_GETCHECK,0,0))SendMessageW(syn,BM_CLICK,0,0);
+  COLORREF plainKw=fore(ra,1,0),plainId=fore(ra,0,0);
+  check(plainKw==plainId,"without syntax colours a keyword looks like other text");
+  SendMessageW(syn,BM_CLICK,0,0);
+  check(SendMessageW(syn,BM_GETCHECK,0,0)==BST_CHECKED,"syntax colours switched on");
+  check(fore(ra,1,0)!=fore(ra,0,0)&&fore(rb,1,0)!=fore(rb,0,0),"keyword has its own text colour");
+  check(fore(ra,1,17)!=fore(ra,0,0)&&fore(ra,1,17)!=fore(ra,1,0),"comment has its own text colour");
+  check(fore(ra,0,0)==plainId,"other text keeps the plain colour");
+  colours("with syntax colours");
+  SendMessageW(syn,BM_CLICK,0,0);
+  check(fore(ra,1,0)==plainId&&fore(ra,1,17)==plainId,"switching syntax colours off restores the text colour");
+  colours("syntax colours off again");}
 
  /* F7 walks the differences downwards and stops at the last, Shift+F7 walks back */
  caretTo(0);
@@ -166,11 +222,12 @@ static DWORD WINAPI watcher(void*arg){
  return 0;
 }
 static DWORD WINAPI watchdog(void*arg){(void)arg;Sleep(60000);printf("FAIL timed out\n");fflush(stdout);ExitProcess(3);}
-int main(void){
+int main(int argc,char**argv){
  wchar_t a[400],b[400];
+ mergeMode=argc>1&&!strcmp(argv[1],"merge");
  fixture();
- GetFullPathNameW(L"ui_a.txt",400,a,NULL);GetFullPathNameW(L"ui_b.txt",400,b,NULL);
- swprintf(cmdline,1200,L"bcgui.exe text \"%ls\" \"%ls\"",a,b);
+ GetFullPathNameW(L"ui_a.c",400,a,NULL);GetFullPathNameW(L"ui_b.c",400,b,NULL);
+ swprintf(cmdline,1200,L"bcgui.exe %ls \"%ls\" \"%ls\"",mergeMode?L"merge":L"text",a,b);
  mainTid=GetCurrentThreadId();
  CloseHandle(CreateThread(NULL,0,watchdog,NULL,0,NULL));
  HANDLE w=CreateThread(NULL,0,watcher,NULL,0,NULL);

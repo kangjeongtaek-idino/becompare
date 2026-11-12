@@ -516,6 +516,12 @@ tv_syn_apply:
     PROLOG 96
     mov rsi, rcx
     mov rbx, rdx
+    ; colouring is not an edit: the modify flags are put back at the end
+    ; (switching syntax colours on or off used to mark both files as changed)
+    invoke SendMessageW, [rbx+TV_HA], EM_GETMODIFY, 0, 0
+    mov [rsp+64], rax
+    invoke SendMessageW, [rbx+TV_HB], EM_GETMODIFY, 0, 0
+    mov [rsp+72], rax
     invoke SendMessageW, [rbx+TV_HA], WM_SETREDRAW, 0, 0
     invoke SendMessageW, [rbx+TV_HB], WM_SETREDRAW, 0, 0
     invoke rich_theme, [rbx+TV_HA]
@@ -543,7 +549,9 @@ tv_syn_apply:
     mov r14, rax
     test rax, rax
     jz .nx
+    invoke rich_batch, rdi, 1
     invoke syn_run, rdi, r14, [rsp+80], r12
+    invoke rich_batch, rdi, 0
     invoke free, r14
     invoke rich_unsel, rdi
 .nx:
@@ -551,6 +559,8 @@ tv_syn_apply:
     cmp r13d, 2
     jb .pane
 .off:
+    invoke SendMessageW, [rbx+TV_HA], EM_SETMODIFY, [rsp+64], 0
+    invoke SendMessageW, [rbx+TV_HB], EM_SETMODIFY, [rsp+72], 0
     invoke SendMessageW, [rbx+TV_HA], WM_SETREDRAW, 1, 0
     invoke SendMessageW, [rbx+TV_HB], WM_SETREDRAW, 1, 0
     invoke InvalidateRect, [rbx+TV_HA], 0, 1

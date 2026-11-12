@@ -8,6 +8,9 @@
 extern int text_save(const wchar_t*,const wchar_t*,uint64_t,uint64_t);
 extern int safe_write2(const wchar_t*,const void*,uint64_t,const void*,uint64_t);
 extern int bc_snwprintf(wchar_t*,uint64_t,const wchar_t*,...);
+extern void *read_file_bytes(const wchar_t*,uint64_t*);
+struct block{const void*p;uint64_t n;};
+extern int safe_writev(const wchar_t*,const struct block*,uint64_t);
 /* the converter hooks of textlib.asm are not part of this unit test */
 int tl_convert(const wchar_t*p,wchar_t*o){(void)p;(void)o;return 0;}
 int tl_isconv(const wchar_t*p){(void)p;return 0;}
@@ -15,6 +18,15 @@ static int fault, failed, checks;
 BOOL WINAPI __real_WriteFile(HANDLE,LPCVOID,DWORD,LPDWORD,LPOVERLAPPED);
 BOOL WINAPI __real_FlushFileBuffers(HANDLE);
 BOOL WINAPI __real_ReplaceFileW(LPCWSTR,LPCWSTR,LPCWSTR,DWORD,LPVOID,LPVOID);
+BOOL WINAPI __real_ReadFile(HANDLE,LPVOID,DWORD,LPDWORD,LPOVERLAPPED);
+static int reads;
+/* fault 5: every read returns at most 1000 bytes; fault 6: the third read fails */
+BOOL WINAPI __wrap_ReadFile(HANDLE h,LPVOID p,DWORD n,LPDWORD got,LPOVERLAPPED ov){
+ reads++;
+ if(fault==6&&reads==3){*got=0;SetLastError(ERROR_READ_FAULT);return FALSE;}
+ if((fault==5||fault==6)&&n>1000)n=1000;
+ return __real_ReadFile(h,p,n,got,ov);
+}
 BOOL WINAPI __wrap_WriteFile(HANDLE h,LPCVOID p,DWORD n,LPDWORD written,LPOVERLAPPED ov){
  if(fault==1){*written=0;SetLastError(ERROR_DISK_FULL);return FALSE;}
  if(fault==2){*written=n? n-1:0;return TRUE;}
@@ -46,6 +58,19 @@ int main(void){
   for(int i=0;i<16;i++)b[i]=L'#';n=bc_snwprintf(b,1,L"%s",L"x");check(n==0&&b[0]==0&&b[1]==L'#',"count of one");
   for(int i=0;i<16;i++)b[i]=L'#';n=bc_snwprintf(b,0,L"%s",L"x");check(b[0]==L'#',"count of zero writes nothing");
   wchar_t w[64];n=bc_snwprintf(w,64,L"%u %u %u %u %u %s %llu",1u,2u,3u,4u,5u,L"six",7ull);check(n==15&&!wcscmp(w,L"1 2 3 4 5 six 7"),"arguments passed on the stack");}
+ /* read_file_bytes: reads until the whole size is there, a failed read is a failure */
+ {unsigned char src[5000];for(int i=0;i<5000;i++)src[i]=(unsigned char)(i*7+i/256);
+  FILE*f=fopen("read.bin","wb");fwrite(src,1,5000,f);fclose(f);uint64_t n=0;
+  unsigned char*b=read_file_bytes(L"read.bin",&n);check(b&&n==5000&&!memcmp(b,src,5000)&&!b[5000],"read whole file");free(b);
+  fault=5;reads=0;n=0;b=read_file_bytes(L"read.bin",&n);fault=0;check(b&&n==5000&&!memcmp(b,src,5000)&&reads>=5,"short reads are continued");free(b);
+  fault=6;reads=0;n=77;b=read_file_bytes(L"read.bin",&n);fault=0;check(!b&&n==0,"failed read returns nothing");free(b);
+  n=77;b=read_file_bytes(L"no-such-file.bin",&n);check(!b,"missing file returns nothing");
+  f=fopen("read0.bin","wb");fclose(f);n=77;b=read_file_bytes(L"read0.bin",&n);check(b&&n==0,"empty file reads as empty");free(b);}
+ /* safe_writev: blocks are written one after the other, an empty block in between is fine */
+ {struct block bl[3]={{"head-",5},{NULL,0},{"-tail",5}};seed();
+  check(safe_writev(L"target.txt",bl,3)==1&&content((const unsigned char*)"head--tail",10),"three-block save");
+  struct block b2[3]={{"a",1},{"bc",2},{"def",3}};check(safe_writev(L"target.txt",b2,3)==1&&content((const unsigned char*)"abcdef",6),"three-block save replaces");
+  seed();fault=1;int r3=safe_writev(L"target.txt",b2,3);fault=0;check(!r3&&content((const unsigned char*)"ORIGINAL",8),"failed three-block save preserves original");}
  WIN32_FIND_DATAW fd;HANDLE h=FindFirstFileW(L"BCA*.tmp",&fd);check(h==INVALID_HANDLE_VALUE,"temporary files cleaned");if(h!=INVALID_HANDLE_VALUE)FindClose(h);
  printf("%d checks, %d failures\n",checks,failed);return failed?1:0;
 }

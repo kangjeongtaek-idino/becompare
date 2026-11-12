@@ -541,16 +541,31 @@ text_compare:
     invoke tv_build, rbx, &rsp+C_LA, &rsp+C_LB, &rsp+C_HV
     invoke SendMessageW, [rbx+TV_HA], WM_SETREDRAW, 0, 0
     invoke SendMessageW, [rbx+TV_HB], WM_SETREDRAW, 0, 0
+    ; no notifications while the panes are filled and coloured: each coloured span moves the selection and
+    ; scrolls, and the scroll handler used to scroll the other pane and post a redraw request every time.
+    ; A few thousand changed rows filled the message queue (10,000 entries), and later posts were lost -
+    ; among them the WM_CLOSE that ends an unattended run.
+    invoke rich_quiet, [rbx+TV_HA], 1
+    invoke rich_quiet, [rbx+TV_HB], 1
     invoke rich_set_text, [rbx+TV_HA], [rbx+TV_BUFA]
     invoke rich_set_text, [rbx+TV_HB], [rbx+TV_BUFB]
     invoke rich_theme, [rbx+TV_HA]
     invoke rich_theme, [rbx+TV_HB]
+    invoke rich_batch, [rbx+TV_HA], 1
+    invoke rich_batch, [rbx+TV_HB], 1
     invoke tv_color, rbx, &rsp+C_LA, &rsp+C_LB
+    invoke rich_batch, [rbx+TV_HA], 0
+    invoke rich_batch, [rbx+TV_HB], 0
     invoke rich_unsel, [rbx+TV_HA]
     invoke rich_unsel, [rbx+TV_HB]
     invoke tv_syn_apply, rsi, rbx
+    ; the text was just loaded: nothing of the colouring above may be left for Ctrl+Z to take back
+    invoke SendMessageW, [rbx+TV_HA], EM_EMPTYUNDOBUFFER, 0, 0
+    invoke SendMessageW, [rbx+TV_HB], EM_EMPTYUNDOBUFFER, 0, 0
     invoke SendMessageW, [rbx+TV_HA], EM_SETMODIFY, [rsp+432], 0
     invoke SendMessageW, [rbx+TV_HB], EM_SETMODIFY, [rsp+440], 0
+    invoke rich_quiet, [rbx+TV_HA], 0
+    invoke rich_quiet, [rbx+TV_HB], 0
     invoke SendMessageW, [rbx+TV_HA], WM_SETREDRAW, 1, 0
     invoke SendMessageW, [rbx+TV_HB], WM_SETREDRAW, 1, 0
     invoke InvalidateRect, [rbx+TV_HA], 0, 1
@@ -1188,6 +1203,7 @@ tv_proc:
     invoke text_compare, rsi, r15, r14
     jmp .zero
 .redraw:
+    mov qword [r15+TV_PEND], 0
     invoke tv_redraw_aux, r15
     jmp .zero
 .collect:
@@ -1327,7 +1343,11 @@ tv_proc:
 .rich:
     cmp ebp, EN_VSCROLL
     jne .zero
+    cmp qword [r15+TV_PEND], 0       ; one redraw request at a time
+    jne .posted
+    mov qword [r15+TV_PEND], 1
     invoke PostMessageW, rsi, WM_APP+50, 0, 0
+.posted:
     cmp qword [r15+TV_GUARD], 0
     jne .zero
     mov rdi, [r15+TV_HA]

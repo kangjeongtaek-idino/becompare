@@ -19,7 +19,7 @@ extern save_error
 extern mk, reg_class, scl, set_status, msgbox
 extern mk_btn, mk_chk, mk_lbl, mk_edit, get_chk, ctl_color, theme_checks
 extern pb_create, pb_layout, pb_load, pb_collect, pb_command
-extern rich_create, rich_set_text, rich_get_text, rich_bk, rich_theme, rich_len, rich_unsel
+extern rich_create, rich_set_text, rich_get_text, rich_bk, rich_theme, rich_len, rich_unsel, rich_quiet, rich_batch
 extern sb_init, sb_free, text_load, text_save, lines_split, compare_lines, hunk_free
 extern g_tc_rules, icon_set, g_prev, g_next, g_copyr, g_copyl, set_tab_title, vec_push, rich_theme
 extern _wcsicmp, rich_get_text, g_dark, set_status_part
@@ -58,6 +58,7 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define TV_NANC   2880
 %define TV_BM     2896
 %define TV_NBM    3152
+%define TV_PEND   3408           ; a redraw request (WM_APP+50) is already in the queue
 %define TV_SIZE   3440
 %define E_HR      40
 %define ID_ED_FIND   303

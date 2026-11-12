@@ -9,7 +9,7 @@
 
 extern malloc, free, wcslen, _snwprintf
 extern sb_init, sb_append, sb_free, browse_save_as, set_status, msgbox
-extern xlsx_save, docx_save
+extern xlsx_save3, docx_save3
 
 global ex_pick, ex_done, ex_esc, xw_colname, s_xw_cap
 global xw_begin, xw_cell, xw_numcell, xw_endrow, xw_save
@@ -292,16 +292,21 @@ xw_endrow:
     EPILOG 32
 
 ; xw_save(rcx=ctx, rdx=path, r8=widths (dword[] in characters), r9d=ncols) -> eax 1 when written
-%define XS_S1   96                    ; sheet xml builder (24)
+; The rows stay where they were built: head and tail are separate pieces, and the rows are freed inside
+; xlsx_save3 once they are converted (the ctx can still be passed to sb_free afterwards).
+%define XS_S1   96                    ; head builder (24)
 %define XS_T1   128                   ; wchar[64]
 %define XS_T2   256                   ; wchar[32]
+%define XS_S2   320                   ; tail builder (24)
+%define XS_PC   352                   ; three pieces { pointer, chars } -> 400
 xw_save:
-    PROLOG 352
+    PROLOG 416
     mov rbx, rcx
     mov r12, rdx
     mov r14, r8
     mov r15d, r9d
     invoke sb_init, &rsp+XS_S1
+    invoke sb_init, &rsp+XS_S2
     invoke sb_append, &rsp+XS_S1, &s_xs_head
     xor edi, edi
 .cols:
@@ -315,11 +320,7 @@ xw_save:
     jmp .cols
 .colsd:
     invoke sb_append, &rsp+XS_S1, &s_xs_data
-    cmp qword [rbx+8], 0
-    je .nodata
-    invoke sb_append, &rsp+XS_S1, [rbx]
-.nodata:
-    invoke sb_append, &rsp+XS_S1, &s_xs_end1
+    invoke sb_append, &rsp+XS_S2, &s_xs_end1
     cmp dword [rbx+24], 2
     jb .noaf
     cmp dword [rbx+32], 0
@@ -330,16 +331,29 @@ xw_save:
     mov eax, [rbx+24]
     dec eax
     invoke _snwprintf, &rsp+XS_T2, 32, &f_xref, &rsp+XS_T1, rax
-    invoke sb_append, &rsp+XS_S1, &s_xs_af1
-    invoke sb_append, &rsp+XS_S1, &rsp+XS_T2
-    invoke sb_append, &rsp+XS_S1, &s_xs_af2
+    invoke sb_append, &rsp+XS_S2, &s_xs_af1
+    invoke sb_append, &rsp+XS_S2, &rsp+XS_T2
+    invoke sb_append, &rsp+XS_S2, &s_xs_af2
 .noaf:
-    invoke sb_append, &rsp+XS_S1, &s_xs_end2
-    invoke xlsx_save, r12, [rsp+XS_S1], [rsp+XS_S1+8]
+    invoke sb_append, &rsp+XS_S2, &s_xs_end2
+    mov rax, [rsp+XS_S1]
+    mov [rsp+XS_PC], rax
+    mov rax, [rsp+XS_S1+8]
+    mov [rsp+XS_PC+8], rax
+    mov rax, [rbx]
+    mov [rsp+XS_PC+16], rax
+    mov rax, [rbx+8]
+    mov [rsp+XS_PC+24], rax
+    mov rax, [rsp+XS_S2]
+    mov [rsp+XS_PC+32], rax
+    mov rax, [rsp+XS_S2+8]
+    mov [rsp+XS_PC+40], rax
+    invoke xlsx_save3, r12, &rsp+XS_PC, rbx
     mov ebx, eax
     invoke sb_free, &rsp+XS_S1
+    invoke sb_free, &rsp+XS_S2
     mov eax, ebx
-    EPILOG 352
+    EPILOG 416
 
 ; ================================================================ DOCX
 ; DX ctx: { SB body (0); dword* widths (24); dword ncols (32); dword col (36) }
@@ -457,21 +471,23 @@ dw_tbl_end:
     invoke sb_append, rcx, &s_dtblend
     EPILOG 32
 
-; dw_save(rcx=ctx, rdx=path) -> eax 1 when written
-%define DS_S1  96
+; dw_save(rcx=ctx, rdx=path) -> eax 1 when written (the body is freed inside docx_save3, see xw_save)
+%define DS_PC  96                    ; three pieces { pointer, chars } -> 144
 dw_save:
     PROLOG 160
     mov rbx, rcx
     mov r12, rdx
-    invoke sb_init, &rsp+DS_S1
-    invoke sb_append, &rsp+DS_S1, &s_dx_docH
-    cmp qword [rbx+8], 0
-    je .nb
-    invoke sb_append, &rsp+DS_S1, [rbx]
-.nb:
-    invoke sb_append, &rsp+DS_S1, &s_dx_docT
-    invoke docx_save, r12, [rsp+DS_S1], [rsp+DS_S1+8]
-    mov ebx, eax
-    invoke sb_free, &rsp+DS_S1
-    mov eax, ebx
+    lea rax, [s_dx_docH]
+    mov [rsp+DS_PC], rax
+    invoke wcslen, rax
+    mov [rsp+DS_PC+8], rax
+    mov rax, [rbx]
+    mov [rsp+DS_PC+16], rax
+    mov rax, [rbx+8]
+    mov [rsp+DS_PC+24], rax
+    lea rax, [s_dx_docT]
+    mov [rsp+DS_PC+32], rax
+    invoke wcslen, rax
+    mov [rsp+DS_PC+40], rax
+    invoke docx_save3, r12, &rsp+DS_PC, rbx
     EPILOG 160

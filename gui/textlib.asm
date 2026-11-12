@@ -740,6 +740,8 @@ run_flush:
 %define L_OPS  160
 %define L_OPN  168
 %define L_OPI  176
+%define L_PIECE 184
+%define MY_PIECES 128                ; pieces of MY_DMAX edits before the rest is reported as one block
 
 ; diff_run(DIFFIN*): fills the hunk vector
 diff_run:
@@ -929,17 +931,27 @@ diff_run:
     invoke free, [rsp+L_TAB]
     jmp .tail
 .whole:
-    cmp qword [rsp+L_N1], 0
-    je .whole1
-    cmp qword [rsp+L_M1], 0
-    je .whole1
-    invoke myers_ops, r12, r13, [rsp+L_N1], [rsp+L_M1]
-    test rax, rax
-    jz .whole1
-    mov [rsp+L_OPS], rax
-    mov [rsp+L_OPI], rdx
     xor ebx, ebx                     ; i
     xor ebp, ebp                     ; j
+    mov dword [rsp+L_PIECE], 0
+.piece:
+    ; Myers over what is left; a result that stops short (more than MY_DMAX edits) is continued from there
+    mov rdi, [rsp+L_N1]
+    sub rdi, rbx
+    jz .rest
+    mov r14, [rsp+L_M1]
+    sub r14, rbp
+    jz .rest
+    cmp dword [rsp+L_PIECE], MY_PIECES
+    jae .rest
+    inc dword [rsp+L_PIECE]
+    lea rsi, [r13+rbx]
+    lea r15, [r13+rbp]
+    invoke myers_ops, r12, rsi, rdi, r14, r15
+    test rax, rax
+    jz .rest
+    mov [rsp+L_OPS], rax
+    mov [rsp+L_OPI], rdx
 .rp:
     mov rax, [rsp+L_OPI]
     test rax, rax
@@ -969,17 +981,21 @@ diff_run:
     inc rbp
     jmp .rp
 .rpend:
-    invoke run_flush, &rsp+L_RUN, [r12+48]
     invoke free, [rsp+L_OPS]
-    jmp .tail
-.whole1:
-    mov dword [rsp+L_RUN], 2
-    mov [rsp+L_RUN+4], r13d
-    mov eax, [rsp+L_N1]
-    mov [rsp+L_RUN+8], eax
-    mov [rsp+L_RUN+12], r13d
-    mov eax, [rsp+L_M1]
-    mov [rsp+L_RUN+16], eax
+    jmp .piece
+.rest:
+    ; what was not compared (one side used up, no memory, or too many pieces) is one changed block
+    mov rdi, [rsp+L_N1]
+    sub rdi, rbx
+    mov r14, [rsp+L_M1]
+    sub r14, rbp
+    mov rax, rdi
+    or rax, r14
+    jz .restd
+    RUNSET 2
+    add [rsp+L_RUN+8], edi
+    add [rsp+L_RUN+16], r14d
+.restd:
     invoke run_flush, &rsp+L_RUN, [r12+48]
 .tail:
     mov rax, [rsp+L_S]

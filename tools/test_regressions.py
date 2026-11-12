@@ -31,7 +31,7 @@ run(["windres","res/app.rc","-O","coff","-o",OUT/"app.res.o"],ROOT/"gui")
 run(["gcc","-mwindows",*[OUT/(m+".obj") for m in MODS],OUT/"app.res.o","-o",OUT/"bcgui.exe",*LIBS])
 r=run(["python","tools/hazard.py"])
 assert "hazards: 0" in r.stdout
-run(["gcc",ROOT/"tools/test_safe_save.c",OUT/"engine.obj",OUT/"textlib.obj",*["-Wl,--wrap="+x for x in ["WriteFile","FlushFileBuffers","ReplaceFileW"]],"-o",OUT/"test_safe_save.exe"])
+run(["gcc",ROOT/"tools/test_safe_save.c",OUT/"engine.obj",OUT/"textlib.obj",*["-Wl,--wrap="+x for x in ["WriteFile","FlushFileBuffers","ReplaceFileW","ReadFile"]],"-o",OUT/"test_safe_save.exe"])
 defs={}
 for name in ["inc/app.inc","text.asm","edit_ui.inc","hex.asm","merge.asm","folder.asm"]:
     for line in (ROOT/"gui"/name).read_text(encoding="utf-8").splitlines():
@@ -57,6 +57,9 @@ for d in ["left","right","emptyA","emptyB","dirLeft/only-left","dirRight","local
 r=run([OUT/"test_ui.exe"],fixtures/"ui",timeout=90,env=dict(os.environ,LOCALAPPDATA=str(fixtures/"ui/local-app-data")))
 (fixtures/"test_ui.log").write_text(r.stdout,encoding="utf-8")
 ui_checks=int(re.search(r"(\d+) checks, 0 failures",r.stdout).group(1))
+r=run([OUT/"test_ui.exe","merge"],fixtures/"ui",timeout=90,env=dict(os.environ,LOCALAPPDATA=str(fixtures/"ui/local-app-data")))
+(fixtures/"test_ui_merge.log").write_text(r.stdout,encoding="utf-8")
+ui_checks+=int(re.search(r"(\d+) checks, 0 failures",r.stdout).group(1))
 (fixtures/"left/file.txt").write_text("left",encoding="utf-8")
 (fixtures/"right/file.txt").write_text("different",encoding="utf-8")
 env=dict(os.environ,LOCALAPPDATA=str(fixtures/"local-app-data"))
@@ -99,6 +102,11 @@ ex=fixtures/"export"; ex.mkdir()
 def bmp(path,v):  # 2x2 24-bit bitmap whose last pixel is (v,v,v)
     head=bytes([0x42,0x4D,70,0,0,0,0,0,0,0,54,0,0,0,40,0,0,0,2,0,0,0,2,0,0,0,1,0,24,0,0,0,0,0,16,0,0,0,0x13,0x0B,0,0,0x13,0x0B,0,0,0,0,0,0,0,0,0,0])
     path.write_bytes(head+bytes([10,20,30,40,50,60,0,0,70,80,90,v,v,v,0,0]))
+# many changed rows: 800 (colouring used to fill the message queue, the run never ended) and 2,000
+# (4,000 edits: beyond one pass of the diff, which used to report the whole file as one changed block)
+def many(n,word): return "\r\n".join(f"value {i} = compute({i}, {word if i%10==0 else 'base'}); // row {i}" for i in range(n)).encode()+b"\r\n"
+for n in (8000,20000):
+    (ex/f"many{n}a.txt").write_bytes(many(n,"left")); (ex/f"many{n}b.txt").write_bytes(many(n,"right"))
 bmp(ex/"p1.bmp",100); bmp(ex/"p1same.bmp",100); bmp(ex/"p2.bmp",200)
 for d,t in [("fa","left"),("fb","right"),("fc","base"),("fsame1","same"),("fsame2","same")]:
     (ex/d).mkdir(); (ex/d/"x.txt").write_text(t,encoding="utf-8")
@@ -121,6 +129,8 @@ for name,args,expected in [
     # /exit alone: the first run ends the app with the same exit codes
     ("exit text different",["text","a.txt","b.txt","/exit"],1),
     ("exit text same",["text","a.txt","same.txt","/exit"],0),
+    ("exit text with 800 changed rows",["text","many8000a.txt","many8000b.txt","/exit"],1),
+    ("xlsx text with 2,000 changed rows",["text","many20000a.txt","many20000b.txt","/xlsx","many.xlsx"],1),
     ("exit text missing input",["text","nope1.txt","nope2.txt","/exit"],2),
     ("exit with nothing to run",["text","a.txt","/exit"],0),
     ("exit editor",["edit","a.txt","/exit"],0),
@@ -150,9 +160,13 @@ big=part(ex/"big.xlsx","xl/worksheets/sheet1.xml")
 assert big.count("<row ")==100011
 row=re.search(r'<row r="100001">.*?</row>',big).group(0)
 assert re.findall(r'<t xml:space="preserve">(.*?)</t>',row)==["변경","line 100000","LINE 100000 changed"], row
+many_x=part(ex/"many.xlsx","xl/worksheets/sheet1.xml")
+xml.dom.minidom.parseString(many_x)
+kinds=re.findall(r'<c r="A\d+"[^>]*><is><t[^>]*>(.*?)</t>',many_x)
+assert (len(kinds),kinds.count("변경"),kinds.count("같음"))==(20001,2000,18000), (len(kinds),kinds.count("변경"),kinds.count("같음"))
 assert not any((ex/f).exists() for f in ["w1.xlsx","w2.docx","w3.xlsx","w4.xlsx","w5.xlsx","w6.html"])
 # a compare that could not read its inputs leaves no report of an empty result
 assert not any((ex/f).exists() for f in ["e4.docx","e7.docx"])
 print("PASS export file contents")
 (fixtures/"cli-results.json").write_text(json.dumps(LOG,indent=2),encoding="utf-8")
-print("All regression checks passed: 36 save + 19 state/worker +",ui_checks,"UI +",len(LOG),"CLI cases")
+print("All regression checks passed: 44 save + 19 state/worker +",ui_checks,"UI +",len(LOG),"CLI cases")

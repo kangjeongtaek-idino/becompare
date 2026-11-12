@@ -6,6 +6,7 @@
 extern realloc, malloc, free, wcslen, memcpy, _vsnwprintf
 global bc_snwprintf
 %define _snwprintf bc_snwprintf
+%define READ_CHUNK 0x4000000         ; 64MB per ReadFile call
 extern FileTimeToLocalFileTime, FileTimeToSystemTime
 extern WideCharToMultiByte, MultiByteToWideChar, CreateFileW, WriteFile, CloseHandle, ReadFile, GetFileSizeEx
 
@@ -13,6 +14,7 @@ global vec_push, fmt_size, fmt_time, wild_w, excl_match, excl_match2
 extern GetFullPathNameW, GetTempFileNameW, GetFileAttributesW, GetLastError
 extern FlushFileBuffers, ReplaceFileW, MoveFileExW, DeleteFileW
 global safe_write2
+global safe_writev
 global sb_init, sb_append, sb_append_esc, sb_free, write_utf8, read_file_bytes, lower_w
 
 section .rdata
@@ -461,13 +463,25 @@ write_all:
 ; safe_write2(path, p1, n1, p2, n2): stage in the destination directory,
 ; flush and close, then replace. A failed save never truncates the destination.
 safe_write2:
+    sub rsp, 72
+    mov [rsp+32], rdx                ; two blocks { pointer, length }
+    mov [rsp+40], r8
+    mov [rsp+48], r9
+    mov rax, [rsp+72+40]             ; 5th argument
+    mov [rsp+56], rax
+    lea rdx, [rsp+32]
+    mov r8d, 2
+    call safe_writev
+    add rsp, 72
+    ret
+
+; safe_writev(path, blocks, count): blocks = count x { pointer, length }, written one after the other.
+; Same staging as safe_write2; lets a caller write a large file from parts without joining them first.
+safe_writev:
     PROLOG 160
     mov r12, rcx
     mov r13, rdx
     mov r14, r8
-    mov r15, r9
-    mov rax, [rsp+272]
-    mov [rsp+96], rax
     mov dword [rsp+120], 0           ; owns a successfully created temporary file
     xor ebx, ebx
     xor esi, esi
@@ -501,12 +515,16 @@ safe_write2:
     cmp rax, -1
     je .cleanup
     mov rbp, rax
-    invoke write_all, rbp, r13, r14
+.blk:
+    test r14, r14
+    jz .flush
+    invoke write_all, rbp, [r13], [r13+8]
     test eax, eax
     jz .closefail
-    invoke write_all, rbp, r15, [rsp+96]
-    test eax, eax
-    jz .closefail
+    add r13, 16
+    dec r14
+    jmp .blk
+.flush:
     invoke FlushFileBuffers, rbp
     test eax, eax
     jz .closefail
@@ -606,14 +624,35 @@ read_file_bytes:
     test rax, rax
     jz .close
     mov rsi, rax
+    ; ReadFile takes a 32-bit count and may return less than asked: read in pieces until the size is reached.
+    ; (One call with the 64-bit size read only "size mod 4GB" bytes of a file of 4GB or more.)
+    xor r14d, r14d                   ; bytes read so far
+.rd:
+    mov r15, rdi
+    sub r15, r14
+    jz .got
+    cmp r15, READ_CHUNK
+    jbe .rc
+    mov r15d, READ_CHUNK
+.rc:
     mov qword [rsp+104], 0
-    invoke ReadFile, rbx, rsi, rdi, &rsp+104, 0
+    invoke ReadFile, rbx, &rsi+r14, r15, &rsp+104, 0
+    test eax, eax
+    jz .rderr
     mov eax, [rsp+104]
-    mov qword [r13], rax
-    mov dword [rsi+rax], 0
+    test eax, eax
+    jz .got                          ; the file got shorter meanwhile
+    add r14, rax
+    jmp .rd
+.got:
+    mov [r13], r14
+    mov dword [rsi+r14], 0
     invoke CloseHandle, rbx
     mov rax, rsi
     EPILOG 160
+.rderr:
+    invoke free, rsi
+    mov qword [r13], 0
 .close:
     invoke CloseHandle, rbx
 .fail:

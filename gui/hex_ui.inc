@@ -28,9 +28,10 @@ hp_paint:
     mov r14d, [rcx+r12*4]
     shl r14, 4                                      ; first offset of the row
     invoke _snwprintf, &rsp+200, 12, &f_off, r14
+    mov r15d, eax                                   ; digits written
     invoke SetBkColor, rdi, #[th_bg]
     invoke SetTextColor, rdi, #[th_same]
-    invoke TextOutW, rdi, 0, [rbx+HX_PY], &rsp+200, 8
+    invoke TextOutW, rdi, 0, [rbx+HX_PY], &rsp+200, r15
     xor r15d, r15d
 .b:
     cmp r15d, 16

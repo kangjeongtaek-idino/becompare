@@ -92,7 +92,7 @@ WSTR f_replaced, "%u곳을 바꿨습니다."
 WSTR s_norepl, "바꿀 대상을 찾지 못했습니다."
 WSTR s_b_sva, "왼쪽 저장"
 WSTR s_b_svb, "오른쪽 저장"
-WSTR f_off, "%08X"
+WSTR f_off, "%08llX"                 ; 8 digits, 9 from 4GB on (the column is 10 characters wide)
 WSTR f_info, "오프셋 0x%llX · 왼쪽 %s · 오른쪽 %s · 크기 %llu / %llu · 다른 바이트 %llu"
 WSTR f_byte, "%02X"
 WSTR s_none, "--"

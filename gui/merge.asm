@@ -17,7 +17,7 @@ extern tv_anchor_add, tv_cmp_anch
 extern mk, reg_class, scl, set_status, msgbox
 extern mk_btn, mk_chk, mk_lbl, mk_edit, get_chk, ctl_color, theme_checks
 extern pb_create, pb_layout, pb_load, pb_collect, pb_command
-extern rich_create, rich_set_text, rich_get_text, rich_bk, rich_theme, rich_unsel
+extern rich_create, rich_set_text, rich_get_text, rich_bk, rich_theme, rich_unsel, rich_batch
 extern text_load, text_save, lines_split, compare_lines, hunk_free
 extern sb_init, sb_append, sb_free, vec_push
 extern set_tab_title
@@ -251,6 +251,7 @@ color_lines:
     jmp .o
 .odone:
     mov [rbp+rsi*8], rdi
+    invoke rich_batch, r12, 1        ; colour through text ranges (see rich.asm)
     xor ebx, ebx
 .h:
     cmp rbx, [r14+8]
@@ -278,6 +279,7 @@ color_lines:
     inc rbx
     jmp .h
 .done:
+    invoke rich_batch, r12, 0
     invoke free, rbp
     EPILOG 96
 
@@ -413,6 +415,7 @@ mg_colorout:
 .odone:
     mov [rbp+rsi*8], rdi
     invoke SendMessageW, [rbx+MG_HM], WM_SETREDRAW, 0, 0
+    invoke rich_batch, [rbx+MG_HM], 1
     xor r12d, r12d
 .c:
     cmp r12, [rbx+MG_CONF+8]
@@ -456,6 +459,7 @@ mg_colorout:
     inc r12
     jmp .c
 .redraw:
+    invoke rich_batch, [rbx+MG_HM], 0
     invoke SendMessageW, [rbx+MG_HM], EM_EXSETSEL, 0, &rsp+112
     invoke SendMessageW, [rbx+MG_HM], WM_SETREDRAW, 1, 0
     invoke InvalidateRect, [rbx+MG_HM], 0, 1
@@ -716,6 +720,11 @@ mg_merge:
     lea rax, [s_empty]
 .have2:
     mov r13, rax
+    ; no drawing while the four panes are filled and coloured (each step used to lay the text out again)
+    invoke SendMessageW, [rbx+MG_HM], WM_SETREDRAW, 0, 0
+    invoke SendMessageW, [rbx+MG_HL], WM_SETREDRAW, 0, 0
+    invoke SendMessageW, [rbx+MG_HO], WM_SETREDRAW, 0, 0
+    invoke SendMessageW, [rbx+MG_HR], WM_SETREDRAW, 0, 0
     invoke rich_set_text, [rbx+MG_HM], r13
     invoke SendMessageW, [rbx+MG_HM], EM_SETMODIFY, 1, 0
     invoke rich_theme, [rbx+MG_HM]
@@ -749,7 +758,13 @@ mg_merge:
     invoke rich_unsel, [rbx+MG_HL]
     invoke rich_unsel, [rbx+MG_HO]
     invoke rich_unsel, [rbx+MG_HR]
-    invoke mg_colorout, rbx
+    invoke SendMessageW, [rbx+MG_HL], WM_SETREDRAW, 1, 0
+    invoke SendMessageW, [rbx+MG_HO], WM_SETREDRAW, 1, 0
+    invoke SendMessageW, [rbx+MG_HR], WM_SETREDRAW, 1, 0
+    invoke InvalidateRect, [rbx+MG_HL], 0, 1
+    invoke InvalidateRect, [rbx+MG_HO], 0, 1
+    invoke InvalidateRect, [rbx+MG_HR], 0, 1
+    invoke mg_colorout, rbx          ; turns drawing of the output pane back on
     invoke mg_info, rsi, rbx
     ; tab title
     invoke wcsrchr, &r12+SS_PATHA, 0x5C

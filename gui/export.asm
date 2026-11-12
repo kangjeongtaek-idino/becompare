@@ -5,16 +5,19 @@
 
 extern malloc, realloc, free, memcpy, memset, strlen, wcsrchr, _wcsicmp
 extern WideCharToMultiByte
-extern crc32_update, safe_write2
+extern crc32_update, safe_writev, sb_free
 
-global xlsx_save, docx_save, export_kind
+global xlsx_save, docx_save, xlsx_save3, docx_save3, export_kind
 
 ; byte buffer BB: { ptr, len, cap }
-; zip writer ZW: { BB file (0), BB central directory (24), entry count (48), error flag (56) }
+; zip writer ZW: { BB file (0), BB central directory (24), entry count (48), error flag (56),
+;                 data of the last entry kept outside the file buffer: pointer (64), length (72) }
 %define ZW_CD    24
 %define ZW_COUNT 48
 %define ZW_ERR   56
-%define ZW_SIZE  64
+%define ZW_EXTP  64
+%define ZW_EXTN  72
+%define ZW_SIZE  80
 
 %macro PART 2+
 %1: db %2
@@ -150,17 +153,16 @@ bb_put:
     xor eax, eax
     EPILOG 64
 
-; zw_add(zw, name (ASCII), data, length): one stored entry
-zw_add:
+; zw_head(zw, name (ASCII), crc, length): local header and central directory record of a stored entry;
+; its data comes next (zw_add puts it in the file buffer, pkg_save3 keeps it outside)
+zw_head:
     PROLOG 160
     mov r12, rcx
     mov r13, rdx
-    mov r14, r8
+    mov ebx, r8d                     ; CRC-32
     mov r15, r9
     invoke strlen, r13
     mov ebp, eax                     ; name length
-    invoke crc32_update, 0, r14, r15
-    mov ebx, eax                     ; CRC-32
     mov rdi, [r12+8]                 ; offset of the local header
     lea rsi, [rsp+96]
     ; local file header (30 bytes)
@@ -179,9 +181,6 @@ zw_add:
     test eax, eax
     jz .err
     invoke bb_put, r12, r13, rbp
-    test eax, eax
-    jz .err
-    invoke bb_put, r12, r14, r15
     test eax, eax
     jz .err
     ; central directory record (46 bytes)
@@ -214,50 +213,33 @@ zw_add:
     mov qword [r12+ZW_ERR], 1
     EPILOG 160
 
-; zw_add_w(zw, name, wide text, chars): entry holding the text as UTF-8
-zw_add_w:
-    PROLOG 96
+; zw_add(zw, name (ASCII), data, length): one stored entry
+zw_add:
+    PROLOG 64
     mov r12, rcx
     mov r13, rdx
     mov r14, r8
     mov r15, r9
-    xor esi, esi
-    xor ebx, ebx
-    test r15, r15
-    jz .add
-    invoke WideCharToMultiByte, CP_UTF8, 0, r14, r15, 0, 0, 0, 0
-    test eax, eax
-    jle .err
+    invoke crc32_update, 0, r14, r15
     mov ebx, eax
-    invoke malloc, rbx
-    test rax, rax
-    jz .err
-    mov rsi, rax
-    invoke WideCharToMultiByte, CP_UTF8, 0, r14, r15, rsi, rbx, 0, 0
+    invoke zw_head, r12, r13, rbx, r15
+    invoke bb_put, r12, r14, r15
     test eax, eax
-    jle .freeerr
-    mov ebx, eax
-.add:
-    invoke zw_add, r12, r13, rsi, rbx
-    invoke free, rsi
-    EPILOG 96
-.freeerr:
-    invoke free, rsi
-.err:
+    jnz .d
     mov qword [r12+ZW_ERR], 1
-    EPILOG 96
+.d:
+    EPILOG 64
 
 ; zw_finish(zw, path) -> eax 1 when the archive was committed; always frees the buffers
+; The file is the buffer, then the data kept outside it (ZW_EXTP), then the central directory.
 zw_finish:
-    PROLOG 160
+    PROLOG 192
     mov r12, rcx
     mov r13, rdx
     xor r14d, r14d                   ; result
-    mov rdi, [r12+8]                 ; offset of the central directory
+    mov rdi, [r12+8]
+    add rdi, [r12+ZW_EXTN]           ; offset of the central directory
     mov rbx, [r12+ZW_CD+8]           ; its size
-    invoke bb_put, r12, [r12+ZW_CD], rbx
-    test eax, eax
-    jz .free
     lea rsi, [rsp+96]                ; end of central directory (22 bytes)
     mov dword [rsi], 0x06054B50
     mov dword [rsi+4], 0
@@ -267,39 +249,158 @@ zw_finish:
     mov [rsi+12], ebx
     mov [rsi+16], edi
     mov word [rsi+20], 0
-    invoke bb_put, r12, rsi, 22
+    invoke bb_put, &r12+ZW_CD, rsi, 22
     test eax, eax
     jz .free
     cmp qword [r12+ZW_ERR], 0
     jne .free
-    invoke safe_write2, r13, [r12], [r12+8], 0, 0
+    mov rax, [r12]
+    mov [rsp+128], rax
+    mov rax, [r12+8]
+    mov [rsp+136], rax
+    mov rax, [r12+ZW_EXTP]
+    mov [rsp+144], rax
+    mov rax, [r12+ZW_EXTN]
+    mov [rsp+152], rax
+    mov rax, [r12+ZW_CD]
+    mov [rsp+160], rax
+    mov rax, [r12+ZW_CD+8]
+    mov [rsp+168], rax
+    invoke safe_writev, r13, &rsp+128, 3
     mov r14d, eax
 .free:
     invoke free, [r12]
     invoke free, [r12+ZW_CD]
     mov eax, r14d
-    EPILOG 160
+    EPILOG 192
 
-; pkg_save(path, wide xml, chars, package description) -> eax
+; xlsx_save(path, wide xml, chars) / docx_save: the main part as one text
 xlsx_save:
     lea r9, [xl_desc]
     jmp pkg_save
 docx_save:
     lea r9, [dx_desc]
 pkg_save:
-    PROLOG 192
+    sub rsp, 88
+    mov [rsp+32], rdx                ; three pieces, the last two empty
+    mov [rsp+40], r8
+    xor eax, eax
+    mov [rsp+48], rax
+    mov [rsp+56], rax
+    mov [rsp+64], rax
+    mov [rsp+72], rax
+    lea rdx, [rsp+32]
+    mov r8, r9
+    xor r9d, r9d
+    call pkg_save3
+    add rsp, 88
+    ret
+
+; xlsx_save3(path, pieces, sb) / docx_save3: the main part as three pieces of wide text { pointer, chars },
+; so that a large middle piece does not have to be copied between a head and a tail first.
+; sb (or 0) is a string builder that is freed as soon as the text has been converted - normally the one
+; that owns the middle piece: the UTF-16 text is then gone before the file is written.
+xlsx_save3:
+    mov r9, r8
+    lea r8, [xl_desc]
+    jmp pkg_save3
+docx_save3:
+    mov r9, r8
+    lea r8, [dx_desc]
+
+; pkg_save3(path, pieces, package description, sb) -> eax 1 when written
+%define PK_ZW   96                   ; ZW (80) -> 176
+%define PK_L    176                  ; UTF-8 length of each piece (3 qwords) -> 200
+%define PK_BIG  200                  ; the main part as UTF-8
+%define PK_SB   208
+%define PK_T    216
+pkg_save3:
+    PROLOG 256
     mov r12, rcx
     mov r13, rdx
-    mov r14, r8
-    mov r15, r9
-    invoke memset, &rsp+96, 0, ZW_SIZE
+    mov r15, r8
+    mov [rsp+PK_SB], r9
+    mov qword [rsp+PK_BIG], 0
+    invoke memset, &rsp+PK_ZW, 0, ZW_SIZE
     mov rbp, [r15]                   ; fixed part count
     lea rbx, [r15+16]
 .l:
-    invoke zw_add, &rsp+96, [rbx], [rbx+8], [rbx+16]
+    invoke zw_add, &rsp+PK_ZW, [rbx], [rbx+8], [rbx+16]
     add rbx, 24
     dec rbp
     jnz .l
-    invoke zw_add_w, &rsp+96, [r15+8], r13, r14
-    invoke zw_finish, &rsp+96, r12
-    EPILOG 192
+    xor r14d, r14d                   ; UTF-8 bytes in all
+    xor ebx, ebx
+.len:
+    cmp ebx, 3
+    jae .lend
+    mov qword [rsp+PK_L+rbx*8], 0
+    mov rax, rbx
+    shl rax, 4
+    mov rsi, [r13+rax]
+    mov rdi, [r13+rax+8]
+    test rdi, rdi
+    jz .ln
+    cmp rdi, 0x7FFFFFF0              ; the conversion takes a 32-bit count
+    ja .err
+    invoke WideCharToMultiByte, CP_UTF8, 0, rsi, rdi, 0, 0, 0, 0
+    test eax, eax
+    jle .err
+    mov eax, eax
+    mov [rsp+PK_L+rbx*8], rax
+    add r14, rax
+.ln:
+    inc ebx
+    jmp .len
+.lend:
+    mov eax, 0xFFFF0000              ; sizes and offsets in this ZIP format are 32 bits
+    cmp r14, rax
+    jae .err
+    lea rcx, [r14+8]
+    call malloc
+    test rax, rax
+    jz .err
+    mov [rsp+PK_BIG], rax
+    mov rbp, rax
+    xor ebx, ebx
+.cv:
+    cmp ebx, 3
+    jae .cvd
+    mov rax, [rsp+PK_L+rbx*8]
+    test rax, rax
+    jz .cn
+    mov [rsp+PK_T], rax
+    mov rax, rbx
+    shl rax, 4
+    mov rsi, [r13+rax]
+    mov rdi, [r13+rax+8]
+    invoke WideCharToMultiByte, CP_UTF8, 0, rsi, rdi, rbp, [rsp+PK_T], 0, 0
+    cmp eax, [rsp+PK_T]
+    jne .err
+    add rbp, [rsp+PK_T]
+.cn:
+    inc ebx
+    jmp .cv
+.cvd:
+    mov rcx, [rsp+PK_SB]             ; the wide text is not needed any more
+    test rcx, rcx
+    jz .nosb
+    call sb_free
+.nosb:
+    invoke crc32_update, 0, [rsp+PK_BIG], r14
+    mov ebx, eax
+    invoke zw_head, &rsp+PK_ZW, [r15+8], rbx, r14
+    mov rax, [rsp+PK_BIG]
+    mov [rsp+PK_ZW+ZW_EXTP], rax
+    mov [rsp+PK_ZW+ZW_EXTN], r14
+    invoke zw_finish, &rsp+PK_ZW, r12
+    mov ebx, eax
+    invoke free, [rsp+PK_BIG]
+    mov eax, ebx
+    EPILOG 256
+.err:
+    mov qword [rsp+PK_ZW+ZW_ERR], 1
+    invoke zw_finish, &rsp+PK_ZW, r12        ; frees the buffers and writes nothing
+    invoke free, [rsp+PK_BIG]
+    xor eax, eax
+    EPILOG 256

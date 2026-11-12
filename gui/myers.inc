@@ -1,6 +1,10 @@
 ; myers.inc - Myers O(ND) diff, used when the LCS table would be too large (included by textlib.asm)
-;   myers_ops(din, p, n1, m1) -> rax = ops (bytes, REVERSED order: 0 common, 1 delete A line, 2 insert B line), rdx = count
-;   rax = 0 when the edit distance exceeds MY_DMAX
+;   myers_ops(din, pa, n1, m1, pb) -> rax = ops (bytes, REVERSED order: 0 common, 1 delete A line, 2 insert B line),
+;   rdx = count. The compared ranges are A[pa .. pa+n1) and B[pb .. pb+m1).
+;   When the edit distance exceeds MY_DMAX the ops cover only a leading part of both ranges: the path that got
+;   furthest in MY_DMAX edits. The caller replays them and calls again for what is left (diff_run), so a file
+;   pair with many changes is compared piece by piece instead of being reported as one changed block.
+;   rax = 0 only when out of memory or when no progress is possible.
 
 %define MY_DMAX 3000
 %define MY_OFF  (MY_DMAX+1)
@@ -15,6 +19,9 @@
 %define Y_OPS  152
 %define Y_K    160
 %define Y_PK   168
+%define Y_PB   176
+%define Y_BX   184                  ; where the backtrack starts
+%define Y_BY   192
 
 myers_ops:
     PROLOG 224
@@ -22,6 +29,8 @@ myers_ops:
     mov [rsp+Y_P], rdx
     mov [rsp+Y_N], r8
     mov [rsp+Y_M], r9
+    mov rax, [rsp+224+112]           ; 5th argument
+    mov [rsp+Y_PB], rax
     mov ecx, (2*MY_DMAX+8)*4
     call malloc
     mov [rsp+Y_V], rax
@@ -36,10 +45,11 @@ myers_ops:
     mov dword [rbx+(MY_OFF+1)*4], 0
     mov rsi, [rsp+Y_DIN]
     mov rdi, [rsp+Y_P]
+    mov rbp, [rsp+Y_PB]
     xor r12d, r12d                   ; d
 .dloop:
     cmp r12d, MY_DMAX
-    ja .fail2
+    ja .partial
     mov r13d, r12d
     neg r13d                         ; k = -d
 .kloop:
@@ -71,7 +81,12 @@ myers_ops:
     cmp r15d, [rsp+Y_M]
     jge .snaked
     lea rdx, [rdi+r14]
-    lea r8, [rdi+r15]
+    lea r8, [rbp+r15]
+    mov rax, [rsi+8]                 ; line hashes first: most comparisons end here
+    mov eax, [rax+rdx*4]
+    mov rcx, [rsi+32]
+    cmp eax, [rcx+r8*4]
+    jne .snaked
     invoke keq, rsi, rdx, r8
     test eax, eax
     jz .snaked
@@ -87,6 +102,10 @@ myers_ops:
     cmp r15d, [rsp+Y_M]
     jl .nextk
     mov [rsp+Y_D], r12
+    mov rax, [rsp+Y_N]
+    mov [rsp+Y_BX], rax
+    mov rax, [rsp+Y_M]
+    mov [rsp+Y_BY], rax
     jmp .found
 .nextk:
     add r13d, 2
@@ -112,8 +131,40 @@ myers_ops:
 .svd:
     inc r12d
     jmp .dloop
+.partial:
+    ; ---- too many edits: take the diagonal that got furthest (largest x + y) after MY_DMAX edits
+    mov r13d, -MY_DMAX               ; k, same parity as MY_DMAX
+    mov r10d, -1                     ; best x + y
+.pt:
+    cmp r13d, MY_DMAX
+    jg .ptd
+    lea eax, [r13+MY_OFF]
+    movsxd rcx, eax
+    mov r14d, [rbx+rcx*4]            ; x
+    mov r15d, r14d
+    sub r15d, r13d                   ; y
+    js .ptn
+    test r14d, r14d
+    js .ptn
+    cmp r14d, [rsp+Y_N]
+    jg .ptn
+    cmp r15d, [rsp+Y_M]
+    jg .ptn
+    lea eax, [r14+r15]
+    cmp eax, r10d
+    jle .ptn
+    mov r10d, eax
+    mov [rsp+Y_BX], r14
+    mov [rsp+Y_BY], r15
+.ptn:
+    add r13d, 2
+    jmp .pt
+.ptd:
+    test r10d, r10d
+    jle .fail2
+    mov qword [rsp+Y_D], MY_DMAX
 .found:
-    ; ---- backtrack from (N, M)
+    ; ---- backtrack from the end point
     mov rax, [rsp+Y_N]
     add rax, [rsp+Y_M]
     lea rcx, [rax+16]
@@ -122,8 +173,8 @@ myers_ops:
     test rax, rax
     jz .fail2
     mov r8, rax                      ; ops
-    mov r14d, [rsp+Y_N]              ; x
-    mov r15d, [rsp+Y_M]              ; y
+    mov r14d, [rsp+Y_BX]             ; x
+    mov r15d, [rsp+Y_BY]             ; y
     xor ebp, ebp                     ; op count
     mov r13, [rsp+Y_D]               ; dd
     mov rsi, [rsp+Y_SNAP]
