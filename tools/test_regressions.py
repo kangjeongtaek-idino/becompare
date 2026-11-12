@@ -148,4 +148,4 @@ assert not any((ex/f).exists() for f in ["w1.xlsx","w2.docx","w3.xlsx","w4.xlsx"
 assert not any((ex/f).exists() for f in ["e4.docx","e7.docx"])
 print("PASS export file contents")
 (fixtures/"cli-results.json").write_text(json.dumps(LOG,indent=2),encoding="utf-8")
-print("All regression checks passed: 30 save + 19 state/worker +",len(LOG),"CLI cases")
+print("All regression checks passed: 36 save + 19 state/worker +",len(LOG),"CLI cases")

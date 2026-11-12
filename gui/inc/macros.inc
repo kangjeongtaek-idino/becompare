@@ -99,5 +99,12 @@ bits 64
 %1: dw __utf16__(%2), 0
 %endmacro
 
+; The C runtime's _snwprintf leaves the buffer without a terminator when the text is as long as, or longer
+; than, the count, and then returns a negative length. Every module formats through bc_snwprintf (engine.asm)
+; instead, which always terminates within the count and returns the length actually written.
+%ifndef SNW_IMPL
+%define _snwprintf bc_snwprintf
+%endif
+
 ; zero-extending constants helper
 %define NULL 0

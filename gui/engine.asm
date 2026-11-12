@@ -1,8 +1,11 @@
 ; engine.asm - shared algorithms: vectors, number/time formatting, wildcards, string builder, utf-8 output
+%define SNW_IMPL 1
 %include "inc/macros.inc"
 %include "inc/win.inc"
 
-extern realloc, malloc, free, wcslen, memcpy, _snwprintf
+extern realloc, malloc, free, wcslen, memcpy, _vsnwprintf
+global bc_snwprintf
+%define _snwprintf bc_snwprintf
 extern FileTimeToLocalFileTime, FileTimeToSystemTime
 extern WideCharToMultiByte, MultiByteToWideChar, CreateFileW, WriteFile, CloseHandle, ReadFile, GetFileSizeEx
 
@@ -21,6 +24,34 @@ WSTR e_gt, "&gt;"
 WSTR e_quot, "&quot;"
 
 section .text
+
+; bc_snwprintf(rcx=buffer, rdx=count in characters, r8=format, ...) -> eax = characters written
+;   The app-wide replacement for _snwprintf (see inc/macros.inc). Text that does not fit is cut to
+;   count-1 characters and terminated; the result is then count-1, never negative, so callers that
+;   advance a pointer by the result stay inside their buffer.
+bc_snwprintf:
+    mov [rsp+32], r9                  ; home the 4th argument: the variable arguments are now contiguous
+    push rbx
+    push rsi
+    sub rsp, 40
+    mov rbx, rcx
+    mov rsi, rdx
+    lea r9, [rsp+40+16+32]            ; va_list = address of the first variable argument
+    call _vsnwprintf
+    test rsi, rsi
+    jz .d
+    test eax, eax
+    js .cut
+    cmp eax, esi
+    jb .d
+.cut:
+    mov word [rbx+rsi*2-2], 0
+    lea eax, [rsi-1]
+.d:
+    add rsp, 40
+    pop rsi
+    pop rbx
+    ret
 
 ; vec_push(rcx=vec{ptr,count,cap}, rdx=elemsize) -> rax = pointer to the new (uninitialised) element
 vec_push:
