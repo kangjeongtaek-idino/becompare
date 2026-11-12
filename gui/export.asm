@@ -41,9 +41,10 @@ PART xp_types, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>', 10, '<
 PART xp_rels, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>', 10, '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'
 PART xp_wb, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>', 10, '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView/></bookViews><sheets><sheet name="비교 결과" sheetId="1" r:id="rId1"/></sheets></workbook>'
 PART xp_wbrels, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>', 10, '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'
-; cell formats: 0 default, 1 header, 2..6 text by status (same/diff/left only/right only/type), 7..11 numbers by status, 12 title
+; cell formats: 0 default, 1 header, 2..6 text by status (same/diff/left only/right only/type), 7..11 numbers by status, 12 title,
+; 13..16 Consolas text (plain / red / green / orange fill) used by the text and hex exports
 PART xp_styles, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>', 10, '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">', \
-  '<fonts count="4"><font><sz val="10"/><name val="맑은 고딕"/></font><font><b/><sz val="10"/><name val="맑은 고딕"/></font><font><sz val="10"/><color rgb="FF808080"/><name val="맑은 고딕"/></font><font><b/><sz val="14"/><name val="맑은 고딕"/></font></fonts>', \
+  '<fonts count="5"><font><sz val="10"/><name val="맑은 고딕"/></font><font><b/><sz val="10"/><name val="맑은 고딕"/></font><font><sz val="10"/><color rgb="FF808080"/><name val="맑은 고딕"/></font><font><b/><sz val="14"/><name val="맑은 고딕"/></font><font><sz val="10"/><name val="Consolas"/></font></fonts>', \
   '<fills count="7"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>', \
   '<fill><patternFill patternType="solid"><fgColor rgb="FFD9D9D9"/><bgColor indexed="64"/></patternFill></fill>', \
   '<fill><patternFill patternType="solid"><fgColor rgb="FFFFD7D7"/><bgColor indexed="64"/></patternFill></fill>', \
@@ -52,7 +53,7 @@ PART xp_styles, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>', 10, '
   '<fill><patternFill patternType="solid"><fgColor rgb="FFFFE6BE"/><bgColor indexed="64"/></patternFill></fill></fills>', \
   '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFBFBFBF"/></left><right style="thin"><color rgb="FFBFBFBF"/></right><top style="thin"><color rgb="FFBFBFBF"/></top><bottom style="thin"><color rgb="FFBFBFBF"/></bottom><diagonal/></border></borders>', \
   '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>', \
-  '<cellXfs count="13"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>', \
+  '<cellXfs count="17"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>', \
   '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>', \
   '<xf numFmtId="0" fontId="2" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/>', \
   '<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1"/>', \
@@ -64,7 +65,7 @@ PART xp_styles, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>', 10, '
   '<xf numFmtId="3" fontId="0" fillId="4" borderId="1" xfId="0" applyNumberFormat="1" applyFill="1" applyBorder="1"/>', \
   '<xf numFmtId="3" fontId="0" fillId="5" borderId="1" xfId="0" applyNumberFormat="1" applyFill="1" applyBorder="1"/>', \
   '<xf numFmtId="3" fontId="0" fillId="6" borderId="1" xfId="0" applyNumberFormat="1" applyFill="1" applyBorder="1"/>', \
-  '<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>', \
+  '<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>',   '<xf numFmtId="0" fontId="4" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/>',   '<xf numFmtId="0" fontId="4" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>',   '<xf numFmtId="0" fontId="4" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>',   '<xf numFmtId="0" fontId="4" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/></cellXfs>', \
   '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'
 
 ; ---- DOCX fixed parts

@@ -441,6 +441,7 @@ mg_layout:
     PLACE ID_BTN_ALLL, 110
     PLACE ID_BTN_ALLR, 120
     PLACE ID_BTN_SAVE, 40
+    PLACE ID_BTN_DOC, 90
     PLACE ID_LBL_INFO, 300
     ; --- panes
     lea r13d, [r13+r15]
@@ -592,6 +593,7 @@ mg_proc:
     invoke mk_btn, rsi, &s_b_alll, ID_BTN_ALLL
     invoke mk_btn, rsi, &s_b_allr, ID_BTN_ALLR
     invoke mk_btn, rsi, &s_b_save, ID_BTN_SAVE
+    invoke mk_btn, rsi, &s_b_doc, ID_BTN_DOC
     invoke icon_set, rsi, ID_BTN_PREV, &g_prev, &s_b_prev
     invoke icon_set, rsi, ID_BTN_NEXT, &g_next, &s_b_next
     invoke icon_set, rsi, ID_BTN_USEL, &g_usel, &s_b_usel
@@ -633,6 +635,18 @@ mg_proc:
     mov dword [rax+2880], 0           ; TV_NANC
     invoke mg_merge, rsi, r15, r14
     invoke mg_layout, rsi, r15
+    test qword [g_batch], 0x20        ; /docx file: export the first merge and close
+    jz .zero
+    and qword [g_batch], ~0x20
+    invoke mg_docx_path, rsi, r15, r14, &g_dx_path
+    test eax, eax
+    jnz .bdx_ok
+    mov qword [g_exitcode], 2
+.bdx_ok:
+    test qword [g_batch], 4
+    jz .zero
+    invoke SendMessageW, [r15+MG_HM], EM_SETMODIFY, 0, 0   ; unattended: do not ask to save the merge output
+    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
     jmp .zero
 .collect:
     invoke pb_collect, rsi, r14
@@ -643,6 +657,9 @@ mg_proc:
     jmp .zero
 .save:
     invoke mg_save, rsi, r15, r14
+    jmp .zero
+.doc:
+    invoke mg_export, rsi, r15, r14
     jmp .zero
 .theme:
     invoke mg_theme, rsi, r15
@@ -681,6 +698,8 @@ mg_proc:
     je .b_ar
     cmp ebx, ID_BTN_SAVE
     je .save
+    cmp ebx, ID_BTN_DOC
+    je .doc
     cmp ebx, ID_BTN_ALN
     je .b_aln
     cmp ebx, ID_BTN_ALC

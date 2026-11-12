@@ -3,8 +3,10 @@
 %include "inc/macros.inc"
 %include "inc/win.inc"
 %include "inc/app.inc"
+%include "inc/export.inc"
 
 extern PostMessageW
+extern g_batch, g_xl_path, g_exitcode, g_hframe
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetFocus, GetWindowTextW, SetWindowTextW
 extern InvalidateRect, SetWindowTheme
@@ -17,7 +19,7 @@ extern mk, reg_class, scl, set_status, msgbox
 extern mk_btn, mk_chk, mk_lbl, mk_edit, get_chk, ctl_color, theme_checks
 extern pb_create, pb_layout, pb_load, pb_collect, pb_command
 extern rich_create, rich_set_text, rich_get_text, rich_bk, rich_theme, rich_len, rich_unsel
-extern text_load, text_save, lines_split, compare_lines, hunk_free
+extern sb_init, sb_free, text_load, text_save, lines_split, compare_lines, hunk_free
 extern g_tc_rules, icon_set, g_prev, g_next, g_copyr, g_copyl, set_tab_title, vec_push, rich_theme
 extern _wcsicmp, rich_get_text, g_dark, set_status_part
 
@@ -83,6 +85,7 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define ID_CHK_SYN  215
 %define ID_BTN_ALN  247
 %define ID_BTN_ALC  248
+%define ID_BTN_XLS  249
 %define MAX_ANC     64
 %define ID_EDIT_CMT 231
 %define ID_BTN_PREV 241
@@ -242,6 +245,7 @@ sum_len:
 
 
 %include "text_ui.inc"
+%include "text_xl.inc"
 %include "text_gutter.inc"
 %include "text_syn.inc"
 %include "text_align.inc"

@@ -2,7 +2,9 @@
 %include "inc/macros.inc"
 %include "inc/win.inc"
 %include "inc/app.inc"
+%include "inc/export.inc"
 
+extern sb_free, PostMessageW, wcscpy, g_batch, g_dx_path, g_exitcode, g_hframe
 extern icon_set, g_rot, g_flh, g_flv, g_zout, g_zin, g_fit
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetWindowTextW, SetWindowTextW
@@ -53,6 +55,7 @@ global pic_register, pic_create
 %define ID_LBL_INFO  550
 %define ID_LBL_CUR   551
 %define ID_PPANE     560
+%define ID_BTN_DOC   561
 
 %define CB_ADDSTRING 0x0143
 %define CB_SETCURSEL 0x014E
@@ -488,3 +491,4 @@ px_build:
     EPILOG 192
 
 %include "pic_ui.inc"
+%include "pic_doc.inc"

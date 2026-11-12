@@ -207,6 +207,7 @@ pv_layout:
     PLACE ID_BTN_ZOUT, 40
     PLACE ID_BTN_ZIN, 40
     PLACE ID_BTN_FIT, 40
+    PLACE ID_BTN_DOC, 90
     ; the combo box owns its drop-down height
     mov ecx, 190
     call scl
@@ -314,6 +315,7 @@ pv_proc:
     invoke mk_btn, rsi, &s_b_zout, ID_BTN_ZOUT
     invoke mk_btn, rsi, &s_b_zin, ID_BTN_ZIN
     invoke mk_btn, rsi, &s_b_fit, ID_BTN_FIT
+    invoke mk_btn, rsi, &s_b_doc, ID_BTN_DOC
     invoke icon_set, rsi, ID_BTN_ROT, &g_rot, &s_b_rot
     invoke icon_set, rsi, ID_BTN_FLH, &g_flh, &s_b_flh
     invoke icon_set, rsi, ID_BTN_FLV, &g_flv, &s_b_flv
@@ -351,6 +353,23 @@ pv_proc:
     jmp .zero
 .run:
     invoke pv_compare, rsi, r15, r14
+    test qword [g_batch], 0x20        ; /docx file: export the first compare and close
+    jz .zero
+    and qword [g_batch], ~0x20
+    cmp qword [r15+PX_LOADED], 0
+    je .bdx_fail
+    invoke px_docx_path, rsi, r15, &g_dx_path
+    test eax, eax
+    jnz .bdx_ok
+.bdx_fail:
+    mov qword [g_exitcode], 2
+.bdx_ok:
+    test qword [g_batch], 4
+    jz .zero
+    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+    jmp .zero
+.doc:
+    invoke px_export, rsi, r15
     jmp .zero
 .collect:
     invoke pv_collect, rsi, r14, r15
@@ -387,6 +406,8 @@ pv_proc:
     je .zout
     cmp ebx, ID_BTN_FIT
     je .fit
+    cmp ebx, ID_BTN_DOC
+    je .doc
     cmp ebx, ID_COMBO
     je .combo
     cmp ebx, ID_EDIT_TOL

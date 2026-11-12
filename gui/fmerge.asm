@@ -4,6 +4,7 @@
 %include "inc/macros.inc"
 %include "inc/win.inc"
 %include "inc/app.inc"
+%include "inc/export.inc"
 
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem, EnableWindow
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetWindowTextW, SetWindowTextW, InvalidateRect, SetWindowTheme
@@ -15,6 +16,7 @@ extern mk, reg_class, scl, set_status, msgbox
 extern mk_btn, mk_chk, mk_lbl, mk_edit, get_chk, ctl_color, theme_checks, lv_dark_header
 extern pb_create, pb_layout, pb_load, pb_collect, pb_command
 extern set_tab_title, str_dup, fmt_size, vec_push, read_file_bytes, crc32_update, browse_folder
+extern sb_free, PostMessageW, g_batch, g_dx_path, g_exitcode, g_hframe
 extern sess_new, sess_open
 extern icon_set, g_usel, g_user, g_base, g_del, g_edit, g_run
 
@@ -61,6 +63,7 @@ global fmerge_register, fmerge_create
 %define ID_BTN_TC 713
 %define ID_BTN_TD 714
 %define ID_BTN_OPENM 715
+%define ID_BTN_DOC 716
 %define ID_LBL_BASE 651
 %define ID_LBL_OUT  652
 
@@ -1151,6 +1154,7 @@ fm_layout:
     PLACE ID_BTN_TD, 40
     PLACE ID_BTN_OPENM, 40
     PLACE ID_BTN_RUNM, 40
+    PLACE ID_BTN_DOC, 90
     ; row 4
     lea r13d, [r13+r15]
     add r13d, r14d
@@ -1298,6 +1302,7 @@ fm_proc:
     invoke mk_btn, rsi, &s_b_td, ID_BTN_TD
     invoke mk_btn, rsi, &s_b_openm, ID_BTN_OPENM
     invoke mk_btn, rsi, &s_b_runm, ID_BTN_RUNM
+    invoke mk_btn, rsi, &s_b_doc, ID_BTN_DOC
     invoke icon_set, rsi, ID_BTN_TA, &g_usel, &s_b_ta
     invoke icon_set, rsi, ID_BTN_TB, &g_user, &s_b_tb
     invoke icon_set, rsi, ID_BTN_TC, &g_base, &s_b_tc
@@ -1359,6 +1364,20 @@ fm_proc:
     jmp .zero
 .run:
     invoke fm_compare, rsi, r15, r14
+    test qword [g_batch], 0x20        ; /docx file: export the first compare and close
+    jz .zero
+    and qword [g_batch], ~0x20
+    invoke fm_docx_path, rsi, r15, &g_dx_path
+    test eax, eax
+    jnz .bdx_ok
+    mov qword [g_exitcode], 2
+.bdx_ok:
+    test qword [g_batch], 4
+    jz .zero
+    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+    jmp .zero
+.doc:
+    invoke fm_export, rsi, r15
     jmp .zero
 .collect:
     invoke pb_collect, rsi, r14
@@ -1401,6 +1420,8 @@ fm_proc:
     je .openm
     cmp ebx, ID_BTN_RUNM
     je .runm
+    cmp ebx, ID_BTN_DOC
+    je .doc
     jmp .def
 .browse:
     invoke pb_command, rsi, rbx, 1
@@ -1548,3 +1569,4 @@ fm_proc:
 
 section .rdata
 WSTR s_c_conf_dummy, ""
+%include "fmerge_doc.inc"

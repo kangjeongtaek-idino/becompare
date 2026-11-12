@@ -2,6 +2,7 @@
 %include "inc/macros.inc"
 %include "inc/win.inc"
 %include "inc/app.inc"
+%include "inc/export.inc"
 
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem, GetParent
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetWindowTextW, SetWindowTextW
@@ -9,6 +10,7 @@ extern InvalidateRect, SetWindowTheme, GetDC, ReleaseDC, SelectObject, GetTextMe
 extern BeginPaint, EndPaint, TextOutW, SetBkColor, SetTextColor, SetBkMode, SetScrollInfo, GetScrollInfo
 extern GetSysColor, GetKeyState, SetCapture
 extern safe_write2
+extern sb_free, PostMessageW, g_batch, g_xl_path, g_exitcode, g_hframe
 extern CreateFileW, WriteFile, CloseHandle
 extern malloc, calloc, realloc, free, memset, memcpy, wcslen, wcsrchr, _snwprintf
 extern g_hinst, g_mono, th_bg, th_fg, th_panel, th_diff, th_lonly, th_ronly, th_same, th_panelbrush, th_bgbrush
@@ -62,6 +64,7 @@ global hex_register, hex_create
 %define ID_BTN_SVB  416
 %define ID_BTN_REPL 417
 %define ID_BTN_REPLALL 418
+%define ID_BTN_XLS  419
 %define ID_LBL_FIND 420
 %define ID_LBL_REPL 423
 %define ID_EDIT_REPL 424
@@ -497,3 +500,4 @@ hx_drawbyte:
 
 %include "hex_ui.inc"
 %include "hex_repl.inc"
+%include "hex_xl.inc"
