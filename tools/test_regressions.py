@@ -72,5 +72,53 @@ cli("snapshot output failure",["folder",str(fixtures/"emptyA"),str(fixtures/"emp
 (fixtures/"syncLeft/new.txt").write_text("sync fixture",encoding="utf-8")
 cli("update synchronization",["folder",str(fixtures/"syncLeft"),str(fixtures/"syncRight"),"/sync","update"],0)
 assert (fixtures/"syncRight/new.txt").read_text(encoding="utf-8")=="sync fixture"
+# ---- /xlsx and /docx: exit code 0 same / 1 different / 2 error, never a window left waiting, well-formed XML
+import zipfile, xml.dom.minidom
+def part(path,name):
+    with zipfile.ZipFile(path) as z: return z.read(name).decode("utf-8")
+ex=fixtures/"export"; ex.mkdir()
+(ex/"a.txt").write_bytes(b"one\r\ntwo\r\nthree\r\n")
+(ex/"same.txt").write_bytes(b"one\r\ntwo\r\nthree\r\n")
+(ex/"b.txt").write_bytes(b"one\r\n2\r\nthree\r\nfour\r\n")
+(ex/"a.csv").write_bytes(b"id,name\r\n1,x\r\n2,y\r\n")
+(ex/"b.csv").write_bytes(b"id,name\r\n1,x\r\n2,z\r\n")
+(ex/"a.bin").write_bytes(bytes(range(64)))
+(ex/"b.bin").write_bytes(bytes(range(5))+b"\xc8"+bytes(range(6,64)))
+# U+FFFE / U+FFFF / a lone surrogate are not XML characters
+(ex/"odd.txt").write_bytes(b"\xff\xfe"+"a￾b￿c".encode("utf-16-le")+b"\x00\xd8"+'d <&> "q"\r\n'.encode("utf-16-le"))
+# cell references get longer from row 100,000 on (the cell start used to be cut there)
+(ex/"bigA.txt").write_bytes("".join(f"line {i}\r\n" for i in range(1,100011)).encode())
+(ex/"bigB.txt").write_bytes("".join((f"LINE {i} changed\r\n" if i%50000==0 else f"line {i}\r\n") for i in range(1,100011)).encode())
+for name,args,expected in [
+    ("xlsx text same",["text","a.txt","same.txt","/xlsx","t0.xlsx"],0),
+    ("xlsx text different",["text","a.txt","b.txt","/xlsx","t1.xlsx"],1),
+    ("xlsx table same",["table","a.csv","a.csv","/xlsx","b0.xlsx"],0),
+    ("xlsx table different",["table","a.csv","b.csv","/xlsx","b1.xlsx"],1),
+    ("xlsx hex same",["hex","a.bin","a.bin","/xlsx","h0.xlsx"],0),
+    ("xlsx hex different",["hex","a.bin","b.bin","/xlsx","h1.xlsx"],1),
+    ("xlsx characters XML cannot hold",["text","odd.txt","a.txt","/xlsx","odd.xlsx"],1),
+    ("xlsx beyond row 100,000",["text","bigA.txt","bigB.txt","/xlsx","big.xlsx"],1),
+    ("docx merge",["merge","a.txt","b.txt","/docx","m.docx"],0),
+    ("xlsx output failure",["text","a.txt","b.txt","/xlsx","absent/o.xlsx"],2),
+    ("xlsx missing text input",["text","nope1.txt","nope2.txt","/xlsx","e1.xlsx"],2),
+    ("xlsx missing table input",["table","nope1.csv","nope2.csv","/xlsx","e2.xlsx"],2),
+    ("xlsx missing hex input",["hex","nope1.bin","nope2.bin","/xlsx","e3.xlsx"],2),
+    ("docx missing merge input",["merge","nope1.txt","nope2.txt","/docx","e4.docx"],2),
+    ("docx missing picture input",["picture","nope1.png","nope2.png","/docx","e5.docx"],2),
+    ("docx missing version input",["version","nope1.exe","nope2.exe","/docx","e6.docx"],2),
+    ("xlsx on a session without it",["merge","a.txt","b.txt","/xlsx","w1.xlsx"],2),
+    ("docx on a session without it",["text","a.txt","b.txt","/docx","w2.docx"],2),
+    ("xlsx on a folder session",["folder",".",".","/xlsx","w3.xlsx"],2),
+    ("xlsx without both inputs",["text","a.txt","/xlsx","w4.xlsx"],2),
+]:
+    cli(name,[args[0],*[str(ex/a) if not a.startswith("/") else a for a in args[1:]]],expected)
+for f,p in [("t1.xlsx","xl/worksheets/sheet1.xml"),("b1.xlsx","xl/worksheets/sheet1.xml"),("h1.xlsx","xl/worksheets/sheet1.xml"),("odd.xlsx","xl/worksheets/sheet1.xml"),("big.xlsx","xl/worksheets/sheet1.xml"),("m.docx","word/document.xml")]:
+    xml.dom.minidom.parseString(part(ex/f,p))
+big=part(ex/"big.xlsx","xl/worksheets/sheet1.xml")
+assert big.count("<row ")==100011
+row=re.search(r'<row r="100001">.*?</row>',big).group(0)
+assert re.findall(r'<t xml:space="preserve">(.*?)</t>',row)==["변경","line 100000","LINE 100000 changed"], row
+assert not any((ex/f).exists() for f in ["w1.xlsx","w2.docx","w3.xlsx","w4.xlsx"])
+print("PASS export file contents")
 (fixtures/"cli-results.json").write_text(json.dumps(LOG,indent=2),encoding="utf-8")
 print("All regression checks passed: 30 save + 19 state/worker +",len(LOG),"CLI cases")

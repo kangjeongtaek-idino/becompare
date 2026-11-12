@@ -7,6 +7,7 @@
 ; ex_pick(hwnd, out wchar[520], kind) -> eax 1 when a path was chosen (kind 0 = xlsx, 1 = docx)
 ; ex_done(hwnd, ok): status bar message + error box
 
+%define XW_MAXROWS 1048575            ; data rows that fit a sheet below the header row
 %define XL_SIZE 40
 %define DX_SIZE 40
 
@@ -23,7 +24,7 @@
 %define XS_MONOORANGE 16
 
 %ifndef EXPORT_IMPL
-extern ex_pick, ex_done
+extern ex_pick, ex_done, s_xw_cap
 extern xw_begin, xw_cell, xw_numcell, xw_endrow, xw_save
 extern dw_begin, dw_para, dw_tbl_begin, dw_row_begin, dw_cell, dw_row_end, dw_tbl_end, dw_save
 extern dwc_red, dwc_green, dwc_blue, dwc_orange, dwc_gray

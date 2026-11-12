@@ -73,6 +73,8 @@ tb_xlsx_path:
 .row:
     cmp r12, [rbx+TB_NVIS]
     jae .fin
+    cmp r12, XW_MAXROWS               ; a sheet holds 1,048,576 rows; more makes Excel reject the file
+    jae .fin
     mov rcx, [rbx+TB_VIS]
     mov eax, [rcx+r12*4]
     imul rax, R_SIZE
@@ -190,7 +192,13 @@ tb_export:
     test eax, eax
     jz .d
     invoke tb_xlsx_path, rbx, &rsp+400
-    invoke ex_done, rsi, rax
+    mov edi, eax
+    invoke ex_done, rsi, rdi
+    test edi, edi
+    jz .d
+    cmp qword [rbx+TB_NVIS], XW_MAXROWS
+    jbe .d
+    invoke msgbox, rsi, &s_xw_cap, MB_OK|MB_ICONINFO
 .d:
     EPILOG 1200
 .norun:

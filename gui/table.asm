@@ -1312,6 +1312,14 @@ tb_compare:
     jnz .okx
     mov qword [g_exitcode], 2
 .okx:
+    mov rax, [rbx+TB_CNT]             ; exit code like /report: 0 same, 1 different, 2 error
+    or rax, [rbx+TB_CNT+16]
+    or rax, [rbx+TB_CNT+24]
+    jz .okq
+    cmp qword [g_exitcode], 2
+    je .okq
+    mov qword [g_exitcode], 1
+.okq:
     test qword [g_batch], 4
     jz .okb
     invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0

@@ -364,6 +364,12 @@ pv_proc:
 .bdx_fail:
     mov qword [g_exitcode], 2
 .bdx_ok:
+    cmp qword [r15+PX_NDIFF], 0       ; exit code like /report: 0 same, 1 different, 2 error
+    je .bdx_q
+    cmp qword [g_exitcode], 2
+    je .bdx_q
+    mov qword [g_exitcode], 1
+.bdx_q:
     test qword [g_batch], 4
     jz .zero
     invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0

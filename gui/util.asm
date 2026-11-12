@@ -4,7 +4,8 @@
 
 extern CreateWindowExW, SendMessageW, RegisterClassExW, LoadCursorW, CreateFontW, LoadImageW
 extern CreateSolidBrush, DeleteObject, GetDeviceCaps, GetDC, ReleaseDC
-extern MessageBoxW, GetOpenFileNameW, GetSaveFileNameW
+extern MessageBoxW, GetOpenFileNameW, GetSaveFileNameW, PostMessageW
+extern g_batch, g_exitcode
 extern SHBrowseForFolderW, SHGetPathFromIDListW, CoTaskMemFree
 extern wcslen, wcscpy, memset, malloc, _snwprintf, wcscmp
 extern GetDpiForSystem
@@ -151,9 +152,24 @@ set_status_part:
     EPILOG 64
 
 ; msgbox(hwnd, text, flags) -> id
+; In an unattended run (/report, /sync, /xlsx, /docx, /snapshot, /exit) nobody can dismiss a notice, and the
+; minimized window would wait forever. A plain OK box there means the job cannot go on: record the error
+; (exit code 2) and close instead. Boxes that ask a question are still shown.
 msgbox:
     PROLOG 64
     mov rbx, r8
+    test qword [g_batch], 4
+    jz .show
+    test ebx, 0x0F
+    jnz .show
+    mov qword [g_exitcode], 2
+    cmp qword [g_hframe], 0
+    je .quiet
+    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+.quiet:
+    mov eax, 1                        ; IDOK
+    EPILOG 64
+.show:
     invoke MessageBoxW, rcx, rdx, &s_appname, rbx
     EPILOG 64
 

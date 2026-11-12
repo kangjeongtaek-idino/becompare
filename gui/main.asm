@@ -1612,6 +1612,44 @@ parse_cmdline:
     invoke wcsncpy, &r15+SS_PATHO, rax, 519
 .open:
     invoke parse_switches, rbx, r12, r13
+    ; /xlsx and /docx are served by the session's first compare. Without both inputs, or on a session type
+    ; that has no such export, nothing would ever consume the switch and the minimized window would stay
+    ; open for good: end with exit code 2 instead.
+    mov rax, [g_batch]
+    test eax, 0x30
+    jz .openok
+    cmp word [r15+SS_PATHA], 0
+    je .badsw
+    cmp word [r15+SS_PATHB], 0
+    je .badsw
+    test eax, 0x10
+    jz .ckdocx
+    cmp r14d, T_TEXT
+    je .ckdocx
+    cmp r14d, T_TABLE
+    je .ckdocx
+    cmp r14d, T_HEX
+    jne .badsw
+.ckdocx:
+    test eax, 0x20
+    jz .openok
+    cmp r14d, T_PIC
+    je .openok
+    cmp r14d, T_MERGE
+    je .openok
+    cmp r14d, T_VER
+    je .openok
+    cmp r14d, T_REG
+    je .openok
+    cmp r14d, T_MEDIA
+    je .openok
+    cmp r14d, T_FMERGE
+    je .openok
+.badsw:
+    mov qword [g_exitcode], 2
+    invoke PostMessageW, [g_hframe], WM_CLOSE, 0, 0
+    jmp .free
+.openok:
     invoke sess_open, r15
     invoke save_requested, r15
     jmp .free

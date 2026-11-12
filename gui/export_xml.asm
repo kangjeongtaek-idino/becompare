@@ -11,7 +11,7 @@ extern malloc, free, wcslen, _snwprintf
 extern sb_init, sb_append, sb_free, browse_save_as, set_status, msgbox
 extern xlsx_save, docx_save
 
-global ex_pick, ex_done, ex_esc, xw_colname
+global ex_pick, ex_done, ex_esc, xw_colname, s_xw_cap
 global xw_begin, xw_cell, xw_numcell, xw_endrow, xw_save
 global dw_begin, dw_para, dw_tbl_begin, dw_row_begin, dw_cell, dw_row_end, dw_tbl_end, dw_save
 global dwc_red, dwc_green, dwc_blue, dwc_orange, dwc_gray
@@ -23,6 +23,7 @@ flt_xlsx: dw __utf16__("Excel 통합 문서 (*.xlsx)"), 0, __utf16__("*.xlsx"), 
 flt_docx: dw __utf16__("Word 문서 (*.docx)"), 0, __utf16__("*.docx"), 0, 0
 WSTR s_ex_ok, "내보내기를 완료했습니다."
 WSTR s_ex_fail, "파일을 저장하지 못했습니다. 경로와 쓰기 권한, 파일이 다른 프로그램에서 열려 있는지 확인하세요."
+WSTR s_xw_cap, "행이 많아 처음 1,048,575행만 내보냈습니다 (Excel 시트의 최대 행 수)."
 WSTR e_amp, "&amp;"
 WSTR e_lt, "&lt;"
 WSTR e_gt, "&gt;"
@@ -73,7 +74,8 @@ WSTR s_dtcend, `</w:t></w:r></w:p></w:tc>`
 section .text
 
 ; ================================================================ XML text
-; ex_esc(rcx=sb, rdx=wide text): XML-escaped append; control characters dropped, 32000 chars max (Excel cell limit)
+; ex_esc(rcx=sb, rdx=wide text): XML-escaped append; control characters and U+FFFE / U+FFFF dropped,
+; 32000 chars max (Excel cell limit)
 %macro FLUSHBUF 0
     mov word [rsp+96+rdi*2], 0
     invoke sb_append, rbx, &rsp+96
@@ -104,6 +106,8 @@ ex_esc:
     je .ok
     jmp .l
 .ok:
+    cmp eax, 0xFFFE                  ; U+FFFE / U+FFFF are not XML characters: Excel and Word refuse the file
+    jae .l
     cmp eax, '&'
     je .amp
     cmp eax, '<'
@@ -214,7 +218,8 @@ xw_colname:
     ret
 
 ; xw_open_cell(rbx=ctx, rsi=format, buf=rsp+96 (wchar[64]), style in r12d): shared start of a cell
-; (inlined by xw_cell / xw_numcell through this helper taking rcx=ctx, rdx=format, r8d=style, r9=scratch wchar[96])
+; (inlined by xw_cell / xw_numcell through this helper taking rcx=ctx, rdx=format, r8d=style, r9=scratch wchar[112]:
+;  chars 0..95 hold the formatted cell start, chars 100..111 the column letters)
 xw_start:
     PROLOG 96
     mov rbx, rcx
@@ -227,9 +232,12 @@ xw_start:
     invoke sb_append, rbx, r13
     mov dword [rbx+36], 1
 .open:
-    lea r14, [r13+128]                ; column letters
+    lea r14, [r13+200]                ; column letters
     invoke xw_colname, r14, [rbx+28]
-    invoke _snwprintf, r13, 64, rsi, r14, [rbx+24], r12
+    ; the longest cell start is 55 chars + column letters + row digits + style digits: 64 chars cut it
+    ; from row 100,000 on (no terminator, so the column letters leaked into the cell text)
+    invoke _snwprintf, r13, 95, rsi, r14, [rbx+24], r12
+    mov word [r13+190], 0
     invoke sb_append, rbx, r13
     inc dword [rbx+28]
     mov eax, [rbx+28]
