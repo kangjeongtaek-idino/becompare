@@ -14,6 +14,7 @@ extern settings_font, settings_colors
 global g_hinst, g_hframe, g_htab, g_hstatus, g_font, g_fontb, g_mono, g_dpi, g_dark
 global g_font_title, g_font_sub, g_font_desc, g_font_badge, g_card_iconfont
 global th_bg, th_fg, th_panel, th_diff, th_lonly, th_ronly, th_type, th_same, th_hl, th_conf
+global th_tc_mod, th_tc_modin, th_tc_ins, th_tc_del, th_tc_modb, th_tc_insb, th_tc_delb, th_tc_gap
 global th_card_bg, th_card_border, th_card_hover_bg, th_card_hover_border, th_accent
 global th_bgbrush, th_panelbrush
 global save_error
@@ -56,6 +57,15 @@ th_type:        resd 1
 th_same:        resd 1
 th_hl:          resd 1
 th_conf:        resd 1
+; text compare palette (IntelliJ-style): modified / inserted / deleted lines, inline changes, markers
+th_tc_mod:      resd 1
+th_tc_modin:    resd 1
+th_tc_ins:      resd 1
+th_tc_del:      resd 1
+th_tc_modb:     resd 1
+th_tc_insb:     resd 1
+th_tc_delb:     resd 1
+th_tc_gap:      resd 1
 th_card_bg:           resd 1
 th_card_border:       resd 1
 th_card_hover_bg:     resd 1
@@ -270,6 +280,14 @@ theme_set:
     mov dword [th_same], 0x8B7464
     mov dword [th_hl], 0xEB6325
     mov dword [th_conf], 0x7171F8
+    mov dword [th_tc_mod], 0xF9E8DC          ; IntelliJ light: modified #DCE8F9
+    mov dword [th_tc_modin], 0xF0C7A9        ;   inline change #A9C7F0
+    mov dword [th_tc_ins], 0xDCF1DC          ;   inserted #DCF1DC
+    mov dword [th_tc_del], 0xE8E8E8          ;   deleted #E8E8E8
+    mov dword [th_tc_modb], 0xDB8B4B         ;   markers: blue / green / grey
+    mov dword [th_tc_insb], 0x5FB85F
+    mov dword [th_tc_delb], 0xA0A0A0
+    mov dword [th_tc_gap], 0xF2F0EE          ;   empty side of a changed block #EEF0F2
     mov dword [th_card_bg], 0xFFFFFF
     mov dword [th_card_border], 0xEBE7E5
     mov dword [th_card_hover_bg], 0xFCFAF8
@@ -287,6 +305,14 @@ theme_set:
     mov dword [th_same], 0x9E9994
     mov dword [th_hl], 0xFA9638
     mov dword [th_conf], 0x1E70B0
+    mov dword [th_tc_mod], 0x4E3A2B          ; IntelliJ dark: modified #2B3A4E
+    mov dword [th_tc_modin], 0x7A573D        ;   inline change #3D577A
+    mov dword [th_tc_ins], 0x2F4026          ;   inserted #26402F
+    mov dword [th_tc_del], 0x403D3A          ;   deleted #3A3D40
+    mov dword [th_tc_modb], 0xD68F5C         ;   markers: blue / green / grey
+    mov dword [th_tc_insb], 0x5E9A4E
+    mov dword [th_tc_delb], 0x857F7B
+    mov dword [th_tc_gap], 0x1B1816          ;   empty side #16181B
     mov dword [th_card_bg], 0x28211C
     mov dword [th_card_border], 0x42362E
     mov dword [th_card_hover_bg], 0x342B24

@@ -13,6 +13,7 @@ extern InvalidateRect, SetWindowTheme
 extern malloc, calloc, free, memcpy, memset, wcslen, wcscpy, wcscmp, wcsrchr, _snwprintf
 extern DrawTextW, SelectObject, SetBkMode, SetTextColor, FrameRect, CreateSolidBrush, DeleteObject, BeginPaint, EndPaint
 extern g_font, g_iconfont, th_same, th_conf
+extern th_tc_mod, th_tc_modin, th_tc_ins, th_tc_del, th_tc_modb, th_tc_insb, th_tc_delb, th_tc_gap
 extern g_hinst, g_mono, th_bg, th_fg, th_panel, th_diff, th_lonly, th_ronly, th_hl, th_panelbrush
 extern save_error
 extern mk, reg_class, scl, set_status, msgbox
@@ -246,6 +247,7 @@ sum_len:
 
 %include "text_ui.inc"
 %include "text_xl.inc"
+%include "text_word.inc"
 %include "text_gutter.inc"
 %include "text_syn.inc"
 %include "text_align.inc"
