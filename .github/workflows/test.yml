@@ -1,0 +1,69 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # A change under gui/ comes with a change under tools/test_*, unless the description says why not.
+      - name: Tests accompany code changes
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE_SHA"...HEAD)
+          echo "$changed"
+          if ! echo "$changed" | grep -q '^gui/.*\.\(asm\|inc\)$'; then
+            echo "no code under gui/ changed"; exit 0
+          fi
+          if echo "$changed" | grep -q '^tools/test_'; then
+            echo "tests changed together with the code"; exit 0
+          fi
+          if printf '%s' "$PR_BODY" | grep -q '테스트 생략 사유: *[^ ]'; then
+            echo "tests skipped, with a reason in the description"; exit 0
+          fi
+          echo "::error::gui/ changed without a change under tools/test_*. Add a test, or write '테스트 생략 사유: ...' in the description."
+          exit 1
+
+      - name: Install NASM
+        shell: pwsh
+        run: |
+          choco install nasm -y --no-progress
+          Add-Content $env:GITHUB_PATH "C:\Program Files\NASM"
+
+      - name: Tool versions
+        shell: pwsh
+        run: |
+          nasm -v
+          gcc --version
+          windres --version
+          objcopy --version
+          python --version
+
+      - name: Regression tests
+        shell: pwsh
+        run: python tools/test_regressions.py
+
+      - name: Keep the logs of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-fixtures
+          path: |
+            build/regression/fixtures-*/*.log
+            build/regression/fixtures-*/cli-results.json
+          if-no-files-found: ignore

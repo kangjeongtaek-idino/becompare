@@ -37,7 +37,7 @@ powershell -File build.ps1          # src/bc.asm -> bc.exe (이전 단계의 콘
 
 ```powershell
 python tools/hazard.py              # invoke 인자 덮어쓰기 / 스택 프레임 16바이트 정렬 정적 검사 -> "hazards: 0" 이어야 함
-python tools/test_regressions.py    # 격리된 경로에서 재빌드 + 저장 오류·상태·명령줄 회귀 검사 57개
+python tools/test_regressions.py    # 격리된 경로에서 재빌드 + 저장 오류·상태·화면 동작·명령줄 회귀 검사 156개
 powershell -File tools/t_smoke.ps1  # 세션 유형 14가지가 3초 이상 살아 있는지 확인 (실제 창을 띄움)
 ```
 
@@ -210,7 +210,9 @@ git config --global mergetool.becompare.cmd 'bcgui.exe merge "$LOCAL" "$REMOTE" 
 
 ## 검증 방법
 
-- `python tools/test_regressions.py`: 격리된 입력·설정 경로에서 전체 재빌드와 저장 오류 주입, 변경 상태·종료·스레드 취소, 명령줄 비교·보고서·동기화 회귀 검사 57개를 실행합니다.
+- `python tools/test_regressions.py`: 격리된 입력·설정 경로에서 전체 재빌드와 저장 오류 주입, 변경 상태·종료·스레드 취소, 화면 동작, 명령줄 비교·보고서·내보내기·동기화 회귀 검사 156개를 실행합니다.
+- 화면 동작 검사(`tools/test_ui.c`, 56개): 앱 전체를 테스트 프로세스 안에서 창을 숨긴 채 실행하고, 실제 RichEdit 컨트롤에서 글자별 배경색을 읽습니다. 텍스트 비교의 행 색(수정·삭제·삽입·빈 쪽)과 단어 단위 강조, 긴 줄의 접두·접미 강조를 밝은 테마와 어두운 테마에서 확인하고, F7 / Shift+F7과 이전·다음 차이 버튼의 이동 위치를 확인합니다. `BC_UITEST_SHOW=1`을 주면 창을 보면서 실행합니다. 거터·미니맵처럼 직접 그리는 부분과 텍스트 비교 외의 세션 화면은 이 검사에 없습니다.
+- 코드 변경 규칙: `gui/`를 고치는 변경은 `tools/test_*`의 검사를 함께 추가하거나 고칩니다. GitHub Actions(`.github/workflows/test.yml`)가 푸시와 PR마다 회귀 검사를 실행하고, PR에서 `gui/`만 바뀌고 테스트가 바뀌지 않았으면 설명에 `테스트 생략 사유:`가 적혀 있지 않은 한 실패합니다.
 - [2026-10-14 수정 결과](APP_FIXES_2026-10-14.md): 안전한 저장, 미저장 변경 보호, 작업 종료 대기, 자동화 종료 코드 수정.
 
 - `tools/ui.ps1` 로 실제 창을 띄워 컨트롤 ID로 클릭·입력·키 입력을 보내고, 화면 캡처와 결과 파일을 비교했습니다 (`tools/t_*.ps1` 시나리오).

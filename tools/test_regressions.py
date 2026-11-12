@@ -1,6 +1,6 @@
 """Build and exercise real NASM objects and unattended GUI CLI in isolated fixtures.
 Requires Windows, Python 3, NASM and MinGW-w64 (gcc, windres, objcopy).
-No desktop input automation, user files or installed settings are used.
+No desktop input automation, user files or installed settings are used; the UI test keeps its window hidden.
 """
 from pathlib import Path
 import re
@@ -42,6 +42,9 @@ exports={"main":["view_can_close","frame_proc","g_nsess","g_sess"],"text":["text
 for mod,names in exports.items():
     run(["objcopy",*["--globalize-symbol="+n for n in names],OUT/(mod+".obj"),OUT/(mod+".test.obj")])
 run(["gcc","-I",OUT,ROOT/"tools/test_view_state.c",*[OUT/(m+(".test" if m in exports else "")+".obj") for m in MODS],*["-Wl,--wrap="+x for x in ["SendMessageW","GetWindowLongPtrW","GetDlgItem","GetWindowTextW","SetWindowTextW","InvalidateRect","msgbox","DestroyWindow","EnableWindow","SetTimer","KillTimer"]],*LIBS,"-o",OUT/"test_view_state.exe"])
+# UI behaviour: the whole application in one process with a hidden window (tools/test_ui.c)
+run(["objcopy","--redefine-sym","WinMain=bc_winmain",OUT/"main.obj",OUT/"main.ui.obj"])
+run(["gcc",ROOT/"tools/test_ui.c",*[OUT/(m+(".ui" if m=="main" else "")+".obj") for m in MODS],*["-Wl,--wrap="+x for x in ["GetCommandLineW","ShowWindow","GetKeyState","MessageBoxW","update_start"]],*LIBS,"-o",OUT/"test_ui.exe"])
 # Keep the fixture directory and logs for inspection. Each run has independent paths.
 fixtures=Path(tempfile.mkdtemp(prefix="fixtures-",dir=OUT))
 print("Fixtures:",fixtures)
@@ -50,6 +53,10 @@ for name in ["test_safe_save","test_view_state"]:
     (fixtures/(name+".log")).write_text(r.stdout,encoding="utf-8")
 for d in ["left","right","emptyA","emptyB","dirLeft/only-left","dirRight","local-app-data","detail_files/0.html","syncLeft","syncRight"]:
     (fixtures/d).mkdir(parents=True,exist_ok=True)
+(fixtures/"ui/local-app-data").mkdir(parents=True)
+r=run([OUT/"test_ui.exe"],fixtures/"ui",timeout=90,env=dict(os.environ,LOCALAPPDATA=str(fixtures/"ui/local-app-data")))
+(fixtures/"test_ui.log").write_text(r.stdout,encoding="utf-8")
+ui_checks=int(re.search(r"(\d+) checks, 0 failures",r.stdout).group(1))
 (fixtures/"left/file.txt").write_text("left",encoding="utf-8")
 (fixtures/"right/file.txt").write_text("different",encoding="utf-8")
 env=dict(os.environ,LOCALAPPDATA=str(fixtures/"local-app-data"))
@@ -148,4 +155,4 @@ assert not any((ex/f).exists() for f in ["w1.xlsx","w2.docx","w3.xlsx","w4.xlsx"
 assert not any((ex/f).exists() for f in ["e4.docx","e7.docx"])
 print("PASS export file contents")
 (fixtures/"cli-results.json").write_text(json.dumps(LOG,indent=2),encoding="utf-8")
-print("All regression checks passed: 36 save + 19 state/worker +",len(LOG),"CLI cases")
+print("All regression checks passed: 36 save + 19 state/worker +",ui_checks,"UI +",len(LOG),"CLI cases")
