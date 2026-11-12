@@ -83,6 +83,25 @@ gt_paint:
     shl rax, 4
     add rax, [r12+TV_ROWS]
     mov rbp, rax                     ; row
+    cmp dword [rbp], 4
+    jne .notfold
+    ; folded fragment: a flat strip with a centred "..." instead of a line number
+    invoke CreateSolidBrush, #[th_tc_gap]
+    mov [rsp+P_BR+16], rax
+    mov dword [rsp+P_BR], 0
+    mov [rsp+P_BR+4], r15d
+    mov eax, [rsp+P_RC+8]
+    mov [rsp+P_BR+8], eax
+    mov eax, r15d
+    add eax, [rsp+P_H]
+    mov [rsp+P_BR+12], eax
+    invoke FillRect, rdi, &rsp+P_BR, [rsp+P_BR+16]
+    invoke DeleteObject, [rsp+P_BR+16]
+    mov word [rsp+P_BUF], 0x22EF
+    mov word [rsp+P_BUF+2], 0
+    invoke DrawTextW, rdi, &rsp+P_BUF, -1, &rsp+P_BR, 0x0825   ; DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX
+    jmp .next
+.notfold:
     ; band: the gutter row carries the colour of its block, so the gutters and panes read as one ribbon
     mov ecx, [rbp+4]
     cmp qword [rbx+GT_SIDE], 0
@@ -290,6 +309,8 @@ gt_click:
     shl rax, 4
     add rax, [r13+TV_ROWS]
     cmp dword [rax], 0
+    je .d
+    cmp dword [rax], 4               ; a folded fragment has no block
     je .d
     mov ecx, [rax+12]                ; block
     cmp ecx, -1

@@ -85,6 +85,7 @@ tv_align_set:
     mov rsi, rcx
     mov rbx, rdx
     mov r12, r8
+    invoke tv_unfold, rsi, rbx
     cmp dword [rbx+TV_LDA], 0
     je .hint
     invoke SendMessageW, [rbx+TV_HA], EM_EXGETSEL, 0, &rsp+96
@@ -134,6 +135,7 @@ tv_align_clear:
     mov rsi, rcx
     mov rbx, rdx
     mov r12, r8
+    invoke tv_unfold, rsi, rbx
     cmp dword [rbx+TV_NANC], 0
     je .d
     mov dword [rbx+TV_NANC], 0
