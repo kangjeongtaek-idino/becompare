@@ -255,26 +255,26 @@ tv_color:
     ; kind 3: only in B
     mov r8, [rsp+112]
     add r8, rdi
-    invoke rich_bk, [r12+TV_HA], rdi, r8, #[th_panel]
+    invoke rich_bk, [r12+TV_HA], rdi, r8, #[th_tc_gap]
     mov r8, [rsp+128]
     add r8, rbp
-    invoke rich_bk, [r12+TV_HB], rbp, r8, #[th_ronly]
+    invoke rich_bk, [r12+TV_HB], rbp, r8, #[th_tc_ins]
     jmp .adv
 .k2:
     mov r8, [rsp+112]
     add r8, rdi
-    invoke rich_bk, [r12+TV_HA], rdi, r8, #[th_lonly]
+    invoke rich_bk, [r12+TV_HA], rdi, r8, #[th_tc_del]
     mov r8, [rsp+128]
     add r8, rbp
-    invoke rich_bk, [r12+TV_HB], rbp, r8, #[th_panel]
+    invoke rich_bk, [r12+TV_HB], rbp, r8, #[th_tc_gap]
     jmp .adv
 .k1:
     mov r8, [rsp+112]
     add r8, rdi
-    invoke rich_bk, [r12+TV_HA], rdi, r8, #[th_diff]
+    invoke rich_bk, [r12+TV_HA], rdi, r8, #[th_tc_mod]
     mov r8, [rsp+128]
     add r8, rbp
-    invoke rich_bk, [r12+TV_HB], rbp, r8, #[th_diff]
+    invoke rich_bk, [r12+TV_HB], rbp, r8, #[th_tc_mod]
     ; common prefix of the two lines
     mov rdx, [rsp+104]
     mov r8, [rsp+120]
@@ -319,7 +319,7 @@ tv_color:
     sub r8, [rsp+144]
     cmp rax, r8
     jae .nohl_a
-    invoke rich_bk, [r12+TV_HA], rax, r8, #[th_hl]
+    invoke rich_bk, [r12+TV_HA], rax, r8, #[th_tc_modin]
 .nohl_a:
     mov rax, rbp
     add rax, [rsp+136]
@@ -328,7 +328,7 @@ tv_color:
     sub r8, [rsp+144]
     cmp rax, r8
     jae .adv
-    invoke rich_bk, [r12+TV_HB], rax, r8, #[th_hl]
+    invoke rich_bk, [r12+TV_HB], rax, r8, #[th_tc_modin]
 .adv:
     add rdi, [rsp+112]
     inc rdi

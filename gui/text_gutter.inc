@@ -83,6 +83,40 @@ gt_paint:
     shl rax, 4
     add rax, [r12+TV_ROWS]
     mov rbp, rax                     ; row
+    ; band: the gutter row carries the colour of its block, so the gutters and panes read as one ribbon
+    mov ecx, [rbp+4]
+    cmp qword [rbx+GT_SIDE], 0
+    je .tidx
+    mov ecx, [rbp+8]
+.tidx:
+    cmp ecx, -1
+    je .tgap
+    mov eax, [rbp]
+    test eax, eax
+    jz .notint
+    mov ecx, [th_tc_mod]
+    cmp eax, 1
+    je .tfill
+    mov ecx, [th_tc_del]
+    cmp eax, 2
+    je .tfill
+    mov ecx, [th_tc_ins]
+    jmp .tfill
+.tgap:
+    mov ecx, [th_tc_gap]             ; this side has no line in the block
+.tfill:
+    invoke CreateSolidBrush, rcx
+    mov [rsp+P_BR+16], rax
+    mov dword [rsp+P_BR], 0
+    mov [rsp+P_BR+4], r15d
+    mov eax, [rsp+P_RC+8]
+    mov [rsp+P_BR+8], eax
+    mov eax, r15d
+    add eax, [rsp+P_H]
+    mov [rsp+P_BR+12], eax
+    invoke FillRect, rdi, &rsp+P_BR, [rsp+P_BR+16]
+    invoke DeleteObject, [rsp+P_BR+16]
+.notint:
     invoke bm_has, r12, r14
     test eax, eax
     jz .nobm
@@ -122,13 +156,13 @@ gt_paint:
     test eax, eax
     jz .next
     ; colour bar on the inner edge
-    mov ecx, 0x00A5FF                ; changed: amber
+    mov ecx, [th_tc_modb]            ; modified: blue
     cmp eax, 1
     je .bar
-    mov ecx, 0x3030E0                ; only here: red
+    mov ecx, [th_tc_delb]            ; only on the left: deleted, grey
     cmp eax, 2
     je .bar
-    mov ecx, 0x30B030                ; only here (right side): green
+    mov ecx, [th_tc_insb]            ; only on the right: inserted, green
 .bar:
     invoke CreateSolidBrush, rcx
     mov [rsp+P_BR+16], rax
@@ -323,13 +357,13 @@ mm_paint:
     shl rax, 4
     add rax, [rbx+TV_ROWS]
     mov eax, [rax]
-    mov ecx, 0x00A5FF
+    mov ecx, [th_tc_modb]
     cmp eax, 1
     je .col
-    mov ecx, 0x3030E0
+    mov ecx, [th_tc_delb]
     cmp eax, 2
     je .col
-    mov ecx, 0x30B030
+    mov ecx, [th_tc_insb]
 .col:
     invoke CreateSolidBrush, rcx
     mov rbp, rax
