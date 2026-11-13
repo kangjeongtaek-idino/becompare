@@ -1,5 +1,7 @@
 section .rdata
 WSTR s_c_uni, "통합 보기"
+WSTR s_c_word, "단어 강조"
+WSTR s_c_scrl, "스크롤 동기화"
 section .text
 
 ; text_uni.inc - unified view (IntelliJ "Unified viewer")

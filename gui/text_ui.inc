@@ -533,6 +533,9 @@ text_compare:
     mov rsi, rcx
     mov rbx, rdx
     mov r12, r8
+    invoke get_chk, rsi, ID_CHK_WORD
+    movzx eax, al
+    mov [rbx+TV_WORDS], rax
     invoke get_chk, rsi, ID_CHK_UNI
     movzx eax, al
     cmp rax, [rbx+TV_UNI]            ; another row layout: the stored fragment keys no longer fit
@@ -1046,6 +1049,8 @@ tv_layout:
     PLACE ID_CHK_IDS, 140
     PLACE ID_CHK_FOLD, 170
     PLACE ID_CHK_UNI, 110
+    PLACE ID_CHK_WORD, 110
+    PLACE ID_CHK_SCRL, 130
     PLACE ID_LBL_INFO, 520
     lea r13d, [r13+r15]
     add r13d, r14d
@@ -1301,6 +1306,8 @@ tv_proc:
     invoke mk_chk, rsi, &s_c_ids, ID_CHK_IDS, 0
     invoke mk_chk, rsi, &s_c_fold, ID_CHK_FOLD, 0
     invoke mk_chk, rsi, &s_c_uni, ID_CHK_UNI, 0
+    invoke mk_chk, rsi, &s_c_word, ID_CHK_WORD, 1
+    invoke mk_chk, rsi, &s_c_scrl, ID_CHK_SCRL, 1
     invoke mk_lbl, rsi, &s_l_rules, ID_LBL_RULES
     invoke mk_edit, rsi, ID_EDIT_RULES
     invoke mk_lbl, rsi, &s_info0, ID_LBL_INFO
@@ -1417,6 +1424,10 @@ tv_proc:
     je .doreq
     cmp ebx, ID_CHK_UNI
     je .doreq
+    cmp ebx, ID_CHK_WORD
+    je .doreq
+    cmp ebx, ID_CHK_SCRL
+    je .scrl
     cmp ebx, ID_CHK_CASE
     jb .def
     cmp ebx, ID_CHK_CMT
@@ -1493,6 +1504,9 @@ tv_proc:
 .posted:
     cmp qword [r15+TV_GUARD], 0
     jne .zero
+    invoke get_chk, rsi, ID_CHK_SCRL
+    test eax, eax
+    jz .zero                         ; scroll sync is off
     mov rdi, [r15+TV_HA]
     mov rbp, [r15+TV_HB]
     cmp ebx, ID_RA
@@ -1509,6 +1523,14 @@ tv_proc:
     invoke SendMessageW, rbp, EM_LINESCROLL, 0, rbx
     mov qword [r15+TV_GUARD], 0
     jmp .zero
+
+.scrl:                               ; sync turned on: the right pane follows the left one
+    invoke get_chk, rsi, ID_CHK_SCRL
+    test eax, eax
+    jz .zero
+    mov rdi, [r15+TV_HA]
+    mov rbp, [r15+TV_HB]
+    jmp .sync
 
 .notify:
     mov eax, [r13+NMH_CODE]
@@ -1596,6 +1618,8 @@ WSTR tt_text_11, "식별자(변수·함수 이름) 차이를 무시합니다"
 WSTR tt_text_12, "비교할 때 같은 것으로 볼 문자열 규칙 (old=new;old2=new2)"
 WSTR tt_text_13, "찾을 문자열"
 WSTR tt_text_fold, "변경이 없는 긴 구간을 한 줄로 접어 차이만 모아 봅니다"
+WSTR tt_text_scrl, "끄면 두 창을 따로 스크롤합니다. 다시 켜면 오른쪽 창이 왼쪽 창 위치로 맞춰집니다"
+WSTR tt_text_word, "줄 안의 바뀐 단어를 따로 강조합니다. 끄면 바뀐 줄 전체만 칠합니다"
 WSTR tt_text_uni, "좌우 두 창 대신 삭제·추가 줄을 한 창에 이어서 보여 줍니다"
 WSTR tt_text_14, "다음 일치 항목으로 이동합니다"
 WSTR tt_text_15, "이전 일치 항목으로 이동합니다"
@@ -1627,5 +1651,7 @@ tt_text:
     dq ID_ED_CASE, tt_text_19
     dq ID_CHK_FOLD, tt_text_fold
     dq ID_CHK_UNI, tt_text_uni
+    dq ID_CHK_WORD, tt_text_word
+    dq ID_CHK_SCRL, tt_text_scrl
     dq 0, 0
 section .text
