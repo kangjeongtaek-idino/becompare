@@ -59,7 +59,9 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define TV_BM     2896
 %define TV_NBM    3152
 %define TV_PEND   3408           ; a redraw request (WM_APP+50) is already in the queue
-%define TV_SIZE   3440
+%define TV_FOLD   3440          ; fold option read at the last compare
+%define TV_FOLDED 3448          ; the displayed rows are folded
+%define TV_SIZE   3472
 %define E_HR      40
 %define ID_ED_FIND   303
 %define ID_ED_NEXT   304
@@ -70,6 +72,7 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define ID_ED_CASE   309
 %define ID_ED_LFIND  312
 %define ID_CHK_IDS   216
+%define ID_CHK_FOLD  217
 %define ID_EDIT_RULES 232
 %define ID_LBL_RULES 233
 %define TV_RULES  3168
@@ -249,6 +252,7 @@ sum_len:
 %include "text_ui.inc"
 %include "text_xl.inc"
 %include "text_word.inc"
+%include "text_fold.inc"
 %include "text_gutter.inc"
 %include "text_syn.inc"
 %include "text_align.inc"

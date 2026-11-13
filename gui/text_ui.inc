@@ -30,7 +30,8 @@ tv_build:
     add rax, [rsp+104]
     mov rcx, [r13+8]
     add rcx, [r14+8]
-    lea rax, [rax+rcx*2+16]          ; characters per buffer (generous)
+    lea rcx, [rcx+rcx*2]             ; 3 chars per line
+    lea rax, [rax+rcx*2+64]          ; = 6 per line: generous, folded labels are longer than 1 char / row
     lea rcx, [rax*2]
     mov [rsp+104], rcx
     call malloc
@@ -116,13 +117,49 @@ tv_build:
 .rowsdone:
     mov [r12+TV_NROWS], rsi
     mov [r12+TV_NBLK], rbp
-    mov r15, rsi                     ; rows
+    EPILOG 192
+
+; tv_texts(tv, LA, LB): the pane texts (TV_BUFA / TV_BUFB) from the current rows
+tv_texts:
+    PROLOG 288
+    mov r12, rcx
+    mov r13, rdx
+    mov r14, r8
+    mov rbx, [r12+TV_ROWS]
+    mov r15, [r12+TV_NROWS]
     mov rdi, [r12+TV_BUFA]
     mov rbp, [r12+TV_BUFB]
     xor esi, esi
 .t:
     cmp rsi, r15
     jae .tdone
+    mov rax, rsi
+    shl rax, 4
+    add rax, rbx
+    cmp dword [rax], 4
+    jne .norm
+    invoke fold_label, &rsp+112, [rax+12]       ; folded fragment: the same label line in both panes
+    lea r8, [rsp+112]
+.k4a:
+    movzx eax, word [r8]
+    test eax, eax
+    jz .k4b
+    mov [rdi], ax
+    mov [rbp], ax
+    add rdi, 2
+    add rbp, 2
+    add r8, 2
+    jmp .k4a
+.k4b:
+    lea r9, [rsi+1]
+    cmp r9, r15
+    jae .nx
+    mov word [rdi], 13
+    add rdi, 2
+    mov word [rbp], 13
+    add rbp, 2
+    jmp .nx
+.norm:
     mov rax, rsi
     shl rax, 4
     add rax, rbx
@@ -185,7 +222,7 @@ tv_build:
     sub rax, [r12+TV_BUFB]
     shr rax, 1
     mov [r12+TV_LENB], rax
-    EPILOG 192
+    EPILOG 288
 
 ; tv_color(tv, LA, LB): paint changed rows and the differing span inside them
 tv_color:
@@ -252,6 +289,8 @@ tv_color:
     je .k1
     cmp ecx, 2
     je .k2
+    cmp ecx, 4
+    je .k4
     ; kind 3: only in B
     mov r8, [rsp+112]
     add r8, rdi
@@ -259,6 +298,18 @@ tv_color:
     mov r8, [rsp+128]
     add r8, rbp
     invoke rich_bk, [r12+TV_HB], rbp, r8, #[th_tc_ins]
+    jmp .adv
+.k4:                                 ; folded fragment: neutral band over the label line
+    mov rax, [rsp+96]
+    invoke fold_label, &rsp+152, [rax+12]
+    mov [rsp+112], rax
+    mov [rsp+128], rax
+    mov r8, rax
+    add r8, rdi
+    invoke rich_bk, [r12+TV_HA], rdi, r8, #[th_tc_gap]
+    mov r8, [rsp+128]
+    add r8, rbp
+    invoke rich_bk, [r12+TV_HB], rbp, r8, #[th_tc_gap]
     jmp .adv
 .k2:
     mov r8, [rsp+112]
@@ -370,6 +421,8 @@ text_side:
     invoke wcscmp, &rsp+96, rdi
     test eax, eax
     jnz .load
+    cmp qword [rbx+TV_FOLDED], 0     ; folded panes do not hold the file text: keep the stored copy
+    jne .keep
     invoke GetDlgItem, rsi, r14
     invoke rich_get_text, rax, &rsp+1140
     test rax, rax
@@ -380,6 +433,9 @@ text_side:
     invoke free, [r15]
     mov [r15], r13
     mov [r15+8], r14
+    mov eax, 1
+    EPILOG 1216
+.keep:
     mov eax, 1
     EPILOG 1216
 .load:
@@ -539,6 +595,16 @@ text_compare:
 .norules:
     invoke tv_cmp_anch, rbx, &rsp+C_LA, &rsp+C_LB, r13, &rsp+C_CP, &rsp+C_HV
     invoke tv_build, rbx, &rsp+C_LA, &rsp+C_LB, &rsp+C_HV
+    mov qword [rbx+TV_FOLDED], 0
+    invoke get_chk, rsi, ID_CHK_FOLD
+    movzx eax, al
+    mov [rbx+TV_FOLD], rax
+    test eax, eax
+    jz .nofold
+    invoke tv_fold_rows, rbx
+    mov [rbx+TV_FOLDED], rax
+.nofold:
+    invoke tv_texts, rbx, &rsp+C_LA, &rsp+C_LB
     invoke SendMessageW, [rbx+TV_HA], WM_SETREDRAW, 0, 0
     invoke SendMessageW, [rbx+TV_HB], WM_SETREDRAW, 0, 0
     ; no notifications while the panes are filled and coloured: each coloured span moves the selection and
@@ -547,6 +613,8 @@ text_compare:
     ; among them the WM_CLOSE that ends an unattended run.
     invoke rich_quiet, [rbx+TV_HA], 1
     invoke rich_quiet, [rbx+TV_HB], 1
+    invoke SendMessageW, [rbx+TV_HA], EM_SETREADONLY, 0, 0
+    invoke SendMessageW, [rbx+TV_HB], EM_SETREADONLY, 0, 0
     invoke rich_set_text, [rbx+TV_HA], [rbx+TV_BUFA]
     invoke rich_set_text, [rbx+TV_HB], [rbx+TV_BUFB]
     invoke rich_theme, [rbx+TV_HA]
@@ -566,6 +634,8 @@ text_compare:
     invoke SendMessageW, [rbx+TV_HB], EM_SETMODIFY, [rsp+440], 0
     invoke rich_quiet, [rbx+TV_HA], 0
     invoke rich_quiet, [rbx+TV_HB], 0
+    invoke SendMessageW, [rbx+TV_HA], EM_SETREADONLY, [rbx+TV_FOLDED], 0   ; the folded view is not the file text
+    invoke SendMessageW, [rbx+TV_HB], EM_SETREADONLY, [rbx+TV_FOLDED], 0
     invoke SendMessageW, [rbx+TV_HA], WM_SETREDRAW, 1, 0
     invoke SendMessageW, [rbx+TV_HB], WM_SETREDRAW, 1, 0
     invoke InvalidateRect, [rbx+TV_HA], 0, 1
@@ -748,6 +818,7 @@ tv_copy:
     mov rbx, rdx
     mov r12, r8
     mov r13d, r9d
+    invoke tv_unfold, rsi, rbx
     mov rax, [rbx+TV_FORCE]
     cmp rax, -1
     jne .forced
@@ -834,6 +905,7 @@ tv_save:
     mov rsi, rcx
     mov rbx, rdx
     mov r12d, r8d
+    invoke tv_unfold, rsi, rbx
     mov r13d, ID_EDIT_A
     mov r14d, ID_RA
     lea r15, [rbx+TV_TXA]
@@ -936,6 +1008,7 @@ tv_layout:
     PLACE ID_EDIT_CMT, 56
     PLACE ID_CHK_SYN, 100
     PLACE ID_CHK_IDS, 140
+    PLACE ID_CHK_FOLD, 170
     PLACE ID_LBL_INFO, 520
     lea r13d, [r13+r15]
     add r13d, r14d
@@ -1163,6 +1236,7 @@ tv_proc:
     invoke mk_btn, rsi, &s_ed_rall, ID_ED_RALL
     invoke mk_chk, rsi, &s_ed_case, ID_ED_CASE, 0
     invoke mk_chk, rsi, &s_c_ids, ID_CHK_IDS, 0
+    invoke mk_chk, rsi, &s_c_fold, ID_CHK_FOLD, 0
     invoke mk_lbl, rsi, &s_l_rules, ID_LBL_RULES
     invoke mk_edit, rsi, ID_EDIT_RULES
     invoke mk_lbl, rsi, &s_info0, ID_LBL_INFO
@@ -1274,6 +1348,8 @@ tv_proc:
     cmp ebx, ID_ED_RALL
     je .f_all
     cmp ebx, ID_CHK_IDS
+    je .doreq
+    cmp ebx, ID_CHK_FOLD
     je .doreq
     cmp ebx, ID_CHK_CASE
     jb .def
@@ -1431,6 +1507,7 @@ tv_find_cmd:
     invoke ed_find, rsi, &rsp+96, r8
     EPILOG 192
 .rep:
+    invoke tv_unfold, rsi, rbx
     lea r8d, [r12-2]
     invoke ed_replace, rsi, &rsp+96, r8
     EPILOG 192

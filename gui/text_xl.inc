@@ -144,6 +144,7 @@ text_export:
     PROLOG 1200
     mov rsi, rcx
     mov rbx, rdx
+    invoke tv_unfold, rsi, rbx            ; the export is always the full comparison
     cmp qword [rbx+TV_NROWS], 0
     je .norun
     invoke ex_pick, rsi, &rsp+400, 0
