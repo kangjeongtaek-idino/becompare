@@ -115,6 +115,7 @@ gt_paint:
     mov eax, [rbp]
     test eax, eax
     jz .notint
+.tkind:
     mov ecx, [th_tc_mod]
     cmp eax, 1
     je .tfill
@@ -126,6 +127,12 @@ gt_paint:
     mov ecx, [th_tc_ins]
     jmp .tfill
 .tgap:
+    cmp qword [r12+TV_UNI], 0        ; unified: both gutters carry the colour of the line itself
+    je .tgap2
+    mov eax, [rbp]
+    test eax, eax
+    jnz .tkind
+.tgap2:
     mov ecx, [th_tc_gap]             ; this side has no line in the block
 .tfill:
     invoke CreateSolidBrush, rcx
