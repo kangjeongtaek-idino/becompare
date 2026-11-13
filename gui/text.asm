@@ -5,7 +5,7 @@
 %include "inc/app.inc"
 %include "inc/export.inc"
 
-extern PostMessageW
+extern PostMessageW, wcsstr
 extern g_batch, g_xl_path, g_exitcode, g_hframe, batch_done
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetFocus, GetWindowTextW, SetWindowTextW
@@ -61,7 +61,9 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define TV_PEND   3408           ; a redraw request (WM_APP+50) is already in the queue
 %define TV_FOLD   3440          ; fold option read at the last compare
 %define TV_FOLDED 3448          ; the displayed rows are folded
-%define TV_SIZE   3472
+%define TV_OPTS   3472          ; compare options of the last compare (engine flags)
+%define TV_CMT    3480          ; comment prefix of the last compare, wchar[64]
+%define TV_SIZE   3616
 %define E_HR      40
 %define ID_ED_FIND   303
 %define ID_ED_NEXT   304

@@ -593,6 +593,8 @@ text_compare:
     lea rax, [rbx+TV_RULES]
     mov [g_tc_rules], rax
 .norules:
+    mov [rbx+TV_OPTS], r13                ; the word level highlight follows the same options
+    invoke wcscpy, &rbx+TV_CMT, &rsp+C_CP
     invoke tv_cmp_anch, rbx, &rsp+C_LA, &rsp+C_LB, r13, &rsp+C_CP, &rsp+C_HV
     invoke tv_build, rbx, &rsp+C_LA, &rsp+C_LB, &rsp+C_HV
     mov qword [rbx+TV_FOLDED], 0
