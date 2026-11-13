@@ -1529,6 +1529,7 @@ WSTR tt_text_10, "파일 형식에 맞춰 구문에 색을 입힙니다"
 WSTR tt_text_11, "식별자(변수·함수 이름) 차이를 무시합니다"
 WSTR tt_text_12, "비교할 때 같은 것으로 볼 문자열 규칙 (old=new;old2=new2)"
 WSTR tt_text_13, "찾을 문자열"
+WSTR tt_text_fold, "변경이 없는 긴 구간을 한 줄로 접어 차이만 모아 봅니다"
 WSTR tt_text_14, "다음 일치 항목으로 이동합니다"
 WSTR tt_text_15, "이전 일치 항목으로 이동합니다"
 WSTR tt_text_16, "바꿀 문자열"
@@ -1557,5 +1558,6 @@ tt_text:
     dq ID_ED_RONE, tt_text_17
     dq ID_ED_RALL, tt_text_18
     dq ID_ED_CASE, tt_text_19
+    dq ID_CHK_FOLD, tt_text_fold
     dq 0, 0
 section .text
