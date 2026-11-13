@@ -9,7 +9,7 @@ extern memset
 extern mk, scl, browse_folder, browse_open, g_iconfont, g_hinst, CreateWindowExW, GetParent, GetWindowLongPtrW, PostMessageW
 extern th_bg, th_fg, th_panel, th_bgbrush, th_panelbrush
 
-global mk_icon, tip_add, glyph_swap, icon_set
+global mk_icon, tip_add, glyph_swap, icon_set, tips_apply
 global g_base, g_edit, g_run
 global g_rot, g_flh, g_flv, g_zout, g_zin, g_fit, g_usel, g_user, g_both, g_save
 global g_copyr, g_copyl, g_mover, g_movel, g_del, g_sync, g_pause, g_report, g_snap, g_expand, g_collapse, g_prev, g_next
@@ -89,9 +89,10 @@ tip_add:
     jne .have
     invoke CreateWindowExW, 8, &cn_tip, 0, WS_POPUP|3, #0x80000000, #0x80000000, #0x80000000, #0x80000000, 0, 0, [g_hinst], 0
     mov [g_tip], rax
+    invoke SendMessageW, [g_tip], 0x0418, 0, 420        ; TTM_SETMAXTIPWIDTH: longer texts wrap
 .have:
     invoke memset, &rsp+96, 0, 72
-    mov dword [rsp+96], 72
+    mov dword [rsp+96], 64             ; TTTOOLINFOW_V2_SIZE: the size every version of the control accepts
     mov dword [rsp+100], 0x11          ; TTF_IDISHWND | TTF_SUBCLASS
     invoke GetParent, rsi
     mov [rsp+104], rax
@@ -99,6 +100,26 @@ tip_add:
     mov [rsp+144], rdi
     invoke SendMessageW, [g_tip], 0x0432, 0, &rsp+96     ; TTM_ADDTOOLW
     EPILOG 192
+
+; tips_apply(parent, table): a tooltip for each control of the parent that the table names.
+; table = pairs { control id, text }, ended by a zero id; controls that do not exist are skipped.
+tips_apply:
+    PROLOG 64
+    mov rsi, rcx
+    mov rbx, rdx
+.l:
+    mov rdi, [rbx]
+    test rdi, rdi
+    jz .d
+    invoke GetDlgItem, rsi, rdi
+    test rax, rax
+    jz .n
+    invoke tip_add, rax, [rbx+8]
+.n:
+    add rbx, 16
+    jmp .l
+.d:
+    EPILOG 64
 
 ; mk_edit(parent, id)
 mk_edit:
@@ -141,6 +162,7 @@ pb_create:
     invoke mk_icon, rsi, &glyph_swap, ID_SWAP
     invoke tip_add, rax, &s_tip_swap
     invoke mk_btn, rsi, &s_compare, ID_COMPARE
+    invoke tips_apply, rsi, &tt_pb
     EPILOG 64
 
 ; pb_layout(hview, width, y) -> eax = y of the row below the path bar
@@ -467,3 +489,20 @@ icon_set:
     invoke tip_add, rsi, rdi
 .d:
     EPILOG 64
+
+; ---------------------------------------------------------------- tooltips of this view
+section .rdata
+WSTR tt_pb_0, "왼쪽 경로"
+WSTR tt_pb_1, "오른쪽 경로"
+WSTR tt_pb_2, "왼쪽 경로 찾아보기"
+WSTR tt_pb_3, "오른쪽 경로 찾아보기"
+WSTR tt_pb_4, "비교를 실행합니다 (F5)"
+align 8
+tt_pb:
+    dq ID_EDIT_A, tt_pb_0
+    dq ID_EDIT_B, tt_pb_1
+    dq ID_BROWSE_A, tt_pb_2
+    dq ID_BROWSE_B, tt_pb_3
+    dq ID_COMPARE, tt_pb_4
+    dq 0, 0
+section .text

@@ -14,8 +14,10 @@ extern wcscat, wcscmp, _snwprintf
 extern g_hinst, g_hframe, g_font, g_fontb, th_bg, th_fg, th_panel, th_panelbrush, th_bgbrush, g_dark
 extern g_font_title, g_font_sub, g_font_desc, g_font_badge, g_card_iconfont
 extern th_card_bg, th_card_border, th_card_hover_bg, th_card_hover_border, th_accent, th_hl
-extern mk, reg_class, scl
+extern mk, reg_class, scl, tip_add
 extern ini_prepare, open_any_file, g_sess, g_nsess
+extern ShowWindow, SetTimer, KillTimer, InvalidateRect, GetWindowTextW, SetWindowTextW
+extern find_start, find_query, find_path, fi_state, fi_vis
 
 global home_register, home_create, ini_path_init, settings_load, recent_add, g_ini
 
@@ -24,6 +26,11 @@ global home_register, home_create, ini_path_init, settings_load, recent_add, g_i
 %define ID_RLABEL  3002
 %define ID_RDEL    3003
 %define ID_HINT    3004
+%define ID_FIND_EDIT 3010
+%define ID_FIND_BTN  3011
+%define ID_FIND_LIST 3012
+%define FIND_TIMER   77
+%define FIND_SHOWN   300                ; results listed at most
 %define BS_OWNERDRAW 0x000B
 %define MAX_RECENT 10
 
@@ -32,6 +39,7 @@ cn_home:    dw __utf16__("BCHome"), 0
 cn_static:  dw __utf16__("STATIC"), 0
 cn_button:  dw __utf16__("BUTTON"), 0
 cn_listbox: dw __utf16__("LISTBOX"), 0
+cn_edit:    dw __utf16__("EDIT"), 0
 s_empty:    dw 0
 
 ; App Header strings
@@ -39,6 +47,13 @@ WSTR s_app_title, "BeCompare"
 WSTR s_hint_text, "비교할 세션을 선택하거나 파일·폴더를 창으로 끌어다 놓으세요."
 WSTR s_rlabel,    "최근 세션"
 WSTR s_del_btn,   "기록 삭제"
+WSTR s_tip_rdel, "최근 세션 기록을 모두 지웁니다"
+WSTR s_find_btn, "파일 찾기"
+WSTR s_find_cue, "파일 이름의 일부를 입력하면 이 컴퓨터의 고정 드라이브에서 찾습니다"
+WSTR s_tip_find_edit, "찾을 파일·폴더 이름의 일부 (대소문자 구분 없음). 비우면 최근 세션 목록으로 돌아갑니다"
+WSTR s_tip_find_btn, "드라이브의 파일 이름을 색인해 찾습니다. 첫 검색 때 색인을 만들고, 그 뒤로는 바로 찾습니다"
+WSTR f_find_ready, "파일 찾기 결과 %u개 · 색인 %llu개"
+WSTR f_find_busy, "파일 찾기 결과 %u개 · 색인 중 %llu개…"
 WSTR s_chevron,   "›"
 WSTR s_pro,       "PRO"
 
@@ -404,7 +419,34 @@ home_layout:
 
     mov ecx, 22
     call scl
-    add ebp, eax                     ; rlabel_y = bottom of buttons + scl(22)
+    add ebp, eax                     ; y of the file search row = bottom of buttons + scl(22)
+
+    ; 6b. File search row: [ text field .......... ][ button ]
+    movsxd rbp, ebp
+    mov ecx, 26
+    call scl
+    mov [rsp+240], rax               ; row height (slots 240 / 248 are used by this row only)
+    mov ecx, 96
+    call scl
+    mov edi, eax                     ; button width
+    invoke GetDlgItem, rsi, ID_FIND_BTN
+    mov [rsp+248], rax
+    mov eax, r12d
+    add eax, [rsp+128]
+    sub eax, edi
+    movsxd r10, eax
+    invoke MoveWindow, [rsp+248], r10, rbp, rdi, [rsp+240], 1
+    mov ecx, 8
+    call scl
+    add eax, edi                     ; button width + gap
+    mov edi, [rsp+128]
+    sub edi, eax                     ; width of the text field
+    invoke GetDlgItem, rsi, ID_FIND_EDIT
+    mov [rsp+248], rax
+    invoke MoveWindow, [rsp+248], r12, rbp, rdi, [rsp+240], 1
+    mov ecx, 40
+    call scl
+    add ebp, eax                     ; rlabel_y
 
     ; RLABEL
     invoke GetDlgItem, rsi, ID_RLABEL
@@ -412,9 +454,9 @@ home_layout:
     mov ecx, 24
     call scl
     mov [rsp+116], eax               ; rlabel height
-    mov ecx, 300
+    mov ecx, 560
     call scl
-    mov edi, eax                     ; rlabel width
+    mov edi, eax                     ; rlabel width (it also shows the search result counts)
     movsxd rbp, ebp
     invoke MoveWindow, [rsp+112], r12, rbp, rdi, [rsp+116], 1
 
@@ -453,7 +495,10 @@ home_layout:
     jge .h
     mov eax, 80
 .h:
-    invoke MoveWindow, [rsp+112], r12, rbp, rdi, rax, 1
+    mov [rsp+116], eax
+    invoke MoveWindow, [rsp+112], r12, rbp, rdi, [rsp+116], 1
+    invoke GetDlgItem, rsi, ID_FIND_LIST             ; the search results use the same place
+    invoke MoveWindow, rax, r12, rbp, rdi, [rsp+116], 1
     EPILOG 256
 
 ; ---------------------------------------------------------------- window procedure
@@ -479,6 +524,10 @@ home_proc:
     je .cstatic
     cmp edi, WM_CTLCOLORLISTBOX
     je .clist
+    cmp edi, WM_CTLCOLOREDIT
+    je .clist
+    cmp edi, WM_TIMER
+    je .timer
     cmp edi, BC_THEME
     je .theme
     cmp edi, WM_APP+30
@@ -507,6 +556,9 @@ home_proc:
     mov eax, 1001
     add eax, ebx
     invoke mk, rsi, &cn_button, &s_empty, BS_OWNERDRAW|WS_TABSTOP, rax
+    lea rcx, [card_descs]
+    mov rdx, [rcx+rbx*8]             ; the card's own description is its tooltip
+    invoke tip_add, rax, rdx
     inc ebx
     jmp .mkbtn
 .mkdone:
@@ -516,6 +568,16 @@ home_proc:
 
     invoke mk, rsi, &cn_listbox, &s_empty, LBS_NOTIFY|WS_VSCROLL|WS_BORDER|WS_TABSTOP|0x50, ID_RECENT
     invoke mk, rsi, &cn_button, &s_del_btn, BS_OWNERDRAW|WS_TABSTOP, ID_RDEL
+    invoke tip_add, rax, &s_tip_rdel
+    ; file search: a text field and a button above the list; its results take the place of the recent sessions
+    invoke mk, rsi, &cn_edit, &s_empty, WS_BORDER|ES_AUTOHSCROLL|WS_TABSTOP, ID_FIND_EDIT
+    mov rbx, rax
+    invoke SendMessageW, rbx, 0x1501, 1, &s_find_cue     ; EM_SETCUEBANNER
+    invoke tip_add, rbx, &s_tip_find_edit
+    invoke mk, rsi, &cn_button, &s_find_btn, WS_TABSTOP, ID_FIND_BTN
+    invoke tip_add, rax, &s_tip_find_btn
+    invoke mk, rsi, &cn_listbox, &s_empty, LBS_NOTIFY|WS_VSCROLL|WS_BORDER|WS_TABSTOP|0x50, ID_FIND_LIST
+    invoke ShowWindow, rax, 0
     invoke fill_recent, rsi
     xor eax, eax
     EPILOG 192
@@ -535,6 +597,12 @@ home_proc:
     xor eax, eax
     EPILOG 192
 .chk_list:
+    cmp eax, ID_FIND_BTN
+    je .find
+    cmp eax, ID_FIND_EDIT
+    je .find_edit
+    cmp eax, ID_FIND_LIST
+    je .find_list
     cmp eax, ID_RDEL
     je .rdel
     cmp eax, ID_RECENT
@@ -550,8 +618,8 @@ home_proc:
     movsxd rax, eax
     test rax, rax
     js .none
-    invoke SendMessageW, rbx, LB_GETTEXT, rax, rdi
-    invoke open_any_file, rdi
+    mov r14, rax
+    invoke home_find_open, rbx, r14   ; own buffer: a path is longer than this frame has room for
 .none:
     xor eax, eax
     EPILOG 192
@@ -606,6 +674,39 @@ home_proc:
     xor eax, eax
     EPILOG 192
 
+.find_edit:
+    mov rax, r12
+    shr eax, 16
+    cmp eax, 0x0300                   ; EN_CHANGE: search as the text is typed
+    jne .def
+.find:
+    invoke home_find, rsi
+    xor eax, eax
+    EPILOG 192
+.timer:
+    cmp r12, FIND_TIMER               ; while the drives are being listed the results are refreshed
+    jne .def
+    invoke home_find, rsi
+    xor eax, eax
+    EPILOG 192
+.find_list:
+    mov rax, r12
+    shr eax, 16
+    cmp eax, LBN_DBLCLK               ; a found file opens like a recent session
+    jne .def
+    lea rdi, [rsp+96]
+    mov word [rdi], 0
+    invoke GetDlgItem, rsi, ID_FIND_LIST
+    mov rbx, rax
+    invoke SendMessageW, rbx, LB_GETCURSEL, 0, 0
+    movsxd rax, eax
+    test rax, rax
+    js .none
+    mov r14, rax
+    invoke home_find_open, rbx, r14
+    xor eax, eax
+    EPILOG 192
+
 .refresh:
     invoke fill_recent, rsi
     xor eax, eax
@@ -616,6 +717,97 @@ home_proc:
     invoke SetFocus, rax
     xor eax, eax
     EPILOG 192
+
+; ---------------------------------------------------------------- file search
+; home_find(hwnd): search for the text of the field and list what was found.
+;   An empty field shows the recent sessions again. The first search starts listing the drives; while
+;   that runs, a timer repeats the search so that the list fills up.
+%define HF_TXT  96                   ; wchar[200] -> 496
+%define HF_IDS  496                  ; dd[FIND_SHOWN] -> 1696
+%define HF_PATH 1696                 ; wchar[800] -> 3296
+%define HF_LBL  3296                 ; wchar[100] -> 3496
+home_find:
+    PROLOG 3520
+    mov rsi, rcx
+    invoke GetDlgItem, rsi, ID_FIND_EDIT
+    invoke GetWindowTextW, rax, &rsp+HF_TXT, 199
+    invoke GetDlgItem, rsi, ID_FIND_LIST
+    mov r12, rax
+    invoke GetDlgItem, rsi, ID_RECENT
+    mov r13, rax
+    cmp word [rsp+HF_TXT], 0
+    jne .q
+    invoke KillTimer, rsi, FIND_TIMER
+    invoke ShowWindow, r12, 0
+    invoke ShowWindow, r13, 5
+    invoke GetDlgItem, rsi, ID_RDEL
+    invoke ShowWindow, rax, 5
+    invoke GetDlgItem, rsi, ID_RLABEL
+    invoke SetWindowTextW, rax, &s_rlabel
+    EPILOG 3520
+.q:
+    call find_start
+    ; the state from before the search decides whether to search again: a listing that ends while this
+    ; search runs would otherwise leave results of a half-filled index on the screen
+    mov rax, [fi_state]
+    mov [rsp+3504], rax
+    invoke find_query, &rsp+HF_TXT, &rsp+HF_IDS, FIND_SHOWN
+    mov r14d, eax                    ; names found
+    mov r15d, eax
+    cmp r15d, FIND_SHOWN
+    jbe .c
+    mov r15d, FIND_SHOWN
+.c:
+    invoke SendMessageW, r12, WM_SETREDRAW, 0, 0
+    invoke SendMessageW, r12, LB_RESETCONTENT, 0, 0
+    xor ebx, ebx
+.l:
+    cmp ebx, r15d
+    jae .ld
+    mov edi, [rsp+HF_IDS+rbx*4]
+    invoke find_path, rdi, &rsp+HF_PATH, 790
+    test eax, eax
+    jz .ln
+    invoke SendMessageW, r12, LB_ADDSTRING, 0, &rsp+HF_PATH
+.ln:
+    inc ebx
+    jmp .l
+.ld:
+    invoke SendMessageW, r12, WM_SETREDRAW, 1, 0
+    invoke InvalidateRect, r12, 0, 1
+    invoke ShowWindow, r13, 0
+    invoke ShowWindow, r12, 5
+    invoke GetDlgItem, rsi, ID_RDEL                  ; "clear history" belongs to the recent sessions
+    invoke ShowWindow, rax, 0
+    lea rdi, [f_find_ready]
+    cmp qword [rsp+3504], 2
+    je .lb
+    lea rdi, [f_find_busy]
+.lb:
+    mov rbx, [fi_vis]
+    invoke _snwprintf, &rsp+HF_LBL, 99, rdi, r14, rbx
+    invoke GetDlgItem, rsi, ID_RLABEL
+    invoke SetWindowTextW, rax, &rsp+HF_LBL
+    cmp qword [rsp+3504], 2
+    je .kill
+    invoke SetTimer, rsi, FIND_TIMER, 700, 0
+    EPILOG 3520
+.kill:
+    invoke KillTimer, rsi, FIND_TIMER
+    EPILOG 3520
+
+; home_find_open(list, index): open the found file of that row
+home_find_open:
+    PROLOG 1696
+    mov rbx, rcx
+    mov rsi, rdx
+    invoke SendMessageW, rbx, 0x018A, rsi, 0          ; LB_GETTEXTLEN
+    cmp eax, 790
+    jae .d
+    invoke SendMessageW, rbx, LB_GETTEXT, rsi, &rsp+96
+    invoke open_any_file, &rsp+96
+.d:
+    EPILOG 1696
 
 ; ---------------------------------------------------------------- owner-drawn cards & controls
 

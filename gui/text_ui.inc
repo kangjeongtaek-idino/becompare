@@ -1166,6 +1166,7 @@ tv_proc:
     invoke mk_lbl, rsi, &s_l_rules, ID_LBL_RULES
     invoke mk_edit, rsi, ID_EDIT_RULES
     invoke mk_lbl, rsi, &s_info0, ID_LBL_INFO
+    invoke tips_apply, rsi, &tt_text
     invoke rich_create, rsi, ID_RA
     mov [r15+TV_HA], rax
     invoke rich_create, rsi, ID_RB
@@ -1433,3 +1434,51 @@ tv_find_cmd:
     lea r8d, [r12-2]
     invoke ed_replace, rsi, &rsp+96, r8
     EPILOG 192
+
+; ---------------------------------------------------------------- tooltips of this view
+extern tips_apply
+section .rdata
+WSTR tt_text_0, "왼쪽 파일을 저장합니다"
+WSTR tt_text_1, "오른쪽 파일을 저장합니다"
+WSTR tt_text_2, "양쪽에서 고른 줄을 같은 위치로 맞춰 다시 비교합니다"
+WSTR tt_text_3, "지정한 정렬을 모두 해제합니다"
+WSTR tt_text_4, "비교 결과를 엑셀 파일(.xlsx)로 저장합니다"
+WSTR tt_text_5, "대소문자 차이를 무시합니다"
+WSTR tt_text_6, "줄 안의 공백 차이를 무시합니다"
+WSTR tt_text_7, "줄 앞뒤의 공백 차이를 무시합니다"
+WSTR tt_text_8, "옆 칸의 문자로 시작하는 주석을 무시합니다"
+WSTR tt_text_9, "주석이 시작되는 문자 (예: //)"
+WSTR tt_text_10, "파일 형식에 맞춰 구문에 색을 입힙니다"
+WSTR tt_text_11, "식별자(변수·함수 이름) 차이를 무시합니다"
+WSTR tt_text_12, "비교할 때 같은 것으로 볼 문자열 규칙 (old=new;old2=new2)"
+WSTR tt_text_13, "찾을 문자열"
+WSTR tt_text_14, "다음 일치 항목으로 이동합니다"
+WSTR tt_text_15, "이전 일치 항목으로 이동합니다"
+WSTR tt_text_16, "바꿀 문자열"
+WSTR tt_text_17, "현재 일치 항목을 바꿉니다"
+WSTR tt_text_18, "일치하는 항목을 모두 바꿉니다"
+WSTR tt_text_19, "찾을 때 대소문자를 구분합니다"
+align 8
+tt_text:
+    dq ID_BTN_SVL, tt_text_0
+    dq ID_BTN_SVR, tt_text_1
+    dq ID_BTN_ALN, tt_text_2
+    dq ID_BTN_ALC, tt_text_3
+    dq ID_BTN_XLS, tt_text_4
+    dq ID_CHK_CASE, tt_text_5
+    dq ID_CHK_SPC, tt_text_6
+    dq ID_CHK_TRIM, tt_text_7
+    dq ID_CHK_CMT, tt_text_8
+    dq ID_EDIT_CMT, tt_text_9
+    dq ID_CHK_SYN, tt_text_10
+    dq ID_CHK_IDS, tt_text_11
+    dq ID_EDIT_RULES, tt_text_12
+    dq ID_ED_FIND, tt_text_13
+    dq ID_ED_NEXT, tt_text_14
+    dq ID_ED_PREV, tt_text_15
+    dq ID_ED_REPL, tt_text_16
+    dq ID_ED_RONE, tt_text_17
+    dq ID_ED_RALL, tt_text_18
+    dq ID_ED_CASE, tt_text_19
+    dq 0, 0
+section .text

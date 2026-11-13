@@ -1314,6 +1314,7 @@ fm_proc:
     sete r9b
     invoke mk_chk, rsi, &s_c_conf, ID_CHKF, r9
     invoke mk_lbl, rsi, &s_empty, ID_LBLI
+    invoke tips_apply, rsi, &tt_fmerge
     invoke mk, rsi, &cn_listv, 0, LVS_REPORT|LVS_OWNERDATA|LVS_SHOWSELALWAYS|WS_TABSTOP|WS_BORDER, ID_LST
     mov [r15+FM_HLIST], rax
     mov rbx, rax
@@ -1586,3 +1587,23 @@ fm_proc:
 section .rdata
 WSTR s_c_conf_dummy, ""
 %include "fmerge_doc.inc"
+
+; ---------------------------------------------------------------- tooltips of this view
+extern tips_apply
+section .rdata
+WSTR tt_fmerge_0, "공통 조상(Base) 폴더 경로"
+WSTR tt_fmerge_1, "Base 폴더 찾아보기"
+WSTR tt_fmerge_2, "병합 결과를 쓸 출력 폴더 경로"
+WSTR tt_fmerge_3, "출력 폴더 찾아보기"
+WSTR tt_fmerge_4, "병합 계획을 워드 파일(.docx)로 저장합니다"
+WSTR tt_fmerge_5, "충돌 항목만 표시합니다"
+align 8
+tt_fmerge:
+    dq ID_EDIT_C, tt_fmerge_0
+    dq ID_BROWSE_C, tt_fmerge_1
+    dq ID_EDIT_O, tt_fmerge_2
+    dq ID_BROWSE_O, tt_fmerge_3
+    dq ID_BTN_DOC, tt_fmerge_4
+    dq ID_CHKF, tt_fmerge_5
+    dq 0, 0
+section .text

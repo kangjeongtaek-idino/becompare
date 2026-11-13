@@ -1618,6 +1618,7 @@ tb_proc:
     invoke mk_lbl, rsi, &s_l_ign, ID_LBL_IGN
     invoke mk_edit, rsi, ID_EDIT_IGN
     invoke mk_lbl, rsi, &s_empty, ID_LBL_INFO
+    invoke tips_apply, rsi, &tt_table
     invoke mk, rsi, &cn_list, 0, LVS_REPORT|LVS_OWNERDATA|LVS_SHOWSELALWAYS|WS_TABSTOP|WS_BORDER, ID_TLIST
     mov [r15+TB_HLIST], rax
     invoke SendMessageW, rax, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_GRIDLINES
@@ -1790,3 +1791,29 @@ tb_proc:
 %include "xlsx.inc"
 %include "table_date.inc"
 %include "table_xl.inc"
+
+; ---------------------------------------------------------------- tooltips of this view
+extern tips_apply
+section .rdata
+WSTR tt_table_0, "첫 행을 머리글로 취급합니다"
+WSTR tt_table_1, "대소문자 차이를 무시합니다"
+WSTR tt_table_2, "셀 앞뒤의 공백 차이를 무시합니다"
+WSTR tt_table_3, "차이가 있는 행만 표시합니다"
+WSTR tt_table_4, "키 값 순서로 정렬해 표시합니다"
+WSTR tt_table_5, "비교 결과를 엑셀 파일(.xlsx)로 저장합니다"
+WSTR tt_table_6, "행을 짝짓는 키 열 번호 (0=행 순서, 2,3=복합 키, all=전체 열)"
+WSTR tt_table_7, "숫자·날짜를 같다고 볼 허용 오차"
+WSTR tt_table_8, "비교하지 않을 열 번호 (예: 3,5)"
+align 8
+tt_table:
+    dq ID_CHK_HDR, tt_table_0
+    dq ID_CHK_CASE, tt_table_1
+    dq ID_CHK_TRIM, tt_table_2
+    dq ID_CHK_DIFF, tt_table_3
+    dq ID_CHK_SORT, tt_table_4
+    dq ID_BTN_XLS, tt_table_5
+    dq ID_EDIT_KEY, tt_table_6
+    dq ID_EDIT_TOL, tt_table_7
+    dq ID_EDIT_IGN, tt_table_8
+    dq 0, 0
+section .text

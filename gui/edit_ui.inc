@@ -500,6 +500,7 @@ ed_proc:
     invoke mk_chk, rsi, &s_ed_case, ID_ED_CASE, 0
     invoke mk_chk, rsi, &s_c_syn, ID_ED_SYN, 1
     invoke mk_lbl, rsi, &s_empty, ID_ED_INFO
+    invoke tips_apply, rsi, &tt_edit
     invoke rich_create, rsi, ID_RA
     mov [r15+E_HR], rax
     ; options "<syntax><case>"
@@ -632,3 +633,37 @@ ed_proc:
 .zero:
     xor eax, eax
     EPILOG 320
+
+; ---------------------------------------------------------------- tooltips of this view
+extern tips_apply
+section .rdata
+WSTR tt_edit_0, "편집할 파일 경로"
+WSTR tt_edit_1, "파일 찾아보기"
+WSTR tt_edit_2, "경로의 파일을 엽니다"
+WSTR tt_edit_3, "파일을 저장합니다 (Ctrl+S)"
+WSTR tt_edit_4, "다른 이름으로 저장합니다"
+WSTR tt_edit_5, "파일 형식에 맞춰 구문에 색을 입힙니다"
+WSTR tt_edit_6, "찾을 문자열"
+WSTR tt_edit_7, "다음 일치 항목으로 이동합니다"
+WSTR tt_edit_8, "이전 일치 항목으로 이동합니다"
+WSTR tt_edit_9, "바꿀 문자열"
+WSTR tt_edit_10, "현재 일치 항목을 바꿉니다"
+WSTR tt_edit_11, "일치하는 항목을 모두 바꿉니다"
+WSTR tt_edit_12, "찾을 때 대소문자를 구분합니다"
+align 8
+tt_edit:
+    dq ID_EDIT_A, tt_edit_0
+    dq ID_BROWSE_A, tt_edit_1
+    dq ID_COMPARE, tt_edit_2
+    dq ID_ED_SAVE, tt_edit_3
+    dq ID_ED_SAVEAS, tt_edit_4
+    dq ID_ED_SYN, tt_edit_5
+    dq ID_ED_FIND, tt_edit_6
+    dq ID_ED_NEXT, tt_edit_7
+    dq ID_ED_PREV, tt_edit_8
+    dq ID_ED_REPL, tt_edit_9
+    dq ID_ED_RONE, tt_edit_10
+    dq ID_ED_RALL, tt_edit_11
+    dq ID_ED_CASE, tt_edit_12
+    dq 0, 0
+section .text

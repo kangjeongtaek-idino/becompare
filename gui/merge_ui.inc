@@ -600,6 +600,7 @@ mg_proc:
     invoke icon_set, rsi, ID_BTN_USER, &g_user, &s_b_user
     invoke icon_set, rsi, ID_BTN_BOTH, &g_both, &s_b_both
     invoke icon_set, rsi, ID_BTN_SAVE, &g_save, &s_b_save
+    invoke tips_apply, rsi, &tt_merge
     invoke mk_lbl, rsi, &s_empty, ID_LBL_INFO
     invoke rich_create, rsi, ID_RL
     mov [r15+MG_HL], rax
@@ -784,3 +785,29 @@ mg_proc:
 .zero:
     xor eax, eax
     EPILOG 320
+
+; ---------------------------------------------------------------- tooltips of this view
+extern tips_apply
+section .rdata
+WSTR tt_merge_0, "공통 조상(기준) 파일 경로. 비워 두면 두 파일만 병합합니다"
+WSTR tt_merge_1, "기준 파일 찾아보기"
+WSTR tt_merge_2, "병합 결과를 저장할 파일 경로"
+WSTR tt_merge_3, "출력 파일 찾아보기"
+WSTR tt_merge_4, "양쪽에서 고른 줄을 같은 위치로 맞춰 다시 병합합니다"
+WSTR tt_merge_5, "지정한 정렬을 모두 해제합니다"
+WSTR tt_merge_6, "남은 충돌을 모두 왼쪽 내용으로 해결합니다"
+WSTR tt_merge_7, "남은 충돌을 모두 오른쪽 내용으로 해결합니다"
+WSTR tt_merge_8, "병합 결과를 워드 파일(.docx)로 저장합니다"
+align 8
+tt_merge:
+    dq ID_EDIT_C, tt_merge_0
+    dq ID_BROWSE_C, tt_merge_1
+    dq ID_EDIT_O, tt_merge_2
+    dq ID_BROWSE_O, tt_merge_3
+    dq ID_BTN_ALN, tt_merge_4
+    dq ID_BTN_ALC, tt_merge_5
+    dq ID_BTN_ALLL, tt_merge_6
+    dq ID_BTN_ALLR, tt_merge_7
+    dq ID_BTN_DOC, tt_merge_8
+    dq 0, 0
+section .text

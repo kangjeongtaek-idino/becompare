@@ -1992,6 +1992,7 @@ fold_proc:
     invoke icon_set, rsi, ID_BTN_SNAP, &g_snap, &s_b_snap
     invoke icon_set, rsi, ID_BTN_EXPAND, &g_expand, &s_b_expand
     invoke icon_set, rsi, ID_BTN_COLLAP, &g_collapse, &s_b_collap
+    invoke tips_apply, rsi, &tt_folder
     invoke mk, rsi, &cn_list, 0, LVS_REPORT|LVS_OWNERDATA|LVS_SHOWSELALWAYS|WS_TABSTOP|WS_BORDER, ID_LIST
     mov [r15+F_HLIST], rax
     mov rbx, rax
@@ -2436,3 +2437,59 @@ fold_stamp:
 .pol:
     invoke msgbox, rsi, &s_pol_blocked, MB_OK|MB_ICONWARNING
     EPILOG 4400
+
+; ---------------------------------------------------------------- tooltips of this view
+extern tips_apply
+section .rdata
+WSTR tt_folder_0, "진행 중인 스캔을 중지합니다"
+WSTR tt_folder_1, "크기가 다르면 다른 파일로 판정합니다"
+WSTR tt_folder_2, "수정 시각이 다르면 다른 파일로 판정합니다"
+WSTR tt_folder_3, "파일 내용을 바이트 단위로 비교합니다 (오래 걸릴 수 있음)"
+WSTR tt_folder_4, "심볼릭 링크와 정션이 가리키는 폴더 안까지 비교합니다"
+WSTR tt_folder_5, "CRC32 값으로 내용을 비교합니다"
+WSTR tt_folder_6, "파일 속성(읽기 전용·숨김 등) 차이도 비교합니다"
+WSTR tt_folder_7, "비교에서 제외할 이름 패턴 (예: *.obj)"
+WSTR tt_folder_8, "제외할 패턴을 목록에서 고릅니다"
+WSTR tt_folder_9, "이 크기(KB)보다 작은 파일은 제외합니다"
+WSTR tt_folder_10, "이 크기(KB)보다 큰 파일은 제외합니다"
+WSTR tt_folder_11, "최근 이 일수 안에 수정된 파일만 비교합니다"
+WSTR tt_folder_12, "이 속성을 가진 항목은 제외합니다 (R H S A L C O E)"
+WSTR tt_folder_13, "압축 파일 안을 열지 않고 파일 하나로 비교합니다"
+WSTR tt_folder_14, "복사할 때 NTFS 권한(ACL)도 함께 복사합니다"
+WSTR tt_folder_15, "유니코드 표기나 확장자가 조금 달라도 같은 이름으로 짝짓습니다"
+WSTR tt_folder_16, "이름이 다른 파일을 짝짓는 규칙 (예: *.txt=*.bak)"
+WSTR tt_folder_17, "같은 항목을 목록에 표시합니다"
+WSTR tt_folder_18, "다른 항목을 목록에 표시합니다"
+WSTR tt_folder_19, "왼쪽에만 있는 항목을 목록에 표시합니다"
+WSTR tt_folder_20, "오른쪽에만 있는 항목을 목록에 표시합니다"
+WSTR tt_folder_21, "선택한 항목의 수정 시각과 속성을 왼쪽 값으로 오른쪽에 맞춥니다"
+WSTR tt_folder_22, "선택한 항목의 수정 시각과 속성을 오른쪽 값으로 왼쪽에 맞춥니다"
+WSTR tt_folder_23, "비교 결과를 HTML·엑셀·워드 파일로 내보냅니다"
+align 8
+tt_folder:
+    dq ID_STOP, tt_folder_0
+    dq ID_CHK_SIZE, tt_folder_1
+    dq ID_CHK_MTIME, tt_folder_2
+    dq ID_CHK_CONT, tt_folder_3
+    dq ID_CHK_LINKS, tt_folder_4
+    dq ID_CHK_CRC, tt_folder_5
+    dq ID_CHK_ATTR, tt_folder_6
+    dq ID_EDIT_EXCL, tt_folder_7
+    dq ID_BTN_EXCL, tt_folder_8
+    dq ID_EDIT_FMIN, tt_folder_9
+    dq ID_EDIT_FMAX, tt_folder_10
+    dq ID_EDIT_FDAYS, tt_folder_11
+    dq ID_EDIT_ATTRX, tt_folder_12
+    dq ID_CHK_ASFILE, tt_folder_13
+    dq ID_CHK_ACL, tt_folder_14
+    dq ID_CHK_LOOSE, tt_folder_15
+    dq ID_EDIT_MASK, tt_folder_16
+    dq ID_CHK_SAME, tt_folder_17
+    dq ID_CHK_DIFF, tt_folder_18
+    dq ID_CHK_LONLY, tt_folder_19
+    dq ID_CHK_RONLY, tt_folder_20
+    dq ID_BTN_STAMPLR, tt_folder_21
+    dq ID_BTN_STAMPRL, tt_folder_22
+    dq ID_BTN_REPORT, tt_folder_23
+    dq 0, 0
+section .text

@@ -7,6 +7,7 @@ extern CreateSolidBrush, DeleteObject, GetDeviceCaps, GetDC, ReleaseDC
 extern MessageBoxW, GetOpenFileNameW, GetSaveFileNameW, PostMessageW
 extern g_batch, g_exitcode
 extern SHBrowseForFolderW, SHGetPathFromIDListW, CoTaskMemFree
+extern MonitorFromWindow, GetMonitorInfoW, GetWindowRect, SetWindowPos, GetWindow
 extern wcslen, wcscpy, memset, malloc, _snwprintf, wcscmp
 extern GetDpiForSystem
 
@@ -75,6 +76,7 @@ th_accent:            resd 1
                 resd 1
 th_bgbrush:     resq 1
 th_panelbrush:  resq 1
+bf_again:       resq 1              ; the folder dialog is fitted once more on its first selection change
 
 section .text
 
@@ -368,6 +370,116 @@ theme_set:
 
 ; ---------------------------------------------------------------- dialogs
 
+; bf_fit(dialog, centre): keep the folder dialog inside the work area of the monitor it belongs to.
+;   The dialog remembers its last size and position; with a tall size or a low position its OK / Cancel
+;   buttons ended up below the screen. It is made no larger than the work area, centred on its owner
+;   (centre = 1) or left where it is (centre = 0), and then moved back inside the work area.
+%define BF_RC   96                   ; dialog rect
+%define BF_MI   112                  ; MONITORINFO (40): rcWork at +20
+%define BF_OW   160                  ; owner rect
+bf_fit:
+    PROLOG 192
+    mov rsi, rcx
+    mov ebx, edx
+    invoke GetWindowRect, rsi, &rsp+BF_RC
+    test eax, eax
+    jz .d
+    invoke GetWindow, rsi, 4         ; GW_OWNER
+    mov rdi, rax
+    mov rcx, rsi
+    test rdi, rdi
+    jz .mon
+    mov rcx, rdi
+.mon:
+    invoke MonitorFromWindow, rcx, 2 ; MONITOR_DEFAULTTONEAREST
+    mov dword [rsp+BF_MI], 40
+    invoke GetMonitorInfoW, rax, &rsp+BF_MI
+    test eax, eax
+    jz .d
+    mov r12d, [rsp+BF_RC+8]
+    sub r12d, [rsp+BF_RC]            ; width
+    mov r13d, [rsp+BF_RC+12]
+    sub r13d, [rsp+BF_RC+4]          ; height
+    mov eax, [rsp+BF_MI+28]
+    sub eax, [rsp+BF_MI+20]          ; work area width
+    cmp r12d, eax
+    jle .wok
+    mov r12d, eax
+.wok:
+    mov eax, [rsp+BF_MI+32]
+    sub eax, [rsp+BF_MI+24]          ; work area height
+    cmp r13d, eax
+    jle .hok
+    mov r13d, eax
+.hok:
+    mov r14d, [rsp+BF_RC]            ; x
+    mov r15d, [rsp+BF_RC+4]          ; y
+    test ebx, ebx
+    jz .clamp
+    test rdi, rdi
+    jz .clamp
+    invoke GetWindowRect, rdi, &rsp+BF_OW
+    test eax, eax
+    jz .clamp
+    mov eax, [rsp+BF_OW+8]
+    sub eax, [rsp+BF_OW]
+    sub eax, r12d
+    sar eax, 1
+    add eax, [rsp+BF_OW]
+    mov r14d, eax
+    mov eax, [rsp+BF_OW+12]
+    sub eax, [rsp+BF_OW+4]
+    sub eax, r13d
+    sar eax, 1
+    add eax, [rsp+BF_OW+4]
+    mov r15d, eax
+.clamp:
+    mov eax, [rsp+BF_MI+28]
+    sub eax, r12d
+    cmp r14d, eax
+    jle .x1
+    mov r14d, eax
+.x1:
+    cmp r14d, [rsp+BF_MI+20]
+    jge .x2
+    mov r14d, [rsp+BF_MI+20]
+.x2:
+    mov eax, [rsp+BF_MI+32]
+    sub eax, r13d
+    cmp r15d, eax
+    jle .y1
+    mov r15d, eax
+.y1:
+    cmp r15d, [rsp+BF_MI+24]
+    jge .y2
+    mov r15d, [rsp+BF_MI+24]
+.y2:
+    invoke SetWindowPos, rsi, 0, r14, r15, r12, r13, 0x14          ; NOZORDER | NOACTIVATE
+.d:
+    EPILOG 192
+
+; bf_cb(dialog, message, lparam, data): callback of the folder dialog
+;   1 = initialised: centre it on the owner; 2 = selection changed: the first one comes while the dialog
+;   is still being set up (it restores its remembered size after "initialised"), so fit once more.
+bf_cb:
+    PROLOG 64
+    mov rsi, rcx
+    cmp edx, 1
+    jne .sel
+    mov qword [bf_again], 1
+    invoke bf_fit, rsi, 1
+    jmp .d
+.sel:
+    cmp edx, 2
+    jne .d
+    cmp qword [bf_again], 0
+    je .d
+    mov qword [bf_again], 0
+    invoke bf_fit, rsi, 0
+.d:
+    xor eax, eax
+    EPILOG 64
+
 ; browse_folder(hwnd, out wchar[520]) -> eax 1 if chosen
 browse_folder:
     PROLOG 1200
@@ -379,6 +491,8 @@ browse_folder:
     mov [rdi], r12
     mov [rdi+16], rsi
     mov dword [rdi+32], BIF_RETURNONLYFSDIRS|BIF_NEWDIALOGSTYLE
+    lea rax, [bf_cb]
+    mov [rdi+40], rax
     invoke SHBrowseForFolderW, rdi
     test rax, rax
     jz .none

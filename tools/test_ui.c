@@ -3,6 +3,11 @@
    row colours, word level highlight, F7 / Shift+F7 navigation, the light and dark palettes.
    "test_ui merge" opens the same two files as a merge session and checks the colours of its panes.
    "test_ui fmerge" runs a folder merge into an output folder and checks what it reports and writes.
+   "test_ui browse" opens the folder dialog from a window hanging off the screen and checks where it lands.
+   "test_ui find" searches a small folder tree through the file search of the Home tab.
+   "test_ui findmft" lists the whole drive of the working folder from its file table (needs administrator
+   rights, skipped otherwise) and looks for a file created just before.
+   Every mode also checks the buttons at the right end of the tab row and that each control has a tooltip.
    WinMain of main.asm is linked as bc_winmain. Set BC_UITEST_SHOW=1 to watch the window. */
 #include <windows.h>
 #include <richedit.h>
@@ -14,7 +19,11 @@
 #include <string.h>
 #include <wchar.h>
 extern int bc_winmain(HINSTANCE);
-extern uint64_t g_dark;
+extern uint64_t g_dark, g_nsess;
+extern int browse_folder(HWND,wchar_t*);
+extern uint64_t fi_state, fi_vis, fi_mode;
+extern int find_query(const wchar_t*,uint32_t*,uint32_t);
+extern int find_path(uint32_t,wchar_t*,uint32_t);
 extern uint32_t th_lonly, th_ronly, th_conf;
 
 #define ID_RA 201
@@ -27,10 +36,18 @@ extern uint32_t th_lonly, th_ronly, th_conf;
 #define ID_RR 603
 #define ID_RM 610
 #define ID_BTN_RUNM 710
+#define IDM_CLOSE_TAB 1020
+#define IDM_EXIT 1021
+#define ID_RECENT 3001
+#define ID_RLABEL 3002
+#define ID_FIND_EDIT 3010
+#define ID_FIND_BTN 3011
+#define ID_FIND_LIST 3012
 #define IDM_LIGHT 1030
 #define IDM_DARK 1031
 
-static int checks, failed, shiftDown, boxes, mergeMode, fmergeMode, expectBoxes, shownBoxes;
+static int checks, failed, shiftDown, boxes, mergeMode, fmergeMode, browseMode, findMode, mftMode, expectBoxes, shownBoxes;
+static wchar_t findRoot[600], probeName[80], probePath[700];
 static wchar_t lastBox[400];
 static DWORD mainTid;
 static HWND frame, ra, rb, view;
@@ -191,6 +208,7 @@ static void fmergeChecks(void){
   if(run){list=FindWindowExW(GetParent(run),NULL,L"SysListView32",NULL);if(list&&SendMessageW(list,LVM_GETITEMCOUNT,0,0)>=3)break;}
   Sleep(50);
  }
+ printf("list rows: %d\n",list?(int)SendMessageW(list,LVM_GETITEMCOUNT,0,0):-1);
  check(run&&list&&SendMessageW(list,LVM_GETITEMCOUNT,0,0)==3,"folder merge lists the three files");
  if(!run||!list)return;
  expectBoxes=1;lastBox[0]=0;
@@ -213,13 +231,190 @@ static void tempFixture(void){
  swprintf(d,600,L"%ls\\A\\sub",ownTemp);SHCreateDirectoryExW(NULL,d,NULL);
  wcscat(d,L"\\f.txt");putfile(d,"extracted");
 }
+/* ---- tooltips: every button, check box, edit field and combo box of the frame has one */
+static HWND tipWnds[32];static int nTipWnds,tipless,tipped;   /* list views and tab controls have tooltip windows of their own */
+static BOOL CALLBACK onThreadTop(HWND h,LPARAM l){wchar_t c[40];(void)l;GetClassNameW(h,c,40);if(!wcscmp(c,L"tooltips_class32")&&nTipWnds<32)tipWnds[nTipWnds++]=h;return TRUE;}
+static int tipText(HWND ctl,wchar_t*out){
+ for(int i=0;i<nTipWnds;i++){
+  TOOLINFOW ti;memset(&ti,0,sizeof ti);ti.cbSize=TTTOOLINFOW_V2_SIZE;ti.hwnd=GetParent(ctl);ti.uId=(UINT_PTR)ctl;ti.lpszText=out;out[0]=0;
+  if(SendMessageW(tipWnds[i],TTM_GETTOOLINFOW,0,(LPARAM)&ti)){SendMessageW(tipWnds[i],TTM_GETTEXTW,400,(LPARAM)&ti);if(out[0])return 1;}
+ }
+ return 0;
+}
+static BOOL CALLBACK onControl(HWND h,LPARAM l){
+ wchar_t c[40],t[400];(void)l;GetClassNameW(h,c,40);
+ int want=!wcscmp(c,L"Button")||!wcscmp(c,L"Edit")||!wcscmp(c,L"ComboBox");
+ if(!wcscmp(c,L"Edit")){GetClassNameW(GetParent(h),t,40);if(!wcscmp(t,L"ComboBox"))want=0;}   /* the edit inside a combo box */
+ if(!want)return TRUE;
+ if(tipText(h,t))tipped++;else{tipless++;printf("no tooltip: %ls id %d\n",c,GetDlgCtrlID(h));}
+ return TRUE;
+}
+static void tooltipChecks(void){
+ wchar_t t[400];
+ nTipWnds=0;EnumThreadWindows(mainTid,onThreadTop,0);
+ check(nTipWnds>0,"tooltip window exists");
+ if(!nTipWnds)return;
+ for(int i=0;i<nTipWnds;i++)printf("tooltip window %d: %d tools\n",i,(int)SendMessageW(tipWnds[i],TTM_GETTOOLCOUNT,0,0));
+ tipless=tipped=0;EnumChildWindows(frame,onControl,0);
+ printf("%d controls with a tooltip, %d without\n",tipped,tipless);
+ check(tipped>0&&tipless==0,"every button, check box, edit field and combo box has a tooltip");
+ check(tipText(GetDlgItem(frame,IDM_CLOSE_TAB),t)&&wcsstr(t,L"\xD0ED")!=NULL,"close-tab button explains itself");
+ check(tipText(GetDlgItem(frame,IDM_EXIT),t)&&wcsstr(t,L"\xC885\xB8CC")!=NULL,"exit button explains itself");
+}
+/* ---- the two buttons at the right end of the tab row */
+static void tabRowChecks(void){
+ HWND tab=FindWindowExW(frame,NULL,L"SysTabControl32",NULL),bc=GetDlgItem(frame,IDM_CLOSE_TAB),bx=GetDlgItem(frame,IDM_EXIT);
+ check(tab&&bc&&bx,"tab row has a close-tab and an exit button");
+ if(!tab||!bc||!bx)return;
+ RECT rt,rc,rx,cl,disp;GetWindowRect(tab,&rt);GetWindowRect(bc,&rc);GetWindowRect(bx,&rx);GetClientRect(frame,&cl);
+ POINT o={cl.right,0};ClientToScreen(frame,&o);
+ disp=rt;SendMessageW(tab,TCM_ADJUSTRECT,0,(LPARAM)&disp);          /* top of the page area = bottom of the tab row */
+ check(rc.left>=rt.right&&rx.left>=rc.right&&rx.right<=o.x,"the buttons follow the tabs: close, then exit, inside the window");
+ check(rc.top>=rt.top&&rc.bottom<=disp.top&&rx.top>=rt.top&&rx.bottom<=disp.top,"the buttons are in the tab row, above the pages");
+ check(rc.right-rc.left>=16&&rc.bottom-rc.top>=12&&rx.right-rx.left>=16,"the buttons have a usable size");
+}
+/* close the current tab and then the application through those buttons */
+static void closeThroughButtons(void){
+ uint64_t before=g_nsess;
+ SendMessageW(GetDlgItem(frame,IDM_CLOSE_TAB),BM_CLICK,0,0);
+ for(int i=0;i<40&&g_nsess==before;i++)Sleep(50);
+ check(before>1&&g_nsess==before-1,"close-tab button closes the current tab");
+ SendMessageW(GetDlgItem(frame,IDM_CLOSE_TAB),BM_CLICK,0,0);Sleep(200);
+ check(g_nsess==before-1,"close-tab button leaves the Home tab open");
+ SendMessageW(GetDlgItem(frame,IDM_EXIT),BM_CLICK,0,0);              /* the run ends: checked by main */
+}
+/* ---- folder dialog: opened from a window that hangs off the bottom right corner of the screen,
+   the dialog and its OK button must still be inside the work area */
+static HWND dlgSeen;static RECT dlgRect,okRect,workRect;static int dlgOk;
+static BOOL CALLBACK onDialog(HWND h,LPARAM l){
+ wchar_t c[40];DWORD pid;(void)l;GetWindowThreadProcessId(h,&pid);GetClassNameW(h,c,40);
+ if(pid==GetCurrentProcessId()&&!wcscmp(c,L"#32770")&&IsWindowVisible(h)&&GetWindow(h,GW_OWNER)==frame){dlgSeen=h;return FALSE;}
+ return TRUE;
+}
+static DWORD WINAPI dialogWatcher(void*arg){
+ (void)arg;
+ for(int i=0;i<200&&!dlgSeen;i++){EnumWindows(onDialog,0);if(!dlgSeen)Sleep(50);}
+ if(!dlgSeen)return 0;
+ Sleep(1200);                                         /* let it finish restoring its size and position */
+ HWND ok=GetDlgItem(dlgSeen,IDOK);MONITORINFO mi;mi.cbSize=sizeof mi;
+ GetMonitorInfoW(MonitorFromWindow(frame,MONITOR_DEFAULTTONEAREST),&mi);workRect=mi.rcWork;
+ GetWindowRect(dlgSeen,&dlgRect);dlgOk=ok&&IsWindowVisible(ok)&&GetWindowRect(ok,&okRect);
+ PostMessageW(dlgSeen,WM_COMMAND,IDCANCEL,0);
+ return 0;
+}
+static int inside(const RECT*r,const RECT*w){return r->left>=w->left&&r->top>=w->top&&r->right<=w->right&&r->bottom<=w->bottom;}
+static void browseChecks(void){
+ MONITORINFO mi;mi.cbSize=sizeof mi;GetMonitorInfoW(MonitorFromWindow(frame,MONITOR_DEFAULTTOPRIMARY),&mi);
+ SetWindowPos(frame,NULL,mi.rcWork.right-260,mi.rcWork.bottom-120,900,700,SWP_NOZORDER|SWP_NOACTIVATE);
+ HANDLE t=CreateThread(NULL,0,dialogWatcher,NULL,0,NULL);
+ wchar_t out[520]={0};int r=browse_folder(frame,out);
+ WaitForSingleObject(t,15000);CloseHandle(t);
+ check(dlgSeen!=NULL,"folder dialog opened");
+ if(!dlgSeen)return;
+ printf("work %ld,%ld-%ld,%ld dialog %ld,%ld-%ld,%ld ok %ld,%ld-%ld,%ld\n",workRect.left,workRect.top,workRect.right,workRect.bottom,
+  dlgRect.left,dlgRect.top,dlgRect.right,dlgRect.bottom,okRect.left,okRect.top,okRect.right,okRect.bottom);
+ check(r==0,"cancelled folder dialog returns nothing");
+ check(inside(&dlgRect,&workRect),"folder dialog is inside the work area of the screen");
+ check(dlgOk&&inside(&okRect,&workRect),"its OK button is inside the work area");
+}
+/* ---- file search of the Home tab */
+static HWND homeView(void){return FindWindowExW(frame,NULL,L"BCHome",NULL);}
+static int shown(HWND h){return (GetWindowLongPtrW(h,GWL_STYLE)&WS_VISIBLE)!=0;}
+static int search(HWND home,const wchar_t*text){        /* type, press the button, return the number of rows */
+ SetWindowTextW(GetDlgItem(home,ID_FIND_EDIT),text);
+ SendMessageW(GetDlgItem(home,ID_FIND_BTN),BM_CLICK,0,0);
+ return (int)SendMessageW(GetDlgItem(home,ID_FIND_LIST),LB_GETCOUNT,0,0);
+}
+static int rowIs(HWND home,int i,const wchar_t*want){
+ wchar_t t[1200]={0};HWND l=GetDlgItem(home,ID_FIND_LIST);
+ if(SendMessageW(l,LB_GETTEXTLEN,i,0)>1100)return 0;
+ SendMessageW(l,LB_GETTEXT,i,(LPARAM)t);
+ if(_wcsicmp(t,want))printf("row %d is another path (%d characters)\n",i,(int)wcslen(t));
+ return !_wcsicmp(t,want);
+}
+static int hasRow(HWND home,const wchar_t*want){
+ HWND l=GetDlgItem(home,ID_FIND_LIST);int n=(int)SendMessageW(l,LB_GETCOUNT,0,0);wchar_t t[1200];
+ for(int i=0;i<n;i++){if(SendMessageW(l,LB_GETTEXTLEN,i,0)>1100)continue;SendMessageW(l,LB_GETTEXT,i,(LPARAM)t);if(!_wcsicmp(t,want))return 1;}
+ return 0;
+}
+static void findFixture(void){
+ CreateDirectoryW(L"ff",NULL);CreateDirectoryW(L"ff\\Alpha",NULL);CreateDirectoryW(L"ff\\Alpha\\Deep",NULL);CreateDirectoryW(L"ff\\Beta",NULL);
+ putfile(L"ff\\Alpha\\Report_2026.TXT","a");putfile(L"ff\\Beta\\report-draft.md","b");putfile(L"ff\\Beta\\other.bin","c");
+ putfile(L"ff\\Alpha\\Deep\\\xBCF4\xACE0\xC11C \xCD5C\xC885.docx","d");
+ GetFullPathNameW(L"ff",600,findRoot,NULL);
+ SetEnvironmentVariableW(L"BC_FIND_ROOT",findRoot);
+}
+static void findChecks(void){
+ HWND home=homeView();wchar_t want[900],label[200];uint32_t ids[10];
+ check(home&&GetDlgItem(home,ID_FIND_EDIT)&&GetDlgItem(home,ID_FIND_BTN)&&GetDlgItem(home,ID_FIND_LIST),"Home has the file search field, button and list");
+ if(!home)return;
+ HWND list=GetDlgItem(home,ID_FIND_LIST),recent=GetDlgItem(home,ID_RECENT);
+ check(!shown(list)&&shown(recent)&&fi_state==0,"before a search the recent sessions are shown and nothing is listed");
+ search(home,L"report");
+ for(int i=0;i<200&&fi_state!=2;i++)Sleep(50);
+ check(fi_state==2,"the folder tree is listed");
+ {int n=0;for(int i=0;i<60;i++){n=(int)SendMessageW(list,LB_GETCOUNT,0,0);if(n==2)break;Sleep(50);}
+  check(n==2,"the first search fills in by itself once the listing is done");}
+ {RECT re,rb2,rl;GetWindowRect(GetDlgItem(home,ID_FIND_EDIT),&re);GetWindowRect(GetDlgItem(home,ID_FIND_BTN),&rb2);GetWindowRect(list,&rl);
+  check(re.bottom-re.top>=16&&re.right-re.left>=200&&rb2.bottom-rb2.top>=16&&rb2.right-rb2.left>=40,"the search field and button have a usable size");
+  check(rb2.left>=re.right&&re.bottom<=rl.top&&rb2.bottom<=rl.top,"the field is left of the button, both above the list");}
+ check(fi_mode==2,"it was listed by walking the folders");
+ check(search(home,L"report")==2,"two names contain the text, whatever their case");
+ swprintf(want,900,L"%ls\\Alpha\\Report_2026.TXT",findRoot);check(hasRow(home,want),"a result is the full path of the file");
+ swprintf(want,900,L"%ls\\Beta\\report-draft.md",findRoot);check(hasRow(home,want),"the other result too");
+ check(shown(list)&&!shown(recent),"the results take the place of the recent sessions");
+ GetWindowTextW(GetDlgItem(home,ID_RLABEL),label,200);check(wcsstr(label,L"\xACB0\xACFC 2\xAC1C")!=NULL,"the heading shows the number of results");
+ check(search(home,L"\xCD5C\xC885")==1,"a Korean name is found");
+ swprintf(want,900,L"%ls\\Alpha\\Deep\\\xBCF4\xACE0\xC11C \xCD5C\xC885.docx",findRoot);check(rowIs(home,0,want),"with its full path");
+ check(search(home,L"DEEP")==1,"folders are found too");
+ check(search(home,L"no-such-name-anywhere")==0,"a text that no name contains gives no rows");
+ check(find_query(L"REPORT",ids,10)==2&&find_query(L".",ids,10)==4&&find_query(L"",ids,10)==0,"searching the index directly agrees");
+ search(home,L"");
+ GetWindowTextW(GetDlgItem(home,ID_RLABEL),label,200);
+ check(!shown(list)&&shown(recent)&&!wcscmp(label,L"\xCD5C\xADFC \xC138\xC158"),"an empty field brings the recent sessions back");
+}
+/* the whole drive, from its file table */
+static int canOpenVolume(wchar_t letter){
+ wchar_t v[8]=L"\\\\.\\X:";v[4]=letter;
+ HANDLE h=CreateFileW(v,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,NULL,OPEN_EXISTING,0,NULL);
+ if(h==INVALID_HANDLE_VALUE)return 0;
+ CloseHandle(h);return 1;
+}
+static int mftFixture(void){                             /* 1 when the test can run */
+ wchar_t cwd[600],drive[3]=L"X:";GetCurrentDirectoryW(600,cwd);
+ if(cwd[1]!=L':'||!canOpenVolume(cwd[0]))return 0;
+ drive[0]=cwd[0];SetEnvironmentVariableW(L"BC_FIND_ROOT",drive);
+ swprintf(probeName,80,L"bc_find_probe_%X_%X.tmp",(unsigned)GetCurrentProcessId(),(unsigned)GetTickCount());
+ swprintf(probePath,700,L"%ls\\%ls",cwd,probeName);putfile(probePath,"probe");
+ return 1;
+}
+static void mftChecks(void){
+ HWND home=homeView();uint32_t ids[4];wchar_t path[1200];
+ if(!home){check(0,"Home view exists");return;}
+ DWORD t0=GetTickCount();
+ search(home,probeName);
+ for(int i=0;i<2000&&fi_state!=2;i++)Sleep(50);
+ printf("drive listed in %lu ms: %llu entries, mode %llu\n",(unsigned long)(GetTickCount()-t0),(unsigned long long)fi_vis,(unsigned long long)fi_mode);
+ check(fi_state==2,"the drive is listed");
+ check(fi_mode==1,"it was read from the file table of the volume");
+ check(fi_vis>1000,"the index holds the names of the drive");
+ t0=GetTickCount();int n=find_query(probeName,ids,4);DWORD dt=GetTickCount()-t0;
+ printf("one search over the index: %lu ms\n",(unsigned long)dt);
+ check(n==1,"the file created before the search is found, once");
+ check(n==1&&find_path(ids[0],path,1200)>0&&!_wcsicmp(path,probePath),"its path is rebuilt from the folder records");
+ check(search(home,probeName)==1&&rowIs(home,0,probePath),"the Home list shows it");
+ DeleteFileW(probePath);
+}
 static DWORD WINAPI watcher(void*arg){
  (void)arg;
  for(int i=0;i<200&&!frame;i++){EnumThreadWindows(mainTid,onTop,0);if(!frame)Sleep(50);}
  check(frame!=NULL,"frame window created");
  if(!frame){PostThreadMessageW(mainTid,WM_QUIT,0,0);return 0;}
- if(mergeMode){mergeChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
- if(fmergeMode){fmergeChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
+ if(browseMode){tabRowChecks();tooltipChecks();browseChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
+ if(findMode){findChecks();tooltipChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
+ if(mftMode){mftChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
+ if(mergeMode){mergeChecks();tooltipChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
+ if(fmergeMode){fmergeChecks();tooltipChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
  for(int i=0;i<200;i++){
   EnumChildWindows(frame,onChild,0);
   if(ra&&rb){view=GetParent(ra);if(info(L"차이 4개"))break;}
@@ -278,19 +473,27 @@ static DWORD WINAPI watcher(void*arg){
  SendMessageW(view,WM_COMMAND,ID_BTN_PREV,0);check(bothAt(1),"previous-difference button");
 
  check(!SendMessageW(ra,EM_GETMODIFY,0,0)&&!SendMessageW(rb,EM_GETMODIFY,0,0),"colouring and navigation leave the panes unmodified");
- PostMessageW(frame,WM_CLOSE,0,0);
+ tabRowChecks();
+ tooltipChecks();
+ closeThroughButtons();
  return 0;
 }
-static DWORD WINAPI watchdog(void*arg){(void)arg;Sleep(60000);printf("FAIL timed out\n");fflush(stdout);ExitProcess(3);}
+static DWORD WINAPI watchdog(void*arg){(void)arg;Sleep(mftMode?170000:60000);printf("FAIL timed out\n");fflush(stdout);ExitProcess(3);}
 int main(int argc,char**argv){
  wchar_t a[400],b[400];
  mergeMode=argc>1&&!strcmp(argv[1],"merge");
  fmergeMode=argc>1&&!strcmp(argv[1],"fmerge");
+ browseMode=argc>1&&!strcmp(argv[1],"browse");
+ findMode=argc>1&&!strcmp(argv[1],"find");
+ mftMode=argc>1&&!strcmp(argv[1],"findmft");
+ if(findMode)findFixture();
+ if(mftMode&&!mftFixture()){printf("SKIP the volume cannot be opened (no administrator rights)\n0 checks, 0 failures\n");return 0;}
  tempFixture();
  check(GetFileAttributesW(ownTemp)!=INVALID_FILE_ATTRIBUTES,"temporary folder of this process exists before the run");
  fixture();
  GetFullPathNameW(L"ui_a.c",400,a,NULL);GetFullPathNameW(L"ui_b.c",400,b,NULL);
  swprintf(cmdline,1200,L"bcgui.exe %ls \"%ls\" \"%ls\"",mergeMode?L"merge":L"text",a,b);
+ if(browseMode||findMode||mftMode)wcscpy(cmdline,L"bcgui.exe");
  if(fmergeMode){
   wchar_t l[400],r[400],bs[400],o[400];fmergeFixture();
   GetFullPathNameW(L"fm\\L",400,l,NULL);GetFullPathNameW(L"fm\\R",400,r,NULL);GetFullPathNameW(L"fm\\B",400,bs,NULL);GetFullPathNameW(L"fm\\O",400,o,NULL);

@@ -769,6 +769,7 @@ hx_proc:
     invoke mk_edit, rsi, ID_EDIT_REPL
     invoke mk_btn, rsi, &s_b_repl, ID_BTN_REPL
     invoke mk_btn, rsi, &s_b_replall, ID_BTN_REPLALL
+    invoke tips_apply, rsi, &tt_hex
     invoke mk_lbl, rsi, &s_empty, ID_LBL_INFO
     invoke CreateWindowExW, 0, &cn_pane, 0, WS_CHILD|WS_VISIBLE|WS_VSCROLL|WS_BORDER|WS_TABSTOP, 0, 0, 10, 10, rsi, ID_PANE, [g_hinst], r15
     mov [r15+HX_HPANE], rax
@@ -902,3 +903,29 @@ hx_proc:
 .zero:
     xor eax, eax
     EPILOG 320
+
+; ---------------------------------------------------------------- tooltips of this view
+extern tips_apply
+section .rdata
+WSTR tt_hex_0, "차이가 있는 행만 표시합니다"
+WSTR tt_hex_1, "왼쪽 파일을 저장합니다"
+WSTR tt_hex_2, "오른쪽 파일을 저장합니다"
+WSTR tt_hex_3, "비교 결과를 엑셀 파일(.xlsx)로 저장합니다"
+WSTR tt_hex_4, "찾을 값 (16진수 예: 4D 5A, 또는 텍스트)"
+WSTR tt_hex_5, "다음 일치 위치로 이동합니다"
+WSTR tt_hex_6, "바꿀 값 (찾는 값과 바이트 수가 같아야 함)"
+WSTR tt_hex_7, "현재 위치의 값을 바꿉니다"
+WSTR tt_hex_8, "일치하는 값을 모두 바꿉니다"
+align 8
+tt_hex:
+    dq ID_CHK_ONLY, tt_hex_0
+    dq ID_BTN_SVA, tt_hex_1
+    dq ID_BTN_SVB, tt_hex_2
+    dq ID_BTN_XLS, tt_hex_3
+    dq ID_EDIT_FIND, tt_hex_4
+    dq ID_BTN_FIND, tt_hex_5
+    dq ID_EDIT_REPL, tt_hex_6
+    dq ID_BTN_REPL, tt_hex_7
+    dq ID_BTN_REPLALL, tt_hex_8
+    dq 0, 0
+section .text

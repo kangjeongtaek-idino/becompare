@@ -455,6 +455,7 @@ pp_proc:
     invoke mk_chk, rsi, &s_chk_diff, ID_CHKD, r9
     invoke mk_btn, rsi, &s_b_doc, ID_BTN_DOC
     invoke mk_lbl, rsi, &s_empty, ID_LBLI
+    invoke tips_apply, rsi, &tt_props
     invoke mk, rsi, &cn_listv, 0, LVS_REPORT|LVS_OWNERDATA|LVS_SHOWSELALWAYS|WS_TABSTOP|WS_BORDER, ID_LST
     mov [r15+P_HLIST], rax
     mov rbx, rax
@@ -643,3 +644,15 @@ pp_proc:
 .zero:
     xor eax, eax
     EPILOG 320
+
+; ---------------------------------------------------------------- tooltips of this view
+extern tips_apply
+section .rdata
+WSTR tt_props_0, "값이 다른 항목만 표시합니다"
+WSTR tt_props_1, "비교 결과를 워드 파일(.docx)로 저장합니다"
+align 8
+tt_props:
+    dq ID_CHKD, tt_props_0
+    dq ID_BTN_DOC, tt_props_1
+    dq 0, 0
+section .text

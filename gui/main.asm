@@ -33,7 +33,7 @@ extern merge_register, merge_create
 extern props_register, props_create, edit_create
 extern fmerge_register, fmerge_create
 extern script_check, shell_early, shell_pending, shell_install
-extern temp_cleanup
+extern temp_cleanup, mk_btn, icon_set
 extern settings_show, policy_load, keys_load, g_keytab, update_check, update_start, clip_compare, patch_open, patch_cmd
 
 global WinMain
@@ -45,6 +45,11 @@ global g_sess, g_nsess, ini_prepare, apply_theme_all, type_names, open_any_file,
 section .rdata
 WSTR s_unsaved_close, "저장하지 않은 변경 내용이 있습니다. 저장하시겠습니까? (예: 저장, 아니요: 버리기, 취소: 계속 편집)"
 WSTR cn_frame, "BCFrame"
+g_tabclose: dw 0xE8BB, 0             ; Segoe MDL2: close
+g_appexit:  dw 0xE7E8, 0             ; Segoe MDL2: power
+WSTR s_tip_tabclose, "현재 탭 닫기 (Ctrl+W)"
+WSTR s_tip_appexit, "프로그램 종료"
+WSTR s_nolabel, ""
 WSTR cn_tab, "SysTabControl32"
 WSTR cn_status, "msctls_statusbar32"
 WSTR s_empty, ""
@@ -968,10 +973,40 @@ layout_frame:
     mov edi, [rbx+RC_B]
     sub edi, r13d                    ; height without status
     mov [rbx+RC_B], edi
-    invoke MoveWindow, [g_htab], 0, 0, rsi, rdi, 1
-    invoke SendMessageW, [g_htab], TCM_ADJUSTRECT, 0, rbx
+    ; the tab control ends before the two buttons at the right end of the tab row
+    mov ecx, 64
+    call scl
+    mov [rsp+148], eax               ; space kept for the buttons
+    mov eax, esi
+    sub eax, [rsp+148]
+    cmp eax, 120
+    jge .tw
+    mov eax, esi                     ; very narrow window: the tabs take it all
+.tw:
+    mov [rsp+144], eax               ; width of the tab control
+    invoke MoveWindow, [g_htab], 0, 0, #[rsp+144], rdi, 1
+    invoke SendMessageW, [g_htab], TCM_ADJUSTRECT, 0, rbx          ; of the full width: the views keep it
     mov r14d, [rbx+RC_L]
     mov r15d, [rbx+RC_T]
+    mov ecx, 28
+    call scl
+    mov r12d, eax                    ; button width
+    mov eax, r15d
+    sub eax, 4
+    mov [rsp+152], eax               ; button height: the tab row
+    mov r13d, [rsp+144]
+    add r13d, 3
+    invoke GetDlgItem, [g_hframe], IDM_CLOSE_TAB
+    test rax, rax
+    jz .nb
+    invoke MoveWindow, rax, r13, 2, r12, #[rsp+152], 1
+    add r13d, r12d
+    add r13d, 2
+    invoke GetDlgItem, [g_hframe], IDM_EXIT
+    test rax, rax
+    jz .nb
+    invoke MoveWindow, rax, r13, 2, r12, #[rsp+152], 1
+.nb:
     mov esi, [rbx+RC_R]
     sub esi, r14d
     mov edi, [rbx+RC_B]
@@ -1763,6 +1798,11 @@ frame_proc:
     mov [g_htab], rax
     invoke mk, rsi, &cn_status, &s_ready, SBARS_SIZEGRIP, 2
     mov [g_hstatus], rax
+    ; close-tab and exit buttons at the right end of the tab row; their ids are the menu commands
+    invoke mk_btn, rsi, &s_nolabel, IDM_CLOSE_TAB
+    invoke icon_set, rsi, IDM_CLOSE_TAB, &g_tabclose, &s_tip_tabclose
+    invoke mk_btn, rsi, &s_nolabel, IDM_EXIT
+    invoke icon_set, rsi, IDM_EXIT, &g_appexit, &s_tip_appexit
     xor eax, eax
     EPILOG 256
 

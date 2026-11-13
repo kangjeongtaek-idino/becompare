@@ -334,6 +334,7 @@ pv_proc:
     invoke SetWindowTextW, rax, &s_tol0
     invoke mk_lbl, rsi, &s_empty, ID_LBL_INFO
     invoke mk_lbl, rsi, &s_empty, ID_LBL_CUR
+    invoke tips_apply, rsi, &tt_pic
     invoke CreateWindowExW, 0, &cn_pane, 0, WS_CHILD|WS_VISIBLE|WS_VSCROLL|WS_HSCROLL|WS_BORDER|WS_CLIPSIBLINGS, 0, 0, 10, 10, rsi, ID_PPANE, [g_hinst], r15
     mov [r15+PX_HPANE], rax
     invoke pb_load, rsi, r14
@@ -472,3 +473,17 @@ pv_proc:
 .zero:
     xor eax, eax
     EPILOG 320
+
+; ---------------------------------------------------------------- tooltips of this view
+extern tips_apply
+section .rdata
+WSTR tt_pic_0, "비교 결과를 워드 파일(.docx)로 저장합니다"
+WSTR tt_pic_1, "차이를 화면에 표시하는 방식을 고릅니다"
+WSTR tt_pic_2, "같은 색으로 볼 RGB 허용 오차 (0~255)"
+align 8
+tt_pic:
+    dq ID_BTN_DOC, tt_pic_0
+    dq ID_COMBO, tt_pic_1
+    dq ID_EDIT_TOL, tt_pic_2
+    dq 0, 0
+section .text

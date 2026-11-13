@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 Set-Location "$PSScriptRoot\gui"
 New-Item -ItemType Directory -Force ..\build | Out-Null
 $mods = @('util','main','home')
-$optional = 'folder','text','table','hex','pic','merge','pathbar','engine','rich','textlib','inflate','vtab','props','fmerge','settings','script','shell','conv','update','tcextra','export','export_xml'
+$optional = 'folder','text','table','hex','pic','merge','pathbar','engine','rich','textlib','inflate','vtab','props','fmerge','settings','script','shell','conv','update','tcextra','export','export_xml','find'
 foreach ($extra in $optional) { if (Test-Path "$extra.asm") { $mods += $extra } }
 $objs = @()
 foreach ($m in $mods) {
