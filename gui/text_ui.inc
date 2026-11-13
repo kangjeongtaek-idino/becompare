@@ -533,8 +533,13 @@ text_compare:
     mov rsi, rcx
     mov rbx, rdx
     mov r12, r8
+    invoke get_chk, rsi, ID_CHK_UNI
+    movzx eax, al
+    cmp rax, [rbx+TV_UNI]            ; another row layout: the stored fragment keys no longer fit
+    jne .clrexp
     cmp qword [rbx+TV_FOLDED], 0     ; texts are read again when the view was not folded: forget expanded fragments
     jne .keepexp
+.clrexp:
     mov qword [rbx+TV_EXPN], 0
 .keepexp:
     invoke text_side, rsi, rbx, 0
@@ -603,6 +608,14 @@ text_compare:
     invoke wcscpy, &rbx+TV_CMT, &rsp+C_CP
     invoke tv_cmp_anch, rbx, &rsp+C_LA, &rsp+C_LB, r13, &rsp+C_CP, &rsp+C_HV
     invoke tv_build, rbx, &rsp+C_LA, &rsp+C_LB, &rsp+C_HV
+    invoke get_chk, rsi, ID_CHK_UNI
+    movzx eax, al
+    mov [rbx+TV_UNI], rax
+    test eax, eax
+    jz .nouni
+    invoke tv_unify_rows, rbx        ; one row per line of the single pane
+    mov [rbx+TV_UNI], rax
+.nouni:
     mov qword [rbx+TV_FOLDED], 0
     invoke get_chk, rsi, ID_CHK_FOLD
     movzx eax, al
@@ -612,7 +625,15 @@ text_compare:
     invoke tv_fold_rows, rbx
     mov [rbx+TV_FOLDED], rax
 .nofold:
+    mov rax, [rbx+TV_UNI]            ; the unified pane is not the file text either
+    or [rbx+TV_FOLDED], rax
+    cmp qword [rbx+TV_UNI], 0
+    jne .tuni
     invoke tv_texts, rbx, &rsp+C_LA, &rsp+C_LB
+    jmp .tdone
+.tuni:
+    invoke tv_texts_uni, rbx, &rsp+C_LA, &rsp+C_LB
+.tdone:
     invoke SendMessageW, [rbx+TV_HA], WM_SETREDRAW, 0, 0
     invoke SendMessageW, [rbx+TV_HB], WM_SETREDRAW, 0, 0
     ; no notifications while the panes are filled and coloured: each coloured span moves the selection and
@@ -629,7 +650,13 @@ text_compare:
     invoke rich_theme, [rbx+TV_HB]
     invoke rich_batch, [rbx+TV_HA], 1
     invoke rich_batch, [rbx+TV_HB], 1
+    cmp qword [rbx+TV_UNI], 0
+    jne .cuni
     invoke tv_color, rbx, &rsp+C_LA, &rsp+C_LB
+    jmp .cdone
+.cuni:
+    invoke tv_color_uni, rbx, &rsp+C_LA, &rsp+C_LB
+.cdone:
     invoke rich_batch, [rbx+TV_HA], 0
     invoke rich_batch, [rbx+TV_HB], 0
     invoke rich_unsel, [rbx+TV_HA]
@@ -672,6 +699,7 @@ text_compare:
     invoke set_tab_title, r12, &rsp+C_TT
     invoke tv_info, rsi, rbx
     invoke tv_redraw_aux, rbx
+    invoke tv_layout, rsi            ; one pane or two
     cmp qword [rbx+TV_NBLK], 0
     je .ok
     invoke tv_goto, rsi, rbx, 0
@@ -1017,6 +1045,7 @@ tv_layout:
     PLACE ID_CHK_SYN, 100
     PLACE ID_CHK_IDS, 140
     PLACE ID_CHK_FOLD, 170
+    PLACE ID_CHK_UNI, 110
     PLACE ID_LBL_INFO, 520
     lea r13d, [r13+r15]
     add r13d, r14d
@@ -1039,6 +1068,16 @@ tv_layout:
     jns .h
     xor ebp, ebp
 .h:
+    mov dword [rsp+176], 0           ; unified view?
+    invoke GetWindowLongPtrW, rsi, GWLP_USERDATA
+    test rax, rax
+    jz .nouni
+    mov rax, [rax+SS_DATA]
+    test rax, rax
+    jz .nouni
+    mov eax, [rax+TV_UNI]
+    mov [rsp+176], eax
+.nouni:
     mov ecx, 46
     call scl
     mov r14d, eax                    ; gutter width
@@ -1054,6 +1093,8 @@ tv_layout:
     jns .pw
     xor eax, eax
 .pw:
+    cmp dword [rsp+176], 0
+    jne .unilay
     shr eax, 1
     mov ebx, eax                     ; pane width
     MVID rsi, ID_GUL, 0, r13, r14, rbp
@@ -1067,6 +1108,20 @@ tv_layout:
     add edi, ebx
     add edi, 2
     MVID rsi, ID_MINI, rdi, r13, r12, rbp
+    invoke GetDlgItem, rsi, ID_RB
+    invoke ShowWindow, rax, 5
+    EPILOG 192
+.unilay:
+    mov ebx, eax                     ; unified: the one pane takes the width of both
+    MVID rsi, ID_GUL, 0, r13, r14, rbp
+    MVID rsi, ID_GUR, r14, r13, r14, rbp
+    lea edi, [r14*2]
+    MVID rsi, ID_RA, rdi, r13, rbx, rbp
+    add edi, ebx
+    add edi, 2
+    MVID rsi, ID_MINI, rdi, r13, r12, rbp
+    invoke GetDlgItem, rsi, ID_RB
+    invoke ShowWindow, rax, 0
     EPILOG 192
 
 ; ---------------------------------------------------------------- options string
@@ -1245,6 +1300,7 @@ tv_proc:
     invoke mk_chk, rsi, &s_ed_case, ID_ED_CASE, 0
     invoke mk_chk, rsi, &s_c_ids, ID_CHK_IDS, 0
     invoke mk_chk, rsi, &s_c_fold, ID_CHK_FOLD, 0
+    invoke mk_chk, rsi, &s_c_uni, ID_CHK_UNI, 0
     invoke mk_lbl, rsi, &s_l_rules, ID_LBL_RULES
     invoke mk_edit, rsi, ID_EDIT_RULES
     invoke mk_lbl, rsi, &s_info0, ID_LBL_INFO
@@ -1357,6 +1413,8 @@ tv_proc:
     cmp ebx, ID_CHK_IDS
     je .doreq
     cmp ebx, ID_CHK_FOLD
+    je .doreq
+    cmp ebx, ID_CHK_UNI
     je .doreq
     cmp ebx, ID_CHK_CASE
     jb .def

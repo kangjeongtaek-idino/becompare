@@ -66,6 +66,8 @@ gt_paint:
     mov r13, [r12+TV_HA]
     cmp qword [rbx+GT_SIDE], 0
     je .pane
+    cmp qword [r12+TV_UNI], 0        ; unified: both gutters follow pane A
+    jne .pane
     mov r13, [r12+TV_HB]
 .pane:
     invoke gt_metrics, r13, &rsp+P_FIRST, &rsp+P_Y0, &rsp+P_H
@@ -116,6 +118,8 @@ gt_paint:
     mov ecx, [th_tc_mod]
     cmp eax, 1
     je .tfill
+    cmp eax, 5                       ; unified pair rows are modified lines too
+    jae .tfill
     mov ecx, [th_tc_del]
     cmp eax, 2
     je .tfill
@@ -146,6 +150,8 @@ gt_paint:
     mov edx, [rbp]
     cmp edx, 1
     je .ocol
+    cmp edx, 5
+    jae .ocol
     mov ecx, [th_tc_delb]
     cmp edx, 2
     je .ocol
@@ -229,6 +235,8 @@ gt_paint:
     mov ecx, [th_tc_modb]            ; modified: blue
     cmp eax, 1
     je .bar
+    cmp eax, 5
+    jae .bar
     mov ecx, [th_tc_delb]            ; only on the left: deleted, grey
     cmp eax, 2
     je .bar
@@ -292,6 +300,8 @@ gt_click:
     mov r14, [r13+TV_HA]
     cmp qword [rbx+GT_SIDE], 0
     je .m
+    cmp qword [r13+TV_UNI], 0
+    jne .m
     mov r14, [r13+TV_HB]
 .m:
     invoke gt_metrics, r14, &rsp+96, &rsp+100, &rsp+104
@@ -435,6 +445,8 @@ mm_paint:
     mov ecx, [th_tc_modb]
     cmp eax, 1
     je .col
+    cmp eax, 5
+    jae .col
     mov ecx, [th_tc_delb]
     cmp eax, 2
     je .col

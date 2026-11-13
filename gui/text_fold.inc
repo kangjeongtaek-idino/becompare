@@ -224,6 +224,8 @@ tv_unfold:
     mov r12, [rbx+TV_CUR]
     invoke GetDlgItem, rsi, ID_CHK_FOLD
     invoke SendMessageW, rax, BM_SETCHECK, 0, 0
+    invoke GetDlgItem, rsi, ID_CHK_UNI
+    invoke SendMessageW, rax, BM_SETCHECK, 0, 0
     invoke GetWindowLongPtrW, rsi, GWLP_USERDATA
     invoke text_compare, rsi, rbx, rax
     cmp r12, -1

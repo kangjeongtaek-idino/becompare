@@ -5,7 +5,7 @@
 %include "inc/app.inc"
 %include "inc/export.inc"
 
-extern PostMessageW, wcsstr
+extern PostMessageW, wcsstr, ShowWindow
 extern g_batch, g_xl_path, g_exitcode, g_hframe, batch_done
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetFocus, GetWindowTextW, SetWindowTextW
@@ -65,7 +65,8 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define TV_CMT    3480          ; comment prefix of the last compare, wchar[64]
 %define TV_EXPN   3616          ; expanded fold fragments: count
 %define TV_EXPK   3624          ; dword[64]: first hidden row of each expanded fragment
-%define TV_SIZE   3888
+%define TV_UNI    3888          ; unified view: option read at the last compare
+%define TV_SIZE   3896
 %define E_HR      40
 %define ID_ED_FIND   303
 %define ID_ED_NEXT   304
@@ -77,6 +78,7 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define ID_ED_LFIND  312
 %define ID_CHK_IDS   216
 %define ID_CHK_FOLD  217
+%define ID_CHK_UNI   218
 %define ID_EDIT_RULES 232
 %define ID_LBL_RULES 233
 %define TV_RULES  3168
@@ -257,6 +259,7 @@ sum_len:
 %include "text_xl.inc"
 %include "text_word.inc"
 %include "text_fold.inc"
+%include "text_uni.inc"
 %include "text_gutter.inc"
 %include "text_syn.inc"
 %include "text_align.inc"

@@ -416,7 +416,12 @@ tv_wordhl:
     lea r8, [rsi+rdx]
     add rsi, rax
     mov rcx, [rsp+WW_TV]
-    invoke rich_bk, [rcx+TV_HB], rsi, r8, #[th_tc_modin]
+    mov rax, [rcx+TV_HB]
+    cmp qword [rcx+TV_UNI], 0
+    je .pbh
+    mov rax, [rcx+TV_HA]             ; unified: the right line sits in pane A as well
+.pbh:
+    invoke rich_bk, rax, rsi, r8, #[th_tc_modin]
     jmp .pb
 .pbn:
     inc r14d
