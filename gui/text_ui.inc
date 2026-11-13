@@ -630,6 +630,10 @@ text_compare:
 .nofold:
     mov rax, [rbx+TV_UNI]            ; the unified pane is not the file text either
     or [rbx+TV_FOLDED], rax
+    invoke get_chk, rsi, ID_CHK_WS   ; nor are panes that carry whitespace marks
+    movzx eax, al
+    mov [rbx+TV_WS], rax
+    or [rbx+TV_FOLDED], rax
     cmp qword [rbx+TV_UNI], 0
     jne .tuni
     invoke tv_texts, rbx, &rsp+C_LA, &rsp+C_LB
@@ -637,6 +641,10 @@ text_compare:
 .tuni:
     invoke tv_texts_uni, rbx, &rsp+C_LA, &rsp+C_LB
 .tdone:
+    cmp qword [rbx+TV_WS], 0
+    je .nows
+    invoke tv_ws_marks, rbx
+.nows:
     invoke SendMessageW, [rbx+TV_HA], WM_SETREDRAW, 0, 0
     invoke SendMessageW, [rbx+TV_HB], WM_SETREDRAW, 0, 0
     ; no notifications while the panes are filled and coloured: each coloured span moves the selection and
@@ -1051,6 +1059,7 @@ tv_layout:
     PLACE ID_CHK_UNI, 110
     PLACE ID_CHK_WORD, 110
     PLACE ID_CHK_SCRL, 130
+    PLACE ID_CHK_WS, 100
     PLACE ID_LBL_INFO, 520
     lea r13d, [r13+r15]
     add r13d, r14d
@@ -1308,6 +1317,7 @@ tv_proc:
     invoke mk_chk, rsi, &s_c_uni, ID_CHK_UNI, 0
     invoke mk_chk, rsi, &s_c_word, ID_CHK_WORD, 1
     invoke mk_chk, rsi, &s_c_scrl, ID_CHK_SCRL, 1
+    invoke mk_chk, rsi, &s_c_ws, ID_CHK_WS, 0
     invoke mk_lbl, rsi, &s_l_rules, ID_LBL_RULES
     invoke mk_edit, rsi, ID_EDIT_RULES
     invoke mk_lbl, rsi, &s_info0, ID_LBL_INFO
@@ -1428,6 +1438,8 @@ tv_proc:
     je .doreq
     cmp ebx, ID_CHK_SCRL
     je .scrl
+    cmp ebx, ID_CHK_WS
+    je .doreq
     cmp ebx, ID_CHK_CASE
     jb .def
     cmp ebx, ID_CHK_CMT
@@ -1618,6 +1630,7 @@ WSTR tt_text_11, "식별자(변수·함수 이름) 차이를 무시합니다"
 WSTR tt_text_12, "비교할 때 같은 것으로 볼 문자열 규칙 (old=new;old2=new2)"
 WSTR tt_text_13, "찾을 문자열"
 WSTR tt_text_fold, "변경이 없는 긴 구간을 한 줄로 접어 차이만 모아 봅니다"
+WSTR tt_text_ws, "공백을 · 로, 탭을 → 로 표시합니다 (읽기 전용 표시)"
 WSTR tt_text_scrl, "끄면 두 창을 따로 스크롤합니다. 다시 켜면 오른쪽 창이 왼쪽 창 위치로 맞춰집니다"
 WSTR tt_text_word, "줄 안의 바뀐 단어를 따로 강조합니다. 끄면 바뀐 줄 전체만 칠합니다"
 WSTR tt_text_uni, "좌우 두 창 대신 삭제·추가 줄을 한 창에 이어서 보여 줍니다"
@@ -1653,5 +1666,6 @@ tt_text:
     dq ID_CHK_UNI, tt_text_uni
     dq ID_CHK_WORD, tt_text_word
     dq ID_CHK_SCRL, tt_text_scrl
+    dq ID_CHK_WS, tt_text_ws
     dq 0, 0
 section .text

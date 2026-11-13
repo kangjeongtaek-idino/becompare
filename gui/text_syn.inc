@@ -559,6 +559,7 @@ tv_syn_apply:
     cmp r13d, 2
     jb .pane
 .off:
+    invoke tv_ws_color, rbx          ; whitespace marks stay grey whatever the syntax colours did
     invoke SendMessageW, [rbx+TV_HA], EM_SETMODIFY, [rsp+64], 0
     invoke SendMessageW, [rbx+TV_HB], EM_SETMODIFY, [rsp+72], 0
     invoke SendMessageW, [rbx+TV_HA], WM_SETREDRAW, 1, 0

@@ -67,7 +67,8 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define TV_EXPK   3624          ; dword[64]: first hidden row of each expanded fragment
 %define TV_UNI    3888          ; unified view: option read at the last compare
 %define TV_WORDS  3896          ; word level highlight option read at the last compare
-%define TV_SIZE   3904
+%define TV_WS     3904          ; whitespace marks shown: option read at the last compare
+%define TV_SIZE   3912
 %define E_HR      40
 %define ID_ED_FIND   303
 %define ID_ED_NEXT   304
@@ -82,6 +83,7 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define ID_CHK_UNI   218
 %define ID_CHK_WORD  219
 %define ID_CHK_SCRL  220
+%define ID_CHK_WS    221
 %define ID_EDIT_RULES 232
 %define ID_LBL_RULES 233
 %define TV_RULES  3168
@@ -263,6 +265,7 @@ sum_len:
 %include "text_word.inc"
 %include "text_fold.inc"
 %include "text_uni.inc"
+%include "text_ws.inc"
 %include "text_gutter.inc"
 %include "text_syn.inc"
 %include "text_align.inc"
