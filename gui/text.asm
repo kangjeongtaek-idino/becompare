@@ -63,7 +63,9 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define TV_FOLDED 3448          ; the displayed rows are folded
 %define TV_OPTS   3472          ; compare options of the last compare (engine flags)
 %define TV_CMT    3480          ; comment prefix of the last compare, wchar[64]
-%define TV_SIZE   3616
+%define TV_EXPN   3616          ; expanded fold fragments: count
+%define TV_EXPK   3624          ; dword[64]: first hidden row of each expanded fragment
+%define TV_SIZE   3888
 %define E_HR      40
 %define ID_ED_FIND   303
 %define ID_ED_NEXT   304

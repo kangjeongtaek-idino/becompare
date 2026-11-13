@@ -242,6 +242,8 @@ tv_color:
     shl rax, 4
     add rax, rbx
     mov [rsp+96], rax
+    cmp dword [rax], 4
+    je .k4                           ; folded fragment: no lines behind it
     mov ecx, [rax+4]
     cmp ecx, -1
     je .fa
@@ -531,6 +533,10 @@ text_compare:
     mov rsi, rcx
     mov rbx, rdx
     mov r12, r8
+    cmp qword [rbx+TV_FOLDED], 0     ; texts are read again when the view was not folded: forget expanded fragments
+    jne .keepexp
+    mov qword [rbx+TV_EXPN], 0
+.keepexp:
     invoke text_side, rsi, rbx, 0
     test eax, eax
     jz .err

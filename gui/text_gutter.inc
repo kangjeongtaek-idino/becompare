@@ -310,8 +310,8 @@ gt_click:
     add rax, [r13+TV_ROWS]
     cmp dword [rax], 0
     je .d
-    cmp dword [rax], 4               ; a folded fragment has no block
-    je .d
+    cmp dword [rax], 4               ; a folded fragment has no block: the click opens it
+    je .expand
     mov ecx, [rax+12]                ; block
     cmp ecx, -1
     je .d
@@ -330,6 +330,9 @@ gt_click:
 .go:
     invoke SendMessageW, [rbx+GT_HV], WM_COMMAND, r14, 0
 .d:
+    EPILOG 192
+.expand:
+    invoke tv_expand, [rbx+GT_HV], r13, rax
     EPILOG 192
 
 gt_proc:

@@ -13,10 +13,25 @@
 %define FOLD_MIN 4
 
 section .rdata
-WSTR f_fold_lbl, "⋯ 변경 없는 줄 %u개 접힘"
+WSTR f_fold_lbl, "⋯ 변경 없는 줄 %u개 접힘 (⋯ 클릭: 펼치기)"
 WSTR s_c_fold, "변경 없는 구간 접기"
 
 section .text
+
+; fold_isexp(rbx = tv, edx = first hidden row) -> eax 1 when the user expanded that fragment (leaf: eax, ecx only)
+fold_isexp:
+    mov ecx, [rbx+TV_EXPN]
+.l:
+    test ecx, ecx
+    jz .no
+    dec ecx
+    cmp [rbx+TV_EXPK+rcx*4], edx
+    jne .l
+    mov eax, 1
+    ret
+.no:
+    xor eax, eax
+    ret
 
 ; fold_label(buf (>= 40 wchar), n) -> eax length
 fold_label:
@@ -109,6 +124,18 @@ tv_fold_rows:
     mov r11, r8                      ; nothing hidden
     mov rcx, r8
 .have:
+    mov r9, rax                      ; rows that would be hidden
+    mov r10, rcx                     ; end of the hidden rows
+    mov edx, r11d
+    call fold_isexp                  ; a fragment the user expanded stays open
+    mov rcx, r10
+    test eax, eax
+    jz .hide
+    xor r9d, r9d
+    mov r11, r8
+    mov rcx, r8
+.hide:
+    mov rax, r9
     mov [rsp+FR_HS], r11
     mov [rsp+FR_HE], rcx
     mov [rsp+FR_HID], rax
@@ -124,7 +151,8 @@ tv_fold_rows:
     shl rcx, 4
     add rcx, r14
     mov dword [rcx], 4
-    mov dword [rcx+4], -1
+    mov eax, [rsp+FR_HS]
+    mov [rcx+4], eax                 ; key of the fragment (first hidden row), for tv_expand
     mov dword [rcx+8], -1
     mov eax, [rsp+FR_HID]
     mov [rcx+12], eax
@@ -203,5 +231,39 @@ tv_unfold:
     cmp r12, [rbx+TV_NBLK]
     jae .d
     invoke tv_goto, rsi, rbx, r12
+.d:
+    EPILOG 64
+
+; tv_expand(hwnd, tv, row*): open the folded fragment of a placeholder row, keeping the scroll position
+tv_expand:
+    PROLOG 64
+    mov rsi, rcx
+    mov rbx, rdx
+    mov eax, [r8+4]                  ; key
+    mov ecx, [rbx+TV_EXPN]
+    cmp ecx, 64
+    jae .d
+    mov [rbx+TV_EXPK+rcx*4], eax
+    inc ecx
+    mov [rbx+TV_EXPN], ecx
+    invoke SendMessageW, [rbx+TV_HA], EM_GETFIRSTVISIBLELINE, 0, 0
+    mov r12d, eax                    ; first visible row
+    mov r13, [rbx+TV_CUR]
+    invoke GetWindowLongPtrW, rsi, GWLP_USERDATA
+    invoke text_compare, rsi, rbx, rax
+    invoke SendMessageW, [rbx+TV_HA], EM_GETFIRSTVISIBLELINE, 0, 0
+    sub r12d, eax
+    movsxd r14, r12d
+    mov qword [rbx+TV_GUARD], 1
+    invoke SendMessageW, [rbx+TV_HA], EM_LINESCROLL, 0, r14
+    invoke SendMessageW, [rbx+TV_HB], EM_LINESCROLL, 0, r14
+    mov qword [rbx+TV_GUARD], 0
+    cmp r13, -1
+    je .d
+    cmp r13, [rbx+TV_NBLK]
+    jae .d
+    mov [rbx+TV_CUR], r13            ; the current block stays the current block
+    invoke tv_info, rsi, rbx
+    invoke tv_redraw_aux, rbx
 .d:
     EPILOG 64
