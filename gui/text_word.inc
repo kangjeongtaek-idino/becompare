@@ -248,6 +248,11 @@ wh_eq:
 %define WW_SB   144
 %define WW_EB   148
 tv_wordhl:
+    cmp qword [rcx+TV_WORDS], 0
+    jne .on
+    mov eax, 1                       ; option off: whole lines only, no prefix / suffix span either
+    ret
+.on:
     PROLOG 160
     mov [rsp+WW_TV], rcx
     mov [rsp+WW_Q], rdx
