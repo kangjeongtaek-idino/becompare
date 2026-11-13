@@ -226,6 +226,8 @@ tv_unfold:
     invoke SendMessageW, rax, BM_SETCHECK, 0, 0
     invoke GetDlgItem, rsi, ID_CHK_UNI
     invoke SendMessageW, rax, BM_SETCHECK, 0, 0
+    invoke GetDlgItem, rsi, ID_CHK_WS
+    invoke SendMessageW, rax, BM_SETCHECK, 0, 0
     invoke GetWindowLongPtrW, rsi, GWLP_USERDATA
     invoke text_compare, rsi, rbx, rax
     cmp r12, -1
