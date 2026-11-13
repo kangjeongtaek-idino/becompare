@@ -16,11 +16,14 @@
 section .bss
 alignb 8
 wh_buf: resb 140000
+wh_fl:  resd 1                       ; compare options in effect: 1 ignore case, 2 ignore blanks, 4 trim, 8 comments, 16 identifiers
 
 section .text
 
 ; wh_class(ecx = character) -> eax: 1 word character, 2 blank, 0 anything else
 wh_class:
+    cmp ecx, 0x3000
+    je .s
     cmp ecx, 0x80
     jae .w
     cmp ecx, '0'
@@ -53,21 +56,92 @@ wh_class:
     mov eax, 2
     ret
 
-; wh_tok(text, len, starts, ends) -> eax token count, -1 when there are more than WH_MAXT
+; wh_idstart(ecx = character) -> eax 1 when it can start an identifier (letter, '_' or non ASCII)
+wh_idstart:
+    cmp ecx, '_'
+    je .y
+    cmp ecx, 0x80
+    jae .y
+    or ecx, 0x20
+    cmp ecx, 'a'
+    jb .n
+    cmp ecx, 'z'
+    ja .n
+.y:
+    mov eax, 1
+    ret
+.n:
+    xor eax, eax
+    ret
+
+; wh_window(text, len, prefix) -> eax start, edx end of the part of the line the options leave in play:
+;   comment option: up to the first comment prefix; trim option: no blanks at either end
+wh_window:
+    PROLOG 64
+    mov r12, rcx
+    mov r13, rcx
+    lea r14, [rcx+rdx*2]
+    mov r15, r8
+    test dword [wh_fl], 8
+    jz .nc
+    test r15, r15
+    jz .nc
+    cmp word [r15], 0
+    je .nc
+    invoke wcsstr, r12, r15
+    test rax, rax
+    jz .nc
+    mov r14, rax
+.nc:
+    test dword [wh_fl], 4
+    jz .done
+.lt:
+    cmp r13, r14
+    jae .done
+    movzx eax, word [r13]
+    cmp eax, ' '
+    je .lt1
+    cmp eax, 9
+    jne .rt
+.lt1:
+    add r13, 2
+    jmp .lt
+.rt:
+    cmp r14, r13
+    jbe .done
+    movzx eax, word [r14-2]
+    cmp eax, ' '
+    je .rt1
+    cmp eax, 9
+    jne .done
+.rt1:
+    sub r14, 2
+    jmp .rt
+.done:
+    mov rax, r13
+    sub rax, r12
+    shr rax, 1
+    mov rdx, r14
+    sub rdx, r12
+    shr rdx, 1
+    EPILOG 64
+
+; wh_tok(text, start, end, starts, ends) -> eax token count, -1 when there are more than WH_MAXT
+;   tokens of the window [start, end); with the "ignore blanks" option blank runs are no tokens at all
 wh_tok:
     PROLOG 64
     mov rsi, rcx
-    mov rdi, rdx
-    mov r12, r8
-    mov r13, r9
+    mov rbp, rdx
+    mov rdi, r8
+    mov r12, r9
+    mov r13, [rsp+176]
     xor ebx, ebx                     ; tokens
-    xor ebp, ebp                     ; position
 .l:
     cmp rbp, rdi
     jae .done
     cmp ebx, WH_MAXT
     jae .over
-    mov [r12+rbx*4], ebp
+    mov r15, rbp                     ; token start
     movzx ecx, word [rsi+rbp*2]
     call wh_class
     mov r14d, eax
@@ -84,6 +158,12 @@ wh_tok:
     inc rbp
     jmp .ext
 .emit:
+    cmp r14d, 2
+    jne .store
+    test dword [wh_fl], 2
+    jnz .l
+.store:
+    mov [r12+rbx*4], r15d
     mov [r13+rbx*4], ebp
     inc ebx
     jmp .l
@@ -95,8 +175,10 @@ wh_tok:
     EPILOG 64
 
 ; wh_eq(quad*, i, j) -> eax 1 when token i of line A equals token j of line B   (quad: A, lenA, B, lenB)
+;   ignore case: ASCII letters fold; identifier option: any two identifiers are equal
 wh_eq:
     PROLOG 32
+    mov r12, rcx
     lea rbx, [wh_buf]
     mov esi, [rbx+WH_TAS+rdx*4]
     mov edi, [rbx+WH_TAE+rdx*4]
@@ -104,19 +186,47 @@ wh_eq:
     mov r10d, [rbx+WH_TBS+r8*4]
     mov r11d, [rbx+WH_TBE+r8*4]
     sub r11d, r10d                   ; length B
+    test dword [wh_fl], 16
+    jz .len
+    mov rax, [r12]
+    movzx ecx, word [rax+rsi*2]
+    call wh_idstart
+    mov r13d, eax
+    mov rax, [r12+16]
+    movzx ecx, word [rax+r10*2]
+    call wh_idstart
+    and eax, r13d
+    jnz .yes
+.len:
     cmp edi, r11d
     jne .no
-    mov rax, [rcx]
+    mov rax, [r12]
     lea rax, [rax+rsi*2]
-    mov rdx, [rcx+16]
+    mov rdx, [r12+16]
     lea rdx, [rdx+r10*2]
     xor r8d, r8d
 .c:
     cmp r8d, edi
     jae .yes
     movzx r9d, word [rax+r8*2]
-    cmp r9w, [rdx+r8*2]
+    movzx r10d, word [rdx+r8*2]
+    cmp r9d, r10d
+    je .same
+    test dword [wh_fl], 1
+    jz .no
+    lea ecx, [r9-'A']
+    cmp ecx, 25
+    ja .f1
+    or r9d, 0x20
+.f1:
+    lea ecx, [r10-'A']
+    cmp ecx, 25
+    ja .f2
+    or r10d, 0x20
+.f2:
+    cmp r9d, r10d
     jne .no
+.same:
     inc r8d
     jmp .c
 .yes:
@@ -133,6 +243,10 @@ wh_eq:
 %define WW_BA   112
 %define WW_BB   120
 %define WW_STR  128                  ; row stride of the LCS table (nb + 1)
+%define WW_SA   136                  ; window of line A / B (see wh_window)
+%define WW_EA   140
+%define WW_SB   144
+%define WW_EB   148
 tv_wordhl:
     PROLOG 160
     mov [rsp+WW_TV], rcx
@@ -140,13 +254,24 @@ tv_wordhl:
     mov [rsp+WW_BA], r8
     mov [rsp+WW_BB], r9
     lea rbx, [wh_buf]
+    mov r14, [rsp+WW_TV]
+    mov ecx, [r14+TV_OPTS]
+    mov [wh_fl], ecx
     mov rax, [rsp+WW_Q]
-    invoke wh_tok, [rax], [rax+8], &rbx+WH_TAS, &rbx+WH_TAE
+    invoke wh_window, [rax], [rax+8], &r14+TV_CMT
+    mov [rsp+WW_SA], eax
+    mov [rsp+WW_EA], edx
+    mov rax, [rsp+WW_Q]
+    invoke wh_window, [rax+16], [rax+24], &r14+TV_CMT
+    mov [rsp+WW_SB], eax
+    mov [rsp+WW_EB], edx
+    mov rax, [rsp+WW_Q]
+    invoke wh_tok, [rax], #[rsp+WW_SA], #[rsp+WW_EA], &rbx+WH_TAS, &rbx+WH_TAE
     cmp eax, -1
     je .fallback
     mov r12d, eax                    ; tokens in A
     mov rax, [rsp+WW_Q]
-    invoke wh_tok, [rax+16], [rax+24], &rbx+WH_TBS, &rbx+WH_TBE
+    invoke wh_tok, [rax+16], #[rsp+WW_SB], #[rsp+WW_EB], &rbx+WH_TBS, &rbx+WH_TBE
     cmp eax, -1
     je .fallback
     mov r13d, eax                    ; tokens in B
@@ -291,7 +416,12 @@ tv_wordhl:
     lea r8, [rsi+rdx]
     add rsi, rax
     mov rcx, [rsp+WW_TV]
-    invoke rich_bk, [rcx+TV_HB], rsi, r8, #[th_tc_modin]
+    mov rax, [rcx+TV_HB]
+    cmp qword [rcx+TV_UNI], 0
+    je .pbh
+    mov rax, [rcx+TV_HA]             ; unified: the right line sits in pane A as well
+.pbh:
+    invoke rich_bk, rax, rsi, r8, #[th_tc_modin]
     jmp .pb
 .pbn:
     inc r14d
