@@ -17,7 +17,11 @@ extern th_card_bg, th_card_border, th_card_hover_bg, th_card_hover_border, th_ac
 extern mk, reg_class, scl, tip_add
 extern ini_prepare, open_any_file, g_sess, g_nsess
 extern ShowWindow, SetTimer, KillTimer, InvalidateRect, GetWindowTextW, SetWindowTextW
-extern find_start, find_query, find_path, fi_state, fi_vis
+extern find_start, find_query2, find_path, fi_state, fi_vis
+extern ShellExecuteW, CreatePopupMenu, AppendMenuW, TrackPopupMenu, DestroyMenu, ScreenToClient, GetWindowRect
+extern OpenClipboard, EmptyClipboard, SetClipboardData, CloseClipboard, GlobalAlloc, GlobalLock, GlobalUnlock
+extern memcpy, wcslen, CharLowerBuffW, set_status
+extern type_for_path, add_session, GetFileAttributesW
 
 global home_register, home_create, ini_path_init, settings_load, recent_add, g_ini
 
@@ -29,6 +33,16 @@ global home_register, home_create, ini_path_init, settings_load, recent_add, g_i
 %define ID_FIND_EDIT 3010
 %define ID_FIND_BTN  3011
 %define ID_FIND_LIST 3012
+%define ID_FIND_KIND 3013
+%define ID_FIND_EXT  3014
+%define ID_FIND_PATH 3015
+%define ID_FIND_LEXT 3016
+%define ID_FIND_LPATH 3017
+%define FA_OPEN   1                  ; actions on a found item (also the ids of the menu)
+%define FA_OPENAS 2
+%define FA_SHOW   3
+%define FA_BC     4
+%define FA_COPY   5
 %define FIND_TIMER   77
 %define FIND_SHOWN   300                ; results listed at most
 %define BS_OWNERDRAW 0x000B
@@ -40,6 +54,7 @@ cn_static:  dw __utf16__("STATIC"), 0
 cn_button:  dw __utf16__("BUTTON"), 0
 cn_listbox: dw __utf16__("LISTBOX"), 0
 cn_edit:    dw __utf16__("EDIT"), 0
+cn_combo:   dw __utf16__("COMBOBOX"), 0
 s_empty:    dw 0
 
 ; App Header strings
@@ -50,7 +65,53 @@ WSTR s_del_btn,   "기록 삭제"
 WSTR s_tip_rdel, "최근 세션 기록을 모두 지웁니다"
 WSTR s_find_btn, "파일 찾기"
 WSTR s_find_cue, "파일 이름의 일부를 입력하면 이 컴퓨터의 고정 드라이브에서 찾습니다"
-WSTR s_tip_find_edit, "찾을 파일·폴더 이름의 일부 (대소문자 구분 없음). 비우면 최근 세션 목록으로 돌아갑니다"
+WSTR s_tip_find_edit, "찾을 파일·폴더 이름의 일부 (대소문자 구분 없음). 필터까지 모두 비우면 최근 세션 목록으로 돌아갑니다"
+WSTR s_tip_find_kind, "찾을 대상의 종류. 문서·이미지 같은 묶음은 그 확장자의 파일만 찾습니다"
+WSTR s_tip_find_ext, "이 확장자의 파일만 찾습니다. 여러 개는 ; 로 구분 (예: pdf;docx). 적으면 종류의 확장자 묶음 대신 쓰입니다"
+WSTR s_tip_find_path, "들어 있는 폴더 경로에 이 글자가 있는 것만 찾습니다 (예: Downloads)"
+WSTR s_cue_ext, "pdf;docx"
+WSTR s_lbl_ext, "확장자"
+WSTR s_lbl_path, "폴더"
+WSTR s_cue_path, "폴더 경로에 포함"
+WSTR s_fk0, "전체"
+WSTR s_fk1, "파일만"
+WSTR s_fk2, "폴더만"
+WSTR s_fk3, "문서"
+WSTR s_fk4, "이미지"
+WSTR s_fk5, "음악·동영상"
+WSTR s_fk6, "압축 파일"
+WSTR s_fk7, "소스 코드"
+WSTR s_fk8, "실행 파일"
+WSTR s_fm_open, "열기 (연결된 프로그램)"
+WSTR s_fm_openas, "연결 프로그램 선택…"
+WSTR s_fm_show, "폴더에서 보기"
+WSTR s_fm_bc, "BeCompare에서 열기 (비교의 왼쪽으로)"
+WSTR s_x_bcs, ".bcs"
+WSTR s_x_bcw, ".bcw"
+WSTR s_fm_copy, "경로 복사"
+WSTR s_v_open, "open"
+WSTR s_v_openas, "openas"
+WSTR s_explorer, "explorer.exe"
+WSTR f_select, `/select,"%s"`
+WSTR s_copied, "경로를 클립보드에 복사했습니다."
+WSTR s_noapp, "이 파일을 열 프로그램을 찾지 못했습니다."
+%macro EXTS 1-*
+  %rep %0
+    dw __utf16__(%1), 0
+    %rotate 1
+  %endrep
+    dw 0
+%endmacro
+fx_doc:  EXTS "txt","md","rtf","doc","docx","xls","xlsx","ppt","pptx","pdf","hwp","hwpx","csv","odt","ods","odp"
+fx_img:  EXTS "png","jpg","jpeg","gif","bmp","webp","tif","tiff","svg","ico","heic","psd"
+fx_med:  EXTS "mp3","flac","wav","ogg","m4a","aac","wma","mp4","mkv","avi","mov","wmv","webm","m4v"
+fx_arc:  EXTS "zip","7z","rar","tar","gz","bz2","xz","iso","cab","tgz"
+fx_src:  EXTS "c","h","cpp","hpp","cs","java","js","ts","jsx","tsx","py","go","rs","php","rb","swift","kt","asm","inc","sql","sh","ps1","bat","html","css","json","xml","yml","yaml"
+fx_exe:  EXTS "exe","dll","msi","com","sys","scr"
+align 8
+; kind of each row of the combo box: { kind for the search, extension list }
+fk_tab:  dq 0, 0,  1, 0,  2, 0,  1, fx_doc,  1, fx_img,  1, fx_med,  1, fx_arc,  1, fx_src,  1, fx_exe
+fk_names: dq s_fk0, s_fk1, s_fk2, s_fk3, s_fk4, s_fk5, s_fk6, s_fk7, s_fk8
 WSTR s_tip_find_btn, "드라이브의 파일 이름을 색인해 찾습니다. 첫 검색 때 색인을 만들고, 그 뒤로는 바로 찾습니다"
 WSTR f_find_ready, "파일 찾기 결과 %u개 · 색인 %llu개"
 WSTR f_find_busy, "파일 찾기 결과 %u개 · 색인 중 %llu개…"
@@ -421,26 +482,43 @@ home_layout:
     call scl
     add ebp, eax                     ; y of the file search row = bottom of buttons + scl(22)
 
-    ; 6b. File search row: [ text field .......... ][ button ]
+    ; 6b. File search row: [ name .......... ][ kind ][ extensions ][ folder ][ button ], placed from the right
     movsxd rbp, ebp
     mov ecx, 26
     call scl
-    mov [rsp+240], rax               ; row height (slots 240 / 248 are used by this row only)
-    mov ecx, 96
-    call scl
-    mov edi, eax                     ; button width
-    invoke GetDlgItem, rsi, ID_FIND_BTN
-    mov [rsp+248], rax
+    mov [rsp+240], rax               ; row height (slots 224 .. 248 are used by this row only)
     mov eax, r12d
     add eax, [rsp+128]
+    mov [rsp+232], rax               ; right edge, then the x of each control
+%macro FPLACE 2-3                    ; control id, width [, height: a combo box takes the height of its list]
+    mov ecx, %2
+    call scl
+    mov edi, eax
+    mov rax, [rsp+232]
     sub eax, edi
-    movsxd r10, eax
-    invoke MoveWindow, [rsp+248], r10, rbp, rdi, [rsp+240], 1
+    mov [rsp+232], rax
+    invoke GetDlgItem, rsi, %1
+    mov [rsp+248], rax
+  %if %0 == 3
+    mov ecx, %3
+    call scl
+    mov [rsp+224], rax
+    invoke MoveWindow, [rsp+248], [rsp+232], rbp, rdi, [rsp+224], 1
+  %else
+    invoke MoveWindow, [rsp+248], [rsp+232], rbp, rdi, [rsp+240], 1
+  %endif
     mov ecx, 8
     call scl
-    add eax, edi                     ; button width + gap
-    mov edi, [rsp+128]
-    sub edi, eax                     ; width of the text field
+    sub qword [rsp+232], rax         ; gap
+%endmacro
+    FPLACE ID_FIND_BTN, 96
+    FPLACE ID_FIND_PATH, 150
+    FPLACE ID_FIND_LPATH, 30
+    FPLACE ID_FIND_EXT, 110
+    FPLACE ID_FIND_LEXT, 44
+    FPLACE ID_FIND_KIND, 120, 300
+    mov rdi, [rsp+232]
+    sub edi, r12d                    ; the name field takes what is left
     invoke GetDlgItem, rsi, ID_FIND_EDIT
     mov [rsp+248], rax
     invoke MoveWindow, [rsp+248], r12, rbp, rdi, [rsp+240], 1
@@ -528,6 +606,8 @@ home_proc:
     je .clist
     cmp edi, WM_TIMER
     je .timer
+    cmp edi, WM_CONTEXTMENU
+    je .ctxmenu
     cmp edi, BC_THEME
     je .theme
     cmp edi, WM_APP+30
@@ -576,6 +656,29 @@ home_proc:
     invoke tip_add, rbx, &s_tip_find_edit
     invoke mk, rsi, &cn_button, &s_find_btn, WS_TABSTOP, ID_FIND_BTN
     invoke tip_add, rax, &s_tip_find_btn
+    ; filters: kind, extensions, folder path
+    invoke mk, rsi, &cn_combo, &s_empty, 3|WS_VSCROLL|WS_TABSTOP, ID_FIND_KIND      ; CBS_DROPDOWNLIST
+    mov rbx, rax
+    xor r14d, r14d
+.fk:
+    lea rax, [fk_names]
+    mov r15, [rax+r14*8]
+    invoke SendMessageW, rbx, 0x0143, 0, r15          ; CB_ADDSTRING
+    inc r14d
+    cmp r14d, 9
+    jb .fk
+    invoke SendMessageW, rbx, 0x014E, 0, 0            ; CB_SETCURSEL
+    invoke tip_add, rbx, &s_tip_find_kind
+    invoke mk, rsi, &cn_static, &s_lbl_ext, 0x0202, ID_FIND_LEXT       ; SS_RIGHT | SS_CENTERIMAGE
+    invoke mk, rsi, &cn_static, &s_lbl_path, 0x0202, ID_FIND_LPATH
+    invoke mk, rsi, &cn_edit, &s_empty, WS_BORDER|ES_AUTOHSCROLL|WS_TABSTOP, ID_FIND_EXT
+    mov rbx, rax
+    invoke SendMessageW, rbx, 0x1501, 1, &s_cue_ext
+    invoke tip_add, rbx, &s_tip_find_ext
+    invoke mk, rsi, &cn_edit, &s_empty, WS_BORDER|ES_AUTOHSCROLL|WS_TABSTOP, ID_FIND_PATH
+    mov rbx, rax
+    invoke SendMessageW, rbx, 0x1501, 1, &s_cue_path
+    invoke tip_add, rbx, &s_tip_find_path
     invoke mk, rsi, &cn_listbox, &s_empty, LBS_NOTIFY|WS_VSCROLL|WS_BORDER|WS_TABSTOP|0x50, ID_FIND_LIST
     invoke ShowWindow, rax, 0
     invoke fill_recent, rsi
@@ -601,6 +704,12 @@ home_proc:
     je .find
     cmp eax, ID_FIND_EDIT
     je .find_edit
+    cmp eax, ID_FIND_EXT
+    je .find_edit
+    cmp eax, ID_FIND_PATH
+    je .find_edit
+    cmp eax, ID_FIND_KIND
+    je .find_kind
     cmp eax, ID_FIND_LIST
     je .find_list
     cmp eax, ID_RDEL
@@ -674,6 +783,19 @@ home_proc:
     xor eax, eax
     EPILOG 192
 
+.find_kind:
+    mov rax, r12
+    shr eax, 16
+    cmp eax, 1                        ; CBN_SELCHANGE
+    jne .def
+    jmp .find
+.ctxmenu:
+    invoke GetDlgItem, rsi, ID_FIND_LIST
+    cmp rax, r12                      ; right click (or the menu key) on the list of found items
+    jne .def
+    invoke home_find_menu, rsi, r12, r13
+    xor eax, eax
+    EPILOG 192
 .find_edit:
     mov rax, r12
     shr eax, 16
@@ -692,7 +814,7 @@ home_proc:
 .find_list:
     mov rax, r12
     shr eax, 16
-    cmp eax, LBN_DBLCLK               ; a found file opens like a recent session
+    cmp eax, LBN_DBLCLK               ; a found item opens with the program registered for it
     jne .def
     lea rdi, [rsp+96]
     mov word [rdi], 0
@@ -703,7 +825,7 @@ home_proc:
     test rax, rax
     js .none
     mov r14, rax
-    invoke home_find_open, rbx, r14
+    invoke home_find_act, rbx, r14, FA_OPEN
     xor eax, eax
     EPILOG 192
 
@@ -719,24 +841,105 @@ home_proc:
     EPILOG 192
 
 ; ---------------------------------------------------------------- file search
-; home_find(hwnd): search for the text of the field and list what was found.
-;   An empty field shows the recent sessions again. The first search starts listing the drives; while
-;   that runs, a timer repeats the search so that the list fills up.
+; home_find(hwnd): search for the text of the field, narrowed by the filters, and list what was found.
+;   With the name and every filter empty the recent sessions are shown again. The first search starts
+;   listing the drives; while that runs, a timer repeats the search so that the list fills up.
 %define HF_TXT  96                   ; wchar[200] -> 496
 %define HF_IDS  496                  ; dd[FIND_SHOWN] -> 1696
 %define HF_PATH 1696                 ; wchar[800] -> 3296
 %define HF_LBL  3296                 ; wchar[100] -> 3496
+%define HF_ST   3504                 ; state of the listing before the search
+%define HF_EXT  3512                 ; wchar[100]: extensions typed, turned into a list -> 3712
+%define HF_PTX  3712                 ; wchar[120]: folder filter -> 3952
+%define HF_FLT  3952                 ; filter for find_query2 (24) -> 3976
 home_find:
-    PROLOG 3520
+    PROLOG 4000
     mov rsi, rcx
     invoke GetDlgItem, rsi, ID_FIND_EDIT
     invoke GetWindowTextW, rax, &rsp+HF_TXT, 199
+    invoke GetDlgItem, rsi, ID_FIND_EXT
+    invoke GetWindowTextW, rax, &rsp+HF_EXT, 97
+    invoke GetDlgItem, rsi, ID_FIND_PATH
+    invoke GetWindowTextW, rax, &rsp+HF_PTX, 119
+    invoke GetDlgItem, rsi, ID_FIND_KIND
+    invoke SendMessageW, rax, 0x0147, 0, 0            ; CB_GETCURSEL
+    movsxd r14, eax
+    cmp r14, 8
+    jbe .kind
+    xor r14d, r14d
+.kind:
+    shl r14, 4
+    lea rax, [fk_tab]
+    mov rcx, [rax+r14]
+    mov [rsp+HF_FLT], rcx            ; kind
+    mov rcx, [rax+r14+8]
+    mov [rsp+HF_FLT+8], rcx          ; extensions of the kind
+    lea rax, [rsp+HF_PTX]
+    mov [rsp+HF_FLT+16], rax
+    ; extensions typed: "pdf; *.docx , .txt" -> "pdf" "docx" "txt" "" (in place, never longer than the text)
+    lea rdi, [rsp+HF_EXT]
+    xor ecx, ecx                     ; read
+    xor edx, edx                     ; write
+.xs:
+    movzx eax, word [rdi+rcx*2]
+    test eax, eax
+    jz .xend
+    cmp eax, ';'
+    je .xskip
+    cmp eax, ','
+    je .xskip
+    cmp eax, ' '
+    je .xskip
+    cmp eax, '*'
+    je .xskip
+    cmp eax, '.'
+    jne .xitem
+.xskip:
+    inc ecx
+    jmp .xs
+.xitem:
+    movzx eax, word [rdi+rcx*2]
+    test eax, eax
+    jz .xclose
+    cmp eax, ';'
+    je .xclose
+    cmp eax, ','
+    je .xclose
+    cmp eax, ' '
+    je .xclose
+    mov [rdi+rdx*2], ax
+    inc ecx
+    inc edx
+    jmp .xitem
+.xclose:
+    mov word [rdi+rdx*2], 0
+    inc edx
+    test eax, eax
+    jz .xend
+    inc ecx
+    jmp .xs
+.xend:
+    mov word [rdi+rdx*2], 0
+    mov r15d, edx                    ; characters of the list
+    test r15d, r15d
+    jz .noext
+    invoke CharLowerBuffW, rdi, r15
+    mov [rsp+HF_FLT+8], rdi          ; typed extensions replace those of the kind
+    cmp qword [rsp+HF_FLT], 0
+    jne .noext
+    mov qword [rsp+HF_FLT], 1        ; an extension means files
+.noext:
     invoke GetDlgItem, rsi, ID_FIND_LIST
     mov r12, rax
     invoke GetDlgItem, rsi, ID_RECENT
     mov r13, rax
-    cmp word [rsp+HF_TXT], 0
-    jne .q
+    ; nothing typed and no filter: back to the recent sessions
+    movzx eax, word [rsp+HF_TXT]
+    movzx ecx, word [rsp+HF_PTX]
+    or eax, ecx
+    or rax, [rsp+HF_FLT]
+    or rax, [rsp+HF_FLT+8]
+    jnz .q
     invoke KillTimer, rsi, FIND_TIMER
     invoke ShowWindow, r12, 0
     invoke ShowWindow, r13, 5
@@ -744,14 +947,14 @@ home_find:
     invoke ShowWindow, rax, 5
     invoke GetDlgItem, rsi, ID_RLABEL
     invoke SetWindowTextW, rax, &s_rlabel
-    EPILOG 3520
+    EPILOG 4000
 .q:
     call find_start
     ; the state from before the search decides whether to search again: a listing that ends while this
     ; search runs would otherwise leave results of a half-filled index on the screen
     mov rax, [fi_state]
-    mov [rsp+3504], rax
-    invoke find_query, &rsp+HF_TXT, &rsp+HF_IDS, FIND_SHOWN
+    mov [rsp+HF_ST], rax
+    invoke find_query2, &rsp+HF_TXT, &rsp+HF_IDS, FIND_SHOWN, &rsp+HF_FLT
     mov r14d, eax                    ; names found
     mov r15d, eax
     cmp r15d, FIND_SHOWN
@@ -780,7 +983,7 @@ home_find:
     invoke GetDlgItem, rsi, ID_RDEL                  ; "clear history" belongs to the recent sessions
     invoke ShowWindow, rax, 0
     lea rdi, [f_find_ready]
-    cmp qword [rsp+3504], 2
+    cmp qword [rsp+HF_ST], 2
     je .lb
     lea rdi, [f_find_busy]
 .lb:
@@ -788,13 +991,164 @@ home_find:
     invoke _snwprintf, &rsp+HF_LBL, 99, rdi, r14, rbx
     invoke GetDlgItem, rsi, ID_RLABEL
     invoke SetWindowTextW, rax, &rsp+HF_LBL
-    cmp qword [rsp+3504], 2
+    cmp qword [rsp+HF_ST], 2
     je .kill
     invoke SetTimer, rsi, FIND_TIMER, 700, 0
-    EPILOG 3520
+    EPILOG 4000
 .kill:
     invoke KillTimer, rsi, FIND_TIMER
-    EPILOG 3520
+    EPILOG 4000
+
+; home_find_act(list, index, action): do something with the found item of that row
+;   FA_OPEN   open it with the program registered for its type (a folder opens in Explorer); when
+;             there is none, ask which program to use
+;   FA_OPENAS ask which program to use
+;   FA_SHOW   open its folder in Explorer with the item selected
+;   FA_BC     open it in a session of this application
+;   FA_COPY   copy its path to the clipboard
+%define FA_PATH 96                   ; wchar[800] -> 1696
+%define FA_ARG  1696                 ; wchar[800] -> 3296
+home_find_act:
+    PROLOG 3312
+    mov rbx, rcx
+    mov rsi, rdx
+    mov r12d, r8d
+    invoke SendMessageW, rbx, 0x018A, rsi, 0          ; LB_GETTEXTLEN
+    cmp eax, 780
+    jae .d
+    test eax, eax
+    jle .d
+    mov r13d, eax
+    invoke SendMessageW, rbx, LB_GETTEXT, rsi, &rsp+FA_PATH
+    cmp r12d, FA_OPENAS
+    je .openas
+    cmp r12d, FA_SHOW
+    je .show
+    cmp r12d, FA_BC
+    je .bc
+    cmp r12d, FA_COPY
+    je .copy
+    invoke ShellExecuteW, [g_hframe], &s_v_open, &rsp+FA_PATH, 0, 0, 1
+    cmp rax, 32
+    ja .d
+    cmp rax, 31                      ; SE_ERR_NOASSOC: no program is registered for this type
+    jne .fail
+.openas:
+    invoke ShellExecuteW, [g_hframe], &s_v_openas, &rsp+FA_PATH, 0, 0, 1
+    cmp rax, 32
+    ja .d
+.fail:
+    invoke set_status, &s_noapp
+    EPILOG 3312
+.show:
+    invoke _snwprintf, &rsp+FA_ARG, 790, &f_select, &rsp+FA_PATH
+    invoke ShellExecuteW, [g_hframe], &s_v_open, &s_explorer, &rsp+FA_ARG, 0, 1
+    EPILOG 3312
+.bc:
+    ; a saved session or workspace opens as such; anything else starts a new session of the type that
+    ; fits it (folder compare for a folder), with the item as the left side
+    invoke wcsrchr, &rsp+FA_PATH, '.'
+    test rax, rax
+    jz .bcnew
+    mov r14, rax
+    invoke _wcsicmp, r14, &s_x_bcs
+    test eax, eax
+    jz .bcfile
+    invoke _wcsicmp, r14, &s_x_bcw
+    test eax, eax
+    jnz .bcnew
+.bcfile:
+    invoke open_any_file, &rsp+FA_PATH
+    EPILOG 3312
+.bcnew:
+    invoke GetFileAttributesW, &rsp+FA_PATH
+    cmp eax, -1
+    je .fail
+    mov ebx, T_FOLDER
+    test eax, 0x10
+    jnz .bcgo
+    invoke type_for_path, &rsp+FA_PATH
+    mov ebx, eax
+.bcgo:
+    invoke add_session, rbx, &rsp+FA_PATH, 0, 0
+    EPILOG 3312
+.copy:
+    lea r14, [r13*2+2]               ; bytes with the terminator
+    invoke GlobalAlloc, 2, r14       ; GMEM_MOVEABLE
+    test rax, rax
+    jz .d
+    mov r15, rax
+    invoke GlobalLock, r15
+    test rax, rax
+    jz .d
+    invoke memcpy, rax, &rsp+FA_PATH, r14
+    invoke GlobalUnlock, r15
+    invoke OpenClipboard, [g_hframe]
+    test eax, eax
+    jz .d
+    call EmptyClipboard
+    invoke SetClipboardData, 13, r15                  ; CF_UNICODETEXT
+    call CloseClipboard
+    invoke set_status, &s_copied
+.d:
+    EPILOG 3312
+
+; home_find_menu(hwnd, list, lparam of WM_CONTEXTMENU): menu of actions for the item under the pointer
+%define FN_PT   96                   ; POINT (screen), then RECT for the keyboard case -> 112
+%define FN_CL   112                  ; POINT (client)
+home_find_menu:
+    PROLOG 160
+    mov rsi, rcx
+    mov rbx, rdx
+    mov r12, r8
+    cmp r12d, -1
+    je .key
+    movsx eax, r12w
+    mov [rsp+FN_PT], eax
+    mov rax, r12
+    shr eax, 16
+    movsx eax, ax
+    mov [rsp+FN_PT+4], eax
+    mov rax, [rsp+FN_PT]
+    mov [rsp+FN_CL], rax
+    invoke ScreenToClient, rbx, &rsp+FN_CL
+    mov eax, [rsp+FN_CL+4]
+    shl eax, 16
+    mov ecx, [rsp+FN_CL]
+    and ecx, 0xFFFF
+    or eax, ecx
+    mov r13d, eax
+    invoke SendMessageW, rbx, 0x01A9, 0, r13          ; LB_ITEMFROMPOINT
+    test eax, 0x10000                 ; outside the rows
+    jnz .cur
+    movzx r13d, ax
+    invoke SendMessageW, rbx, 0x0186, r13, 0          ; LB_SETCURSEL
+    jmp .cur
+.key:
+    invoke GetWindowRect, rbx, &rsp+FN_PT             ; the menu key: at the top left of the list
+.cur:
+    invoke SendMessageW, rbx, LB_GETCURSEL, 0, 0
+    movsxd r14, eax
+    test r14, r14
+    js .d
+    call CreatePopupMenu
+    mov r15, rax
+    invoke AppendMenuW, r15, MF_STRING, FA_OPEN, &s_fm_open
+    invoke AppendMenuW, r15, MF_STRING, FA_OPENAS, &s_fm_openas
+    invoke AppendMenuW, r15, MF_STRING, FA_SHOW, &s_fm_show
+    invoke AppendMenuW, r15, MF_SEPARATOR, 0, 0
+    invoke AppendMenuW, r15, MF_STRING, FA_BC, &s_fm_bc
+    invoke AppendMenuW, r15, MF_STRING, FA_COPY, &s_fm_copy
+    mov edi, [rsp+FN_PT]
+    mov ebp, [rsp+FN_PT+4]
+    invoke TrackPopupMenu, r15, TPM_RETURNCMD|TPM_RIGHTBUTTON, rdi, rbp, 0, rsi, 0
+    mov r13d, eax
+    invoke DestroyMenu, r15
+    test r13d, r13d
+    jz .d
+    invoke home_find_act, rbx, r14, r13
+.d:
+    EPILOG 160
 
 ; home_find_open(list, index): open the found file of that row
 home_find_open:

@@ -23,6 +23,7 @@ extern uint64_t g_dark, g_nsess;
 extern int browse_folder(HWND,wchar_t*);
 extern uint64_t fi_state, fi_vis, fi_mode;
 extern int find_query(const wchar_t*,uint32_t*,uint32_t);
+extern int find_query2(const wchar_t*,uint32_t*,uint32_t,const void*);
 extern int find_path(uint32_t,wchar_t*,uint32_t);
 extern uint32_t th_lonly, th_ronly, th_conf;
 
@@ -43,6 +44,9 @@ extern uint32_t th_lonly, th_ronly, th_conf;
 #define ID_FIND_EDIT 3010
 #define ID_FIND_BTN 3011
 #define ID_FIND_LIST 3012
+#define ID_FIND_KIND 3013
+#define ID_FIND_EXT 3014
+#define ID_FIND_PATH 3015
 #define IDM_LIGHT 1030
 #define IDM_DARK 1031
 
@@ -71,6 +75,18 @@ int WINAPI __wrap_MessageBoxW(HWND h,LPCWSTR t,LPCWSTR c,UINT f){(void)h;(void)c
  if(expectBoxes){shownBoxes++;wcsncpy(lastBox,t,399);lastBox[399]=0;return (f&15)==MB_YESNO?IDYES:IDOK;}   /* the test answers Yes */
  boxes++;printf("unexpected message box (flags %u, %d characters)\n",f,(int)wcslen(t));return (f&15)?IDNO:IDOK;}
 void __wrap_update_start(void){}                      /* no network access from a test */
+/* opening a found item: nothing is started and the clipboard is left alone, the calls are recorded */
+static wchar_t shVerb[32],shFile[1200],shArgs[1200],clipText[1200];static int shCalls,menuAnswer,menuShown;
+HINSTANCE WINAPI __wrap_ShellExecuteW(HWND h,LPCWSTR verb,LPCWSTR file,LPCWSTR args,LPCWSTR dir,int show){
+ (void)h;(void)dir;(void)show;shCalls++;wcsncpy(shVerb,verb?verb:L"",31);wcsncpy(shFile,file?file:L"",1199);wcsncpy(shArgs,args?args:L"",1199);
+ return (HINSTANCE)(INT_PTR)42;
+}
+BOOL WINAPI __wrap_TrackPopupMenu(HMENU m,UINT f,int x,int y,int r,HWND h,const RECT*rc){(void)f;(void)x;(void)y;(void)r;(void)h;(void)rc;menuShown=GetMenuItemCount(m);return menuAnswer;}
+BOOL WINAPI __wrap_EmptyClipboard(void){return TRUE;}
+HANDLE WINAPI __wrap_SetClipboardData(UINT fmt,HANDLE mem){
+ if(fmt==CF_UNICODETEXT){const wchar_t*t=GlobalLock(mem);if(t){wcsncpy(clipText,t,1199);GlobalUnlock(mem);}}
+ GlobalFree(mem);return (HANDLE)(INT_PTR)1;
+}
 
 /* ---- reading the screen */
 static BOOL CALLBACK onTop(HWND h,LPARAM l){wchar_t c[32];(void)l;GetClassNameW(h,c,32);if(!wcscmp(c,L"BCFrame")){frame=h;return FALSE;}return TRUE;}
@@ -320,6 +336,14 @@ static void browseChecks(void){
 /* ---- file search of the Home tab */
 static HWND homeView(void){return FindWindowExW(frame,NULL,L"BCHome",NULL);}
 static int shown(HWND h){return (GetWindowLongPtrW(h,GWL_STYLE)&WS_VISIBLE)!=0;}
+/* name, kind (row of the combo box), extensions, folder text -> number of rows */
+static int filtered(HWND home,const wchar_t*text,int kind,const wchar_t*ext,const wchar_t*folder){
+ SendMessageW(GetDlgItem(home,ID_FIND_KIND),CB_SETCURSEL,kind,0);
+ SetWindowTextW(GetDlgItem(home,ID_FIND_EXT),ext);SetWindowTextW(GetDlgItem(home,ID_FIND_PATH),folder);
+ SetWindowTextW(GetDlgItem(home,ID_FIND_EDIT),text);
+ SendMessageW(GetDlgItem(home,ID_FIND_BTN),BM_CLICK,0,0);
+ return (int)SendMessageW(GetDlgItem(home,ID_FIND_LIST),LB_GETCOUNT,0,0);
+}
 static int search(HWND home,const wchar_t*text){        /* type, press the button, return the number of rows */
  SetWindowTextW(GetDlgItem(home,ID_FIND_EDIT),text);
  SendMessageW(GetDlgItem(home,ID_FIND_BTN),BM_CLICK,0,0);
@@ -369,9 +393,47 @@ static void findChecks(void){
  check(search(home,L"DEEP")==1,"folders are found too");
  check(search(home,L"no-such-name-anywhere")==0,"a text that no name contains gives no rows");
  check(find_query(L"REPORT",ids,10)==2&&find_query(L".",ids,10)==4&&find_query(L"",ids,10)==0,"searching the index directly agrees");
- search(home,L"");
+ /* filters. The tree: Alpha\\Report_2026.TXT, Alpha\\Deep\\(Korean).docx, Beta\\report-draft.md, Beta\\other.bin */
+ check(GetDlgItem(home,ID_FIND_KIND)&&GetDlgItem(home,ID_FIND_EXT)&&GetDlgItem(home,ID_FIND_PATH),"Home has the kind, extension and folder filters");
+ check(SendMessageW(GetDlgItem(home,ID_FIND_KIND),CB_GETCOUNT,0,0)==9,"the kind filter offers nine kinds");
+ check(filtered(home,L"a",2,L"",L"")==2,"folders only: Alpha and Beta contain the letter");
+ swprintf(want,900,L"%ls\\Alpha",findRoot);check(hasRow(home,want),"a folder row is the path of the folder");
+ check(filtered(home,L"report",1,L"",L"")==2&&filtered(home,L"e",1,L"",L"")==3,"files only leaves the folders out");
+ check(filtered(home,L"",0,L"md",L"")==1,"an extension alone lists every file of that type");
+ swprintf(want,900,L"%ls\\Beta\\report-draft.md",findRoot);check(rowIs(home,0,want),"which is the .md file");
+ check(filtered(home,L"",0,L"*.TXT; .docx",L"")==2,"several extensions, written with dots, stars and any case");
+ check(filtered(home,L"report",0,L"txt;docx",L"")==1,"name and extension together");
+ check(filtered(home,L"",3,L"",L"")==3,"the documents kind: txt, md and docx, not bin");
+ check(filtered(home,L"",8,L"",L"")==0&&filtered(home,L"",3,L"bin",L"")==1,"typed extensions replace those of the kind");
+ check(filtered(home,L"",0,L"",L"beta")==2,"the folder filter: the two files inside Beta");
+ check(filtered(home,L"",0,L"bin",L"BETA")==1&&filtered(home,L"report",0,L"",L"alpha")==1,"folder filter with the other filters");
+ check(filtered(home,L"",2,L"",L"alpha")==1,"folders only inside Alpha: Deep");
+ check(filtered(home,L"",0,L"",L"no-such-folder")==0,"a folder text that no path contains gives no rows");
+ {uint32_t f[6]={1,0,0,0,0,0};check(find_query2(L"",ids,10,f)==4,"searching the index directly with a filter agrees");}
+ /* opening what was found */
+ check(filtered(home,L"other",0,L"",L"")==1,"one row to open");
+ swprintf(want,900,L"%ls\\Beta\\other.bin",findRoot);
+ SendMessageW(list,LB_SETCURSEL,0,0);shCalls=0;
+ SendMessageW(home,WM_COMMAND,MAKEWPARAM(ID_FIND_LIST,LBN_DBLCLK),(LPARAM)list);
+ check(shCalls==1&&!wcscmp(shVerb,L"open")&&!_wcsicmp(shFile,want)&&!shArgs[0],"double click opens the file with its registered program");
+ menuAnswer=0;menuShown=0;shCalls=0;SendMessageW(home,WM_CONTEXTMENU,(WPARAM)list,(LPARAM)-1);
+ check(menuShown==6&&shCalls==0,"the menu has five actions and a separator; leaving it does nothing");
+ menuAnswer=2;shCalls=0;SendMessageW(home,WM_CONTEXTMENU,(WPARAM)list,(LPARAM)-1);
+ check(shCalls==1&&!wcscmp(shVerb,L"openas")&&!_wcsicmp(shFile,want),"menu: choose the program");
+ menuAnswer=3;shCalls=0;SendMessageW(home,WM_CONTEXTMENU,(WPARAM)list,(LPARAM)-1);
+ {wchar_t arg[1000];swprintf(arg,1000,L"/select,\"%ls\"",want);
+  check(shCalls==1&&!_wcsicmp(shFile,L"explorer.exe")&&!_wcsicmp(shArgs,arg),"menu: show in its folder, selected");}
+ menuAnswer=5;shCalls=0;clipText[0]=0;SendMessageW(home,WM_CONTEXTMENU,(WPARAM)list,(LPARAM)-1);
+ check(shCalls==0&&!_wcsicmp(clipText,want),"menu: copy the path");
+ check(filtered(home,L"Report_2026",0,L"",L"")==1,"a text file to open in the application");
+ SendMessageW(list,LB_SETCURSEL,0,0);
+ {uint64_t before=g_nsess;menuAnswer=4;shCalls=0;SendMessageW(home,WM_CONTEXTMENU,(WPARAM)list,(LPARAM)-1);
+  for(int i=0;i<40&&g_nsess==before;i++)Sleep(50);
+  check(shCalls==0&&g_nsess==before+1,"menu: open in a session of the application");}
+ menuAnswer=0;
+ filtered(home,L"",0,L"",L"");
  GetWindowTextW(GetDlgItem(home,ID_RLABEL),label,200);
- check(!shown(list)&&shown(recent)&&!wcscmp(label,L"\xCD5C\xADFC \xC138\xC158"),"an empty field brings the recent sessions back");
+ check(!shown(list)&&shown(recent)&&!wcscmp(label,L"\xCD5C\xADFC \xC138\xC158"),"empty fields and no filter bring the recent sessions back");
 }
 /* the whole drive, from its file table */
 static int canOpenVolume(wchar_t letter){

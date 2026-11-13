@@ -44,7 +44,7 @@ for mod,names in exports.items():
 run(["gcc","-I",OUT,ROOT/"tools/test_view_state.c",*[OUT/(m+(".test" if m in exports else "")+".obj") for m in MODS],*["-Wl,--wrap="+x for x in ["SendMessageW","GetWindowLongPtrW","GetDlgItem","GetWindowTextW","SetWindowTextW","InvalidateRect","msgbox","DestroyWindow","EnableWindow","SetTimer","KillTimer"]],*LIBS,"-o",OUT/"test_view_state.exe"])
 # UI behaviour: the whole application in one process with a hidden window (tools/test_ui.c)
 run(["objcopy","--redefine-sym","WinMain=bc_winmain",OUT/"main.obj",OUT/"main.ui.obj"])
-run(["gcc",ROOT/"tools/test_ui.c",*[OUT/(m+(".ui" if m=="main" else "")+".obj") for m in MODS],*["-Wl,--wrap="+x for x in ["GetCommandLineW","ShowWindow","GetKeyState","MessageBoxW","update_start"]],OUT/"app.res.o",*LIBS,"-o",OUT/"test_ui.exe"])   # with the manifest: the same common controls as the application
+run(["gcc",ROOT/"tools/test_ui.c",*[OUT/(m+(".ui" if m=="main" else "")+".obj") for m in MODS],*["-Wl,--wrap="+x for x in ["GetCommandLineW","ShowWindow","GetKeyState","MessageBoxW","update_start","ShellExecuteW","TrackPopupMenu","EmptyClipboard","SetClipboardData"]],OUT/"app.res.o",*LIBS,"-o",OUT/"test_ui.exe"])   # with the manifest: the same common controls as the application
 # Keep the fixture directory and logs for inspection. Each run has independent paths.
 fixtures=Path(tempfile.mkdtemp(prefix="fixtures-",dir=OUT))
 print("Fixtures:",fixtures)

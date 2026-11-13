@@ -16,7 +16,7 @@ extern VirtualAlloc, VirtualFree, CreateFileW, CloseHandle, DeviceIoControl, Cre
 extern FindFirstFileExW, FindNextFileW, FindClose, GetLogicalDrives, GetDriveTypeW, GetEnvironmentVariableW
 extern CharLowerBuffW, memcpy, wcslen, malloc, realloc, free
 
-global find_start, find_query, find_path, fi_state, fi_vis, fi_mode, fi_cancel
+global find_start, find_query, find_query2, find_path, fi_state, fi_vis, fi_mode, fi_cancel
 
 ; entry (16 bytes); id 0 means "none"
 %define FI_PARENT 0                  ; dd id of the folder it is in
@@ -47,6 +47,8 @@ fi_vis:     resq 1                   ; entries a search may look at (their paren
 fi_mode:    resq 1                   ; bit 0: a volume was read from its file table, bit 1: folders were walked
 fi_cancel:  resq 1
 fi_full:    resq 1                   ; ran out of room
+fq_pat:     resw 260                 ; folder filter of the running search, lower case
+fq_path:    resw 1100                ; folder path of the entry being checked
 
 section .text
 
@@ -226,13 +228,26 @@ find_path:
     xor eax, eax
     EPILOG 608
 
-; find_query(text, out dd[], capacity) -> eax number of names that contain the text (case ignored);
-;   the first `capacity` ids are stored. The whole index is always scanned.
+; find_query(text, out dd[], capacity) -> eax number of names that contain the text (case ignored)
+; find_query2(text, out dd[], capacity, filter) -> the same, narrowed by a filter:
+;   filter + 0  dd  kind: 0 files and folders, 1 files only, 2 folders only
+;   filter + 8  dq  extensions: lower case strings one after the other, ended by an empty one (or 0)
+;   filter + 16 dq  text that the path of the item's folder must contain, any case (or 0)
+;   The first `capacity` ids are stored; the whole index is always scanned. With a filter the text may be
+;   empty (every name that passes the filter); with nothing to look for the result is 0.
+;   Searches run on the user interface thread only: the folder filter uses two static buffers.
+%define FQ_FLT  2104
+%define FQ_KIND 2112
+%define FQ_EXT  2120
+%define FQ_PLEN 2128                 ; length of the folder filter
 find_query:
+    xor r9d, r9d
+find_query2:
     PROLOG 2144
     mov rsi, rcx
     mov rdi, rdx
     mov r12d, r8d
+    mov [rsp+FQ_FLT], r9
     mov r13, [fi_lower]
     test r13, r13
     jz .zero
@@ -249,23 +264,77 @@ find_query:
     jmp .lp
 .lpd:
     mov r14d, ecx                    ; length of the text
-    test r14d, r14d
-    jz .zero
-    movzx r15d, word [rsp+96]        ; its first character
+    mov qword [rsp+FQ_KIND], 0
+    mov qword [rsp+FQ_EXT], 0
+    mov qword [rsp+FQ_PLEN], 0
+    mov rsi, [rsp+FQ_FLT]
+    test rsi, rsi
+    jz .nof
+    mov eax, [rsi]
+    mov [rsp+FQ_KIND], rax
+    mov rax, [rsi+8]
+    test rax, rax
+    jz .noext
+    cmp word [rax], 0
+    je .noext
+    mov [rsp+FQ_EXT], rax
+.noext:
+    mov rax, [rsi+16]
+    test rax, rax
+    jz .nof
+    lea r8, [fq_pat]
+    xor ecx, ecx
+.pl:
+    movzx edx, word [rax+rcx*2]
+    test edx, edx
+    jz .pld
+    cmp ecx, 250
+    jae .pld
+    movzx edx, word [r13+rdx*2]
+    mov [r8+rcx*2], dx
+    inc ecx
+    jmp .pl
+.pld:
+    mov [rsp+FQ_PLEN], rcx
+.nof:
+    mov eax, r14d
+    or rax, [rsp+FQ_KIND]
+    or rax, [rsp+FQ_EXT]
+    or rax, [rsp+FQ_PLEN]
+    jz .zero                         ; nothing to look for
+    movzx r15d, word [rsp+96]        ; first character of the text
     mov ebx, 1                       ; id
     xor ebp, ebp                     ; found
-    mov r8, [fi_ent]
-    mov r9, [fi_pool]
 .id:
     cmp rbx, [fi_vis]
     jae .done
+    mov r8, [fi_ent]
+    mov r9, [fi_pool]
     mov rax, rbx
     shl rax, 4
+    movzx edx, word [r8+rax+FI_FLAGS]
+    test edx, 2
+    jnz .next                        ; the top of a listed tree (a drive, a listed folder) is not a result
+    mov rcx, [rsp+FQ_KIND]
+    cmp ecx, 1
+    jne .k2
+    test edx, 1
+    jnz .next                        ; files only
+    jmp .kok
+.k2:
+    cmp ecx, 2
+    jne .kok
+    test edx, 1
+    jz .next                         ; folders only
+.kok:
     movzx ecx, word [r8+rax+FI_LEN]
+    mov esi, ecx                     ; name length
+    mov edx, [r8+rax+FI_NAME]
+    lea r10, [r9+rdx*2]              ; name
+    test r14d, r14d
+    jz .hit
     sub ecx, r14d                    ; last position the text can start at
     js .next
-    mov edx, [r8+rax+FI_NAME]
-    lea r10, [r9+rdx*2]
     xor r11d, r11d
 .st:
     cmp r11d, ecx
@@ -289,6 +358,86 @@ find_query:
     inc r11d
     jmp .st
 .hit:
+    ; ---- extension: what follows the last dot of the name is one of the list
+    mov rax, [rsp+FQ_EXT]
+    test rax, rax
+    jz .path
+    mov ecx, esi
+.dot:
+    test ecx, ecx
+    jz .next
+    dec ecx
+    cmp word [r10+rcx*2], '.'
+    jne .dot
+    lea r11, [r10+rcx*2+2]           ; extension
+    mov edx, esi
+    sub edx, ecx
+    dec edx                          ; its length
+    jz .next
+.el:
+    cmp word [rax], 0
+    je .next                         ; end of the list
+    xor ecx, ecx
+.ec:
+    movzx r8d, word [rax+rcx*2]
+    test r8d, r8d
+    jz .eend
+    cmp ecx, edx
+    jae .eskip
+    movzx r9d, word [r11+rcx*2]
+    movzx r9d, word [r13+r9*2]
+    cmp r9d, r8d
+    jne .eskip
+    inc ecx
+    jmp .ec
+.eend:
+    cmp ecx, edx
+    je .path
+.eskip:
+    cmp word [rax], 0
+    je .esd
+    add rax, 2
+    jmp .eskip
+.esd:
+    add rax, 2
+    jmp .el
+.path:
+    ; ---- folder: the path of the folder the item is in contains the filter text
+    cmp qword [rsp+FQ_PLEN], 0
+    je .store
+    mov r8, [fi_ent]
+    mov rax, rbx
+    shl rax, 4
+    mov esi, [r8+rax+FI_PARENT]
+    test esi, esi
+    jz .next
+    invoke find_path, rsi, &fq_path, 1090
+    test eax, eax
+    jz .next
+    mov ecx, eax
+    sub ecx, [rsp+FQ_PLEN]           ; last start
+    js .next
+    lea r10, [fq_path]
+    lea r11, [fq_pat]
+    xor r8d, r8d
+.ps:
+    cmp r8d, ecx
+    ja .next
+    xor r9d, r9d
+.pc:
+    cmp r9, [rsp+FQ_PLEN]
+    jae .store
+    lea rax, [r8+r9]
+    movzx eax, word [r10+rax*2]
+    movzx eax, word [r13+rax*2]
+    cmp ax, [r11+r9*2]
+    jne .pn
+    inc r9d
+    jmp .pc
+.pn:
+    inc r8d
+    jmp .ps
+.store:
     cmp ebp, r12d
     jae .nostore
     mov [rdi+rbp*4], ebx
