@@ -81,6 +81,7 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define ID_CHK_FOLD  217
 %define ID_CHK_UNI   218
 %define ID_CHK_WORD  219
+%define ID_CHK_SCRL  220
 %define ID_EDIT_RULES 232
 %define ID_LBL_RULES 233
 %define TV_RULES  3168
