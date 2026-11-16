@@ -5,7 +5,7 @@
 %include "inc/app.inc"
 %include "inc/export.inc"
 
-extern PostMessageW, wcsstr, ShowWindow
+extern PostMessageW, wcsstr, ShowWindow, mk
 extern g_batch, g_xl_path, g_exitcode, g_hframe, batch_done
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetFocus, GetWindowTextW, SetWindowTextW
@@ -19,7 +19,7 @@ extern save_error
 extern mk, reg_class, scl, set_status, msgbox
 extern mk_btn, mk_chk, mk_lbl, mk_edit, get_chk, ctl_color, theme_checks
 extern pb_create, pb_layout, pb_load, pb_collect, pb_command
-extern rich_create, rich_set_text, rich_get_text, rich_bk, rich_theme, rich_len, rich_unsel, rich_quiet, rich_batch
+extern rich_monoface, rich_create, rich_set_text, rich_get_text, rich_bk, rich_theme, rich_len, rich_unsel, rich_quiet, rich_batch
 extern sb_init, sb_free, text_load, text_save, lines_split, compare_lines, hunk_free
 extern g_tc_rules, icon_set, g_prev, g_next, g_copyr, g_copyl, set_tab_title, vec_push, rich_theme
 extern _wcsicmp, rich_get_text, g_dark, set_status_part
@@ -68,7 +68,8 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define TV_UNI    3888          ; unified view: option read at the last compare
 %define TV_WORDS  3896          ; word level highlight option read at the last compare
 %define TV_WS     3904          ; whitespace marks shown: option read at the last compare
-%define TV_SIZE   3912
+%define TV_CTX    3912          ; folding: rows kept next to a change (read at the last compare)
+%define TV_SIZE   3920
 %define E_HR      40
 %define ID_ED_FIND   303
 %define ID_ED_NEXT   304
@@ -84,6 +85,7 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define ID_CHK_WORD  219
 %define ID_CHK_SCRL  220
 %define ID_CHK_WS    221
+%define ID_CMB_CTX   222
 %define ID_EDIT_RULES 232
 %define ID_LBL_RULES 233
 %define TV_RULES  3168
