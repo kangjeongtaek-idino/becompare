@@ -5,7 +5,7 @@
 %include "inc/app.inc"
 %include "inc/export.inc"
 
-extern PostMessageW, wcsstr, ShowWindow, mk
+extern PostMessageW, wcsstr, ShowWindow, mk, write_utf8, browse_save_as
 extern g_batch, g_xl_path, g_exitcode, g_hframe, batch_done
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetFocus, GetWindowTextW, SetWindowTextW
@@ -113,6 +113,7 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define ID_BTN_SVL  245
 %define ID_BTN_SVR  246
 %define ID_LBL_INFO 250
+%define ID_BTN_PATCH 252
 %define FILLER      0x200B
 
 section .rdata
@@ -264,6 +265,7 @@ sum_len:
 
 %include "text_ui.inc"
 %include "text_xl.inc"
+%include "text_patch.inc"
 %include "text_word.inc"
 %include "text_fold.inc"
 %include "text_uni.inc"
