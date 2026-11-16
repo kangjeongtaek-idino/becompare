@@ -6,7 +6,7 @@ extern SendMessageW, GetWindowLongPtrW, memset, malloc, free, wcslen
 extern mk
 extern g_mono, th_bg, th_fg
 
-global rich_fg, rich_create, rich_set_text, rich_get_text, rich_bk, rich_theme, rich_len, rich_unsel, rich_quiet, rich_batch
+global rich_monoface, rich_fg, rich_create, rich_set_text, rich_get_text, rich_bk, rich_theme, rich_len, rich_unsel, rich_quiet, rich_batch
 
 %define EM_EXLIMITTEXT      0x0435
 %define EM_GETTEXTEX        0x045E
@@ -352,6 +352,60 @@ rich_theme:
     invoke SendMessageW, rbx, EM_SETCHARFORMAT, SCF_ALL, &rsp+104
     invoke SendMessageW, rbx, EM_SETMODIFY, r12, 0
     EPILOG 224
+
+; rich_monoface(h): the face of the editor font for the Latin text of the whole control
+;   A line with Hangul makes RichEdit pick a fallback font, and the Latin text that follows it in the same
+;   insertion kept that proportional font (seen behind the label of a folded fragment).
+;   Only the runs below U+2E80 behind such text are reset, so the Hangul keeps the font that can draw it.
+rich_monoface:
+    PROLOG 352
+    mov rbx, rcx
+    invoke memset, &rsp+104, 0, CF_SIZE
+    mov dword [rsp+104], CF_SIZE
+    invoke SendMessageW, rbx, 0x043A, 0, &rsp+104      ; EM_GETCHARFORMAT, SCF_DEFAULT: the editor font
+    mov dword [rsp+104+CF_MASK], CFM_FACE|0x08000000   ; face + character set
+    invoke rich_get_text, rbx, &rsp+96
+    mov r14, rax
+    test rax, rax
+    jz .d
+    invoke SendMessageW, rbx, EM_GETMODIFY, 0, 0
+    mov r15, rax
+    xor esi, esi
+    xor ebp, ebp                     ; 1 after such a character was seen: only text behind it can be wrong
+    mov r13d, 5000                   ; budget of runs (a file full of Hangul would take seconds)
+.s:
+    cmp rsi, [rsp+96]
+    jae .sd
+    movzx eax, word [r14+rsi*2]
+    cmp eax, 0x2E80                  ; CJK, Hangul, ...: the scripts that switch the font
+    jb .asc
+    mov ebp, 1
+    inc rsi
+    jmp .s
+.asc:
+    mov r12, rsi                     ; Latin run [r12, rsi)
+.a:
+    inc rsi
+    cmp rsi, [rsp+96]
+    jae .ad
+    cmp word [r14+rsi*2], 0x2E80
+    jb .a
+.ad:
+    test ebp, ebp
+    jz .s
+    test r13d, r13d
+    jz .sd
+    dec r13d
+    mov [rsp+224], r12d              ; CHARRANGE
+    mov [rsp+228], esi
+    invoke SendMessageW, rbx, EM_EXSETSEL, 0, &rsp+224
+    invoke SendMessageW, rbx, EM_SETCHARFORMAT, SCF_SELECTION, &rsp+104
+    jmp .s
+.sd:
+    invoke free, r14
+    invoke SendMessageW, rbx, EM_SETMODIFY, r15, 0
+.d:
+    EPILOG 352
 
 ; rich_len(h) -> number of characters
 rich_len:

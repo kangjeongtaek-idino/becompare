@@ -46,7 +46,36 @@ gt_metrics:
     mov dword [r14], 16
     EPILOG 128
 
+; gt_rowh(pane, line) -> eax height of that line in pixels (0: unknown - last line or not laid out)
+;   Lines are not all the same height: a line with Hangul (the label of a folded fragment, Korean text in a
+;   file) uses a taller fallback font, so the rows are measured one by one instead of multiplying one pitch.
+gt_rowh:
+    PROLOG 128
+    mov rbx, rcx
+    mov r12, rdx
+    invoke SendMessageW, rbx, EM_LINEINDEX, r12, 0
+    movsxd rsi, eax
+    test rsi, rsi
+    js .no
+    invoke SendMessageW, rbx, EM_POSFROMCHAR, &rsp+96, rsi
+    mov r13d, [rsp+100]
+    lea rsi, [r12+1]
+    invoke SendMessageW, rbx, EM_LINEINDEX, rsi, 0
+    movsxd rsi, eax
+    test rsi, rsi
+    js .no
+    invoke SendMessageW, rbx, EM_POSFROMCHAR, &rsp+96, rsi
+    mov eax, [rsp+100]
+    sub eax, r13d
+    cmp eax, 4
+    jl .no
+    EPILOG 128
+.no:
+    xor eax, eax
+    EPILOG 128
+
 ; gt_paint(hwnd, gt)
+%define P_PANE 296
 %define P_PS   96
 %define P_RC   176
 %define P_BUF  200
@@ -70,6 +99,7 @@ gt_paint:
     jne .pane
     mov r13, [r12+TV_HB]
 .pane:
+    mov [rsp+P_PANE], r13
     invoke gt_metrics, r13, &rsp+P_FIRST, &rsp+P_Y0, &rsp+P_H
     invoke SelectObject, rdi, [g_font]
     invoke SetBkMode, rdi, 1
@@ -81,6 +111,11 @@ gt_paint:
     jae .done
     cmp r15d, [rsp+P_RC+12]
     jge .done
+    invoke gt_rowh, [rsp+P_PANE], r14            ; the height of this very row
+    test eax, eax
+    jz .keeph
+    mov [rsp+P_H], eax
+.keeph:
     mov rax, r14
     shl rax, 4
     add rax, [r12+TV_ROWS]
@@ -312,17 +347,27 @@ gt_click:
     mov r14, [r13+TV_HB]
 .m:
     invoke gt_metrics, r14, &rsp+96, &rsp+100, &rsp+104
-    mov eax, r12d
-    sub eax, [rsp+100]
+    mov edi, r12d
+    sub edi, [rsp+100]               ; y below the top of the first visible row
     js .d
-    xor edx, edx
-    mov ecx, [rsp+104]
-    test ecx, ecx
-    jz .d
-    div ecx
-    add eax, [rsp+96]                ; row
-    cmp rax, [r13+TV_NROWS]
+    cmp dword [rsp+104], 0
+    je .d
+    mov r15d, [rsp+96]               ; walk down row by row: the rows differ in height
+.walk:
+    cmp r15, [r13+TV_NROWS]
     jae .d
+    invoke gt_rowh, r14, r15
+    test eax, eax
+    jnz .hh
+    mov eax, [rsp+104]
+.hh:
+    cmp edi, eax
+    jb .hit
+    sub edi, eax
+    inc r15
+    jmp .walk
+.hit:
+    mov rax, r15                     ; row
     shl rax, 4
     add rax, [r13+TV_ROWS]
     cmp dword [rax], 0

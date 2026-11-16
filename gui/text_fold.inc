@@ -9,14 +9,55 @@
 ;   action that reads or writes pane text (block copy, save, replace, manual alignment) first calls
 ;   tv_unfold, which unchecks the option and compares again.
 
-%define FOLD_CTX 3
+%define FOLD_CTX 3                   ; default; the combo box next to the option chooses 1, 2, 3, 4 or 8
 %define FOLD_MIN 4
 
 section .rdata
 WSTR f_fold_lbl, "⋯ 변경 없는 줄 %u개 접힘 (⋯ 클릭: 펼치기)"
 WSTR s_c_fold, "변경 없는 구간 접기"
+WSTR cn_fold_combo, "COMBOBOX"
+WSTR s_fctx_1, "문맥 1줄"
+WSTR s_fctx_2, "문맥 2줄"
+WSTR s_fctx_3, "문맥 3줄"
+WSTR s_fctx_4, "문맥 4줄"
+WSTR s_fctx_8, "문맥 8줄"
+align 8
+fold_ctx_names: dq s_fctx_1, s_fctx_2, s_fctx_3, s_fctx_4, s_fctx_8
+fold_ctx_vals:  db 1, 2, 3, 4, 8
+align 8                              ; the UTF-16 strings that follow must stay on even addresses
 
 section .text
+
+; tv_ctx_create(hwnd): the combo box with the number of context rows (IntelliJ "Context lines")
+tv_ctx_create:
+    PROLOG 64
+    mov rsi, rcx
+    invoke mk, rsi, &cn_fold_combo, 0, 0x00210003, ID_CMB_CTX     ; CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    mov rbx, rax
+    xor r12d, r12d
+.a:
+    lea rax, [fold_ctx_names]
+    mov r13, [rax+r12*8]
+    invoke SendMessageW, rbx, 0x0143, 0, r13           ; CB_ADDSTRING
+    inc r12d
+    cmp r12d, 5
+    jb .a
+    invoke SendMessageW, rbx, 0x014E, 2, 0             ; CB_SETCURSEL: 3 rows
+    EPILOG 64
+
+; tv_ctx_get(hwnd) -> eax context rows chosen in the combo box
+tv_ctx_get:
+    PROLOG 64
+    invoke GetDlgItem, rcx, ID_CMB_CTX
+    invoke SendMessageW, rax, 0x0147, 0, 0             ; CB_GETCURSEL
+    cmp eax, 5
+    jb .ok
+    mov eax, FOLD_CTX
+    EPILOG 64
+.ok:
+    lea rcx, [fold_ctx_vals]
+    movzx eax, byte [rcx+rax]
+    EPILOG 64
 
 ; fold_isexp(rbx = tv, edx = first hidden row) -> eax 1 when the user expanded that fragment (leaf: eax, ecx only)
 fold_isexp:
@@ -100,12 +141,12 @@ tv_fold_rows:
     xor r9d, r9d
     test rsi, rsi
     jz .nl
-    mov r9d, FOLD_CTX                ; context after the previous change
+    mov r9d, [rbx+TV_CTX]            ; context after the previous change
 .nl:
     xor r10d, r10d
     cmp r8, r13
     jae .nt
-    mov r10d, FOLD_CTX               ; context before the next change
+    mov r10d, [rbx+TV_CTX]           ; context before the next change
 .nt:
     lea r11, [rsi+r9]                ; first hidden row
     mov rcx, r8
