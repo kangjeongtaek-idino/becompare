@@ -1264,6 +1264,8 @@ tv_proc:
     je .m_prev
     cmp edi, BC_PREVDIFF
     je .b_prev
+    cmp edi, BC_GOTOLINE
+    je .m_goto
     cmp edi, BC_COLLECT
     je .collect
     cmp edi, BC_ISDIRTY
@@ -1500,6 +1502,10 @@ tv_proc:
 .b_syn:
     invoke tv_syn_apply, rsi, r15
     jmp .zero
+.m_goto:
+    invoke tv_gotoline, rsi, r15
+    mov eax, 1
+    EPILOG 320
 .m_bm:
     invoke tv_bm_toggle, rsi, r15
     mov eax, 1

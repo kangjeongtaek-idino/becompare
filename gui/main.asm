@@ -437,6 +437,11 @@ pre_key:
     jnz .prevdiff
     jmp .nextdiff
 .nof7:
+    cmp edi, 'G'                     ; Ctrl+G: go to line (IntelliJ)
+    jne .nog
+    cmp ebp, 1
+    je .gotoline
+.nog:
     cmp edi, VK_ESCAPE
     je .esc
     cmp edi, VK_RETURN
@@ -475,6 +480,10 @@ pre_key:
     EPILOG 96
 .nextdiff:
     mov r13d, BC_NEXTDIFF
+    mov r14d, 1
+    jmp .dosend
+.gotoline:
+    mov r13d, BC_GOTOLINE
     mov r14d, 1
     jmp .dosend
 .prevdiff:

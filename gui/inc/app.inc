@@ -41,6 +41,7 @@
 %define BC_BOOKMARK (WM_APP+32)
 %define BC_NEXTMARK (WM_APP+33)
 %define BC_PREVMARK (WM_APP+34)
+%define BC_GOTOLINE (WM_APP+35)      ; Text Compare view: ask for a line number and go there (Ctrl+G)
 %define BC_TVQ      (WM_APP+60)       ; Text Compare view: wParam 0 number of differences, 1 pane with the caret, 2 current difference
 %define BC_PROGRESS (WM_APP+1)
 %define BC_DONE     (WM_APP+2)
