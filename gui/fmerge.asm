@@ -9,15 +9,16 @@
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem, EnableWindow
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetWindowTextW, SetWindowTextW, InvalidateRect, SetWindowTheme
 extern FindFirstFileW, FindNextFileW, FindClose, CreateDirectoryW, CopyFileW, GetFileAttributesExW, GetFileAttributesW, SHCreateDirectoryExW, SetCursor, LoadCursorW
+extern CreateThread, WaitForSingleObject
 extern malloc, calloc, realloc, free, memset, memcpy, wcslen, wcscpy, wcscat, wcsrchr, wcsncpy, _wcsicmp, _wcsnicmp, _snwprintf, qsort
 extern GetFullPathNameW, CreateFileW, ReadFile, CloseHandle
 extern g_hinst, g_dark, th_bg, th_fg, th_panel, th_diff, th_lonly, th_ronly, th_same, th_conf, th_type, th_panelbrush
 extern mk, reg_class, scl, set_status, msgbox
 extern mk_btn, mk_chk, mk_lbl, mk_edit, get_chk, ctl_color, theme_checks, lv_dark_header
 extern pb_create, pb_layout, pb_load, pb_collect, pb_command
-extern set_tab_title, str_dup, fmt_size, vec_push, read_file_bytes, crc32_update, browse_folder
+extern set_tab_title, str_dup, fmt_size, vec_push, read_file_bytes, crc32_update, browse_folder, excl_match, CharLowerBuffW, lower_w
 extern sb_free, PostMessageW, g_batch, g_dx_path, g_exitcode, g_hframe, batch_done
-extern sess_new, sess_open
+extern sess_new, sess_open, type_for_path, diff3_try_file
 extern icon_set, g_usel, g_user, g_base, g_del, g_edit, g_run
 
 global fmerge_register, fmerge_create
@@ -33,8 +34,16 @@ global fmerge_register, fmerge_create
 %define FM_TMP    88                 ; 3 x 64 wchar scratch for cell text (384 bytes)
 %define FM_ROOT   472                ; 3 x 1040 bytes: left, right, base
 %define FM_OUT    3592               ; 1040 bytes
-%define FM_SESS   4632
-%define FM_SIZE   4648
+%define FM_SESS    4632
+%define FM_HVIEW   4640
+%define FM_THREAD  4648
+%define FM_RUNNING 4656
+%define FM_CANCEL  4664
+%define FM_CLOSING 4672
+%define FM_EXCL    4680              ; wchar[256]
+%define FM_SCOL    5192              ; sort column (0..5)
+%define FM_SDESC   5196              ; 1 = descending
+%define FM_SIZE    5208
 
 ; FE (64 bytes)
 %define FE_NAME   0
@@ -53,10 +62,15 @@ global fmerge_register, fmerge_create
 %define ACT_C     3
 %define ACT_DEL   4
 %define ACT_CONF  5
+%define ACT_AUTO  6
 
 %define ID_LST    700
 %define ID_CHKF   701
 %define ID_LBLI   702
+%define ID_LBL_EXCL 703
+%define ID_FM_EXCL  704
+%define ID_LBL_FLT  705
+%define ID_FM_FLT   706
 %define ID_BTN_RUNM 710
 %define ID_BTN_TA 711
 %define ID_BTN_TB 712
@@ -106,6 +120,15 @@ WSTR s_nosel, "먼저 목록에서 항목을 선택하세요."
 WSTR s_noopen, "텍스트 병합은 양쪽에 모두 있는 파일에서만 열 수 있습니다."
 WSTR s_dash, "—"
 WSTR s_slash, "\"
+WSTR s_stop, "중지"
+WSTR s_scanning_0, "스캔 중…"
+WSTR s_scanning, "스캔 중… %llu 항목"
+WSTR s_scan_cancel, "취소됨"
+WSTR s_done_short, "비교 완료"
+WSTR s_busy, "작업이 진행 중입니다."
+WSTR s_fm_excl, "제외:"
+WSTR s_fm_flt, "필터:"
+g_stop: dw 0xE71A, 0
 WSTR fst0, "같음"
 WSTR fst1, "왼쪽 변경"
 WSTR fst2, "오른쪽 변경"
@@ -116,19 +139,25 @@ WSTR fst6, "삭제됨"
 WSTR fst7, "폴더"
 WSTR fst8, "양쪽 삭제"
 WSTR fst9, "읽을 수 없음"
+WSTR fst10, "양쪽 변경"
 WSTR ac0, "—"
 WSTR ac1, "왼쪽 채택"
 WSTR ac2, "오른쪽 채택"
 WSTR ac3, "Base 채택"
 WSTR ac4, "삭제(제외)"
 WSTR ac5, "수동 해결 필요"
+WSTR ac6, "자동 병합"
 
 align 8
 col_text: dq h_name, h_stat, h_act, h_sa, h_sb, h_sc
 col_w:    dd 320, 110, 120, 110, 110, 110
 col_fmt:  dd 0, 0, 0, 1, 1, 1
-st_names: dq fst0, fst1, fst2, fst3, fst4, fst5, fst6, fst7, fst8, fst9
-ac_names: dq ac0, ac1, ac2, ac3, ac4, ac5
+st_names: dq fst0, fst1, fst2, fst3, fst4, fst5, fst6, fst7, fst8, fst9, fst10
+ac_names: dq ac0, ac1, ac2, ac3, ac4, ac5, ac6
+
+section .bss
+alignb 8
+fm_sort_ctx: resq 1
 
 section .text
 
@@ -164,6 +193,8 @@ fm_walk:
     je .d
     mov rbx, rax
 .next:
+    cmp byte [r12+FM_CANCEL], 0
+    jne .close
     lea rsi, [rsp+W_FD+FD_NAME]
     cmp word [rsi], '.'
     jne .real
@@ -174,6 +205,12 @@ fm_walk:
     cmp word [rsi+4], 0
     je .skip
 .real:
+    cmp word [r12+FM_EXCL], 0
+    je .notexcl
+    invoke excl_match, &r12+FM_EXCL, rsi
+    test eax, eax
+    jnz .skip
+.notexcl:
     invoke _snwprintf, &rsp+W_REL, 1090, &f_rel, r15, rsi
     invoke vec_push, &r12+FM_RAW, 32
     mov rdi, rax
@@ -201,6 +238,7 @@ fm_walk:
     invoke FindNextFileW, rbx, &rsp+W_FD
     test eax, eax
     jnz .next
+.close:
     invoke FindClose, rbx
 .d:
     EPILOG 5200
@@ -254,6 +292,8 @@ fm_scan:
     mov [rbx+FM_RAW+16], rax
     xor esi, esi
 .sides:
+    cmp byte [rbx+FM_CANCEL], 0
+    jne .abort_raw
     cmp esi, 3
     jae .sorted
     imul eax, esi, 1040
@@ -270,6 +310,8 @@ fm_scan:
     inc esi
     jmp .sides
 .sorted:
+    cmp byte [rbx+FM_CANCEL], 0
+    jne .abort_raw
     mov rax, [rbx+FM_RAW+8]
     test rax, rax
     jz .done
@@ -318,11 +360,23 @@ fm_scan:
 .memdone:
     mov [r13+FE_FLAGS], r14d
     jmp .grp
+.abort_raw:
+    xor esi, esi
+.ar_l:
+    cmp rsi, [rbx+FM_RAW+8]
+    jae .freeraw
+    mov rax, rsi
+    shl rax, 5
+    add rax, [rbx+FM_RAW]
+    invoke free, [rax]
+    inc rsi
+    jmp .ar_l
 .freeraw:
     invoke free, [rbx+FM_RAW]
     xor eax, eax
     mov [rbx+FM_RAW], rax
     mov [rbx+FM_RAW+8], rax
+    mov [rbx+FM_RAW+16], rax
 .done:
     EPILOG 128
 
@@ -353,6 +407,8 @@ fm_crc:
     test rax, rax
     jz .badclose
 .rd:
+    cmp byte [rbx+FM_CANCEL], 0
+    jne .badclose
     mov dword [rsp+2300], 0
     invoke ReadFile, r14, r15, 262144, &rsp+2300, 0
     test eax, eax
@@ -419,6 +475,46 @@ fm_eq:
 .no:
     xor eax, eax
     EPILOG 64
+
+; fm_path500(fm, e, side, out): full path of an entry on one side into wchar[520]
+fm_path500:
+    PROLOG 64
+    mov rsi, rcx
+    mov rdi, rdx
+    mov rbx, r9
+    imul eax, r8d, 1040
+    lea r12, [rsi+FM_ROOT+rax]
+    invoke _snwprintf, rbx, 519, &f_full, r12, [rdi+FE_NAME]
+    mov word [rbx+1038], 0
+    EPILOG 64
+
+; fm_try_auto(fm, e) -> eax 1 when a 3-way text file merges cleanly without line conflicts
+fm_try_auto:
+    PROLOG 3456
+    mov rbx, rcx
+    mov rsi, rdx
+    test dword [rsi+FE_FLAGS], 0x7000
+    jnz .no
+    cmp qword [rsi+FE_SZ], 0x400000
+    ja .no
+    cmp qword [rsi+FE_SZ+8], 0x400000
+    ja .no
+    cmp qword [rsi+FE_SZ+16], 0x400000
+    ja .no
+    invoke fm_path500, rbx, rsi, 0, &rsp+96
+    invoke type_for_path, &rsp+96
+    cmp eax, T_TEXT
+    jne .no
+    invoke fm_path500, rbx, rsi, 1, &rsp+1200
+    invoke type_for_path, &rsp+1200
+    cmp eax, T_TEXT
+    jne .no
+    invoke fm_path500, rbx, rsi, 2, &rsp+2304
+    invoke diff3_try_file, &rsp+96, &rsp+1200, &rsp+2304, 0
+    EPILOG 3456
+.no:
+    xor eax, eax
+    EPILOG 3456
 
 ; fm_decide(fm, e): set FE_ACT / FE_ST
 fm_decide:
@@ -510,9 +606,16 @@ fm_decide:
 .notac:
     invoke fm_eq, rbx, rsi, 1, 2
     test eax, eax
-    jz .conflict
+    jz .tryauto
     mov dword [rsi+FE_ACT], ACT_A
     mov dword [rsi+FE_ST], 1
+    jmp .done
+.tryauto:
+    invoke fm_try_auto, rbx, rsi
+    test eax, eax
+    jz .conflict
+    mov dword [rsi+FE_ACT], ACT_AUTO
+    mov dword [rsi+FE_ST], 10
     jmp .done
 .conflict:
     mov dword [rsi+FE_ACT], ACT_CONF
@@ -525,11 +628,119 @@ fm_decide:
 .ret:
     EPILOG 64
 
-; fm_vis(fm, onlyconf): visible list, conflict / automatic counters
-fm_vis:
+; fm_namehas(text, pat_lower, pat_len) -> eax 1 if text contains pat_lower (case-insensitive)
+fm_namehas:
     PROLOG 64
+    mov rsi, rcx
+    mov rdi, rdx
+    mov r12d, r8d
+    invoke wcslen, rsi
+    sub eax, r12d
+    js .no
+    mov r13d, eax
+    xor r14d, r14d
+.st:
+    cmp r14d, r13d
+    ja .no
+    xor ebx, ebx
+.cm:
+    cmp ebx, r12d
+    jae .yes
+    lea rax, [r14+rbx]
+    movzx ecx, word [rsi+rax*2]
+    call lower_w
+    cmp ax, [rdi+rbx*2]
+    jne .nx
+    inc ebx
+    jmp .cm
+.nx:
+    inc r14d
+    jmp .st
+.yes:
+    mov eax, 1
+    EPILOG 64
+.no:
+    xor eax, eax
+    EPILOG 64
+
+; fm_viscmp(a*, b*): qsort comparator on visible entry indices
+fm_viscmp:
+    PROLOG 64
+    mov eax, [rcx]
+    mov edx, [rdx]
+    mov rbx, [fm_sort_ctx]
+    mov rsi, rax
+    shl rsi, 6
+    add rsi, [rbx+FM_ENT]
+    mov rdi, rdx
+    shl rdi, 6
+    add rdi, [rbx+FM_ENT]
+    mov ecx, [rbx+FM_SCOL]
+    cmp ecx, 1
+    je .st
+    cmp ecx, 2
+    je .act
+    cmp ecx, 3
+    jae .sz
+.nm:
+    invoke _wcsicmp, [rsi+FE_NAME], [rdi+FE_NAME]
+    jmp .dir
+.st:
+    mov eax, [rsi+FE_ST]
+    sub eax, [rdi+FE_ST]
+    jz .nm
+    jmp .dir
+.act:
+    mov eax, [rsi+FE_ACT]
+    cmp dword [rsi+FE_MAN], 0
+    je .a1
+    mov eax, [rsi+FE_MAN]
+.a1:
+    mov edx, [rdi+FE_ACT]
+    cmp dword [rdi+FE_MAN], 0
+    je .a2
+    mov edx, [rdi+FE_MAN]
+.a2:
+    sub eax, edx
+    jz .nm
+    jmp .dir
+.sz:
+    sub ecx, 3
+    mov rax, [rsi+FE_SZ+rcx*8]
+    mov rdx, [rdi+FE_SZ+rcx*8]
+    cmp rax, rdx
+    je .nm
+    mov eax, -1
+    jb .dir
+    mov eax, 1
+.dir:
+    cmp dword [rbx+FM_SDESC], 0
+    je .out
+    neg eax
+.out:
+    EPILOG 64
+
+; fm_vis(fm, onlyconf): visible list, conflict / automatic counters
+%define FV_FLT 96                    ; wchar[100]
+%define FV_FLN 304
+fm_vis:
+    PROLOG 336
     mov rbx, rcx
     mov r12d, edx
+    mov word [rsp+FV_FLT], 0
+    cmp qword [rbx+FM_HVIEW], 0
+    je .noflt
+    invoke GetDlgItem, [rbx+FM_HVIEW], ID_FM_FLT
+    test rax, rax
+    jz .noflt
+    invoke GetWindowTextW, rax, &rsp+FV_FLT, 99
+.noflt:
+    invoke wcslen, &rsp+FV_FLT
+    mov [rsp+FV_FLN], rax
+    test rax, rax
+    jz .nolow
+    invoke CharLowerBuffW, &rsp+FV_FLT, rax
+.nolow:
     invoke free, [rbx+FM_VIS]
     mov rcx, [rbx+FM_ENT+8]
     lea rcx, [rcx*4+8]
@@ -539,37 +750,52 @@ fm_vis:
     xor edi, edi
     xor r13d, r13d                    ; conflicts
     xor r14d, r14d                    ; automatic
-    xor ecx, ecx
+    xor ebp, ebp
 .l:
-    cmp rcx, [rbx+FM_ENT+8]
+    cmp rbp, [rbx+FM_ENT+8]
     jae .d
-    mov rax, rcx
+    mov rax, rbp
     shl rax, 6
     add rax, [rbx+FM_ENT]
-    mov edx, [rax+FE_ACT]
-    cmp dword [rax+FE_MAN], 0
+    mov r15, rax
+    mov edx, [r15+FE_ACT]
+    cmp dword [r15+FE_MAN], 0
     je .noman
-    mov edx, [rax+FE_MAN]
+    mov edx, [r15+FE_MAN]
 .noman:
     cmp edx, ACT_CONF
     jne .auto
     inc r13d
-    jmp .take
+    jmp .chkflt
 .auto:
     inc r14d
     test r12d, r12d
     jnz .skip
+.chkflt:
+    cmp qword [rsp+FV_FLN], 0
+    je .take
+    invoke fm_namehas, [r15+FE_NAME], &rsp+FV_FLT, [rsp+FV_FLN]
+    test eax, eax
+    jz .skip
 .take:
-    mov [rsi+rdi*4], ecx
+    mov [rsi+rdi*4], ebp
     inc edi
 .skip:
-    inc rcx
+    inc rbp
     jmp .l
 .d:
     mov [rbx+FM_NVIS], rdi
     mov [rbx+FM_NCONF], r13
     mov [rbx+FM_NAUTO], r14
-    EPILOG 64
+    cmp rdi, 1
+    jbe .out
+    mov eax, [rbx+FM_SCOL]
+    or eax, [rbx+FM_SDESC]
+    jz .out
+    mov [fm_sort_ctx], rbx
+    invoke qsort, [rbx+FM_VIS], rdi, 4, &fm_viscmp
+.out:
+    EPILOG 336
 
 ; fm_refresh(hwnd, fm)
 fm_refresh:
@@ -709,6 +935,33 @@ fm_used:
     xor eax, eax
     EPILOG 2912
 
+; fm_thread(fm): background worker that walks the three folders and computes 3-way decisions
+fm_thread:
+    PROLOG 64
+    mov rbx, rcx
+    invoke fm_scan, rbx
+    xor edi, edi
+.dec:
+    cmp byte [rbx+FM_CANCEL], 0
+    jne .fin
+    cmp rdi, [rbx+FM_ENT+8]
+    jae .fin
+    mov rax, rdi
+    shl rax, 6
+    add rax, [rbx+FM_ENT]
+    invoke fm_decide, rbx, rax
+    inc rdi
+    test dil, 0x3F
+    jnz .dec
+    invoke PostMessageW, [rbx+FM_HVIEW], BC_PROGRESS, rdi, 0
+    jmp .dec
+.fin:
+    movzx esi, byte [rbx+FM_CANCEL]
+    mov qword [rbx+FM_RUNNING], 0
+    invoke PostMessageW, [rbx+FM_HVIEW], BC_DONE, rsi, 0
+    xor eax, eax
+    EPILOG 64
+
 ; fm_compare(hwnd, fm, sess)
 fm_compare:
     PROLOG 1648
@@ -716,6 +969,15 @@ fm_compare:
     mov rbx, rdx
     mov r12, r8
     mov [rbx+FM_SESS], r12
+    mov [rbx+FM_HVIEW], rsi
+    cmp qword [rbx+FM_RUNNING], 0
+    je .idle
+    mov byte [rbx+FM_CANCEL], 1
+    invoke WaitForSingleObject, [rbx+FM_THREAD], 0xFFFFFFFF
+    invoke CloseHandle, [rbx+FM_THREAD]
+    mov qword [rbx+FM_THREAD], 0
+    mov qword [rbx+FM_RUNNING], 0
+.idle:
     xor edi, edi
 .get:
     cmp edi, 3
@@ -740,6 +1002,12 @@ fm_compare:
 .out:
     invoke GetDlgItem, rsi, ID_EDIT_O
     invoke GetWindowTextW, rax, &rbx+FM_OUT, 519
+    mov word [rbx+FM_EXCL], 0
+    invoke GetDlgItem, rsi, ID_FM_EXCL
+    test rax, rax
+    jz .noex
+    invoke GetWindowTextW, rax, &rbx+FM_EXCL, 255
+.noex:
     cmp word [rbx+FM_ROOT], 0
     je .nopath
     cmp word [rbx+FM_ROOT+1040], 0
@@ -768,34 +1036,13 @@ fm_compare:
     invoke msgbox, rsi, rdi, MB_OK|MB_ICONWARNING
     EPILOG 1648
 .scan:
-    invoke LoadCursorW, 0, 32514      ; IDC_WAIT
-    invoke SetCursor, rax
-    mov r14, rax
-    invoke fm_scan, rbx
-    xor edi, edi
-.dec:
-    cmp rdi, [rbx+FM_ENT+8]
-    jae .refresh
-    mov rax, rdi
-    shl rax, 6
-    add rax, [rbx+FM_ENT]
-    invoke fm_decide, rbx, rax
-    inc rdi
-    jmp .dec
-.refresh:
-    invoke SetCursor, r14
+    invoke fm_clear, rbx
     invoke fm_refresh, rsi, rbx
-    invoke wcsrchr, &rbx+FM_ROOT, 0x5C
-    lea r13, [rbx+FM_ROOT]
-    test rax, rax
-    jz .t
-    cmp word [rax+2], 0
-    je .t
-    lea r13, [rax+2]
-.t:
-    invoke _snwprintf, &rsp+96, 50, &f_title, r13
-    mov word [rsp+96+100], 0
-    invoke set_tab_title, r12, &rsp+96
+    mov byte [rbx+FM_CANCEL], 0
+    mov qword [rbx+FM_RUNNING], 1
+    invoke CreateThread, 0, 0x1000000, &fm_thread, rbx, 0, 0
+    mov [rbx+FM_THREAD], rax
+    invoke set_status, &s_scanning_0
     EPILOG 1648
 .nopath:
     invoke msgbox, rsi, &s_nopath, MB_OK|MB_ICONINFORMATION
@@ -816,6 +1063,8 @@ fm_setact:
     mov rsi, rcx
     mov rbx, rdx
     mov r12d, r8d
+    cmp qword [rbx+FM_RUNNING], 0
+    jne .busy
     invoke SendMessageW, [rbx+FM_HLIST], LVM_GETSELECTEDCOUNT, 0, 0
     test eax, eax
     jz .nosel
@@ -855,6 +1104,9 @@ fm_setact:
 .nosel:
     invoke msgbox, rsi, &s_nosel, MB_OK|MB_ICONINFORMATION
     EPILOG 64
+.busy:
+    invoke msgbox, rsi, &s_busy, MB_OK|MB_ICONWARNING
+    EPILOG 64
 
 ; fm_path(fm, e, side, out): full path of an entry on one side
 fm_path:
@@ -872,6 +1124,8 @@ fm_openmerge:
     PROLOG 9008
     mov rsi, rcx
     mov rbx, rdx
+    cmp qword [rbx+FM_RUNNING], 0
+    jne .busy
     invoke SendMessageW, [rbx+FM_HLIST], LVM_GETNEXTITEM, -1, LVNI_SELECTED
     movsxd rdi, eax
     test rdi, rdi
@@ -920,6 +1174,9 @@ fm_openmerge:
     jmp .d
 .noopen:
     invoke msgbox, rsi, &s_noopen, MB_OK|MB_ICONINFORMATION
+    jmp .d
+.busy:
+    invoke msgbox, rsi, &s_busy, MB_OK|MB_ICONWARNING
 .d:
     EPILOG 9008
 
@@ -935,11 +1192,25 @@ fm_mtime:
     mov rax, rcx
     EPILOG 128
 
+; fm_exec_auto(fm, e, outpath) -> eax 1 when written
+fm_exec_auto:
+    PROLOG 3456
+    mov rbx, rcx
+    mov rsi, rdx
+    mov r12, r8
+    invoke fm_path500, rbx, rsi, 0, &rsp+96
+    invoke fm_path500, rbx, rsi, 1, &rsp+1200
+    invoke fm_path500, rbx, rsi, 2, &rsp+2304
+    invoke diff3_try_file, &rsp+96, &rsp+1200, &rsp+2304, r12
+    EPILOG 3456
+
 ; fm_run(hwnd, fm): write the merge result into the output folder
 fm_run:
     PROLOG 4608
     mov rsi, rcx
     mov rbx, rdx
+    cmp qword [rbx+FM_RUNNING], 0
+    jne .busy
     cmp qword [rbx+FM_ENT+8], 0
     je .nocmp
     invoke fm_outcheck, rsi, rbx
@@ -983,6 +1254,8 @@ fm_run:
     je .excl
     cmp eax, ACT_CONF
     je .conf
+    cmp eax, ACT_AUTO
+    je .automerge
     ; copy from side (act-1)
     lea r8d, [rax-1]
     mov [rsp+4504], r8d
@@ -1011,6 +1284,22 @@ fm_run:
     jmp .e
 .copied:
     inc r12d
+    jmp .e
+.automerge:
+    invoke wcsrchr, &rsp+2300, 0x5C
+    test rax, rax
+    jz .am_go
+    mov word [rax], 0
+    invoke SHCreateDirectoryExW, 0, &rsp+2300, 0
+    invoke _snwprintf, &rsp+2300, 1090, &f_full, &rbx+FM_OUT, [rbp+FE_NAME]
+.am_go:
+    invoke fm_exec_auto, rbx, rbp, &rsp+2300
+    test eax, eax
+    jz .am_fail
+    inc r13d
+    jmp .e
+.am_fail:
+    inc dword [rsp+4512]
     jmp .e
 .excl:
     test dword [rbp+FE_FLAGS], 0x70   ; folders are not counted as excluded files
@@ -1068,6 +1357,9 @@ fm_run:
     EPILOG 4608
 .nocmp:
     invoke msgbox, rsi, &s_nocmp, MB_OK|MB_ICONINFORMATION
+    EPILOG 4608
+.busy:
+    invoke msgbox, rsi, &s_busy, MB_OK|MB_ICONWARNING
     EPILOG 4608
 
 ; ---------------------------------------------------------------- view
@@ -1148,6 +1440,7 @@ fm_layout:
     add r13d, r14d
     mov r12d, r14d
     PLACE ID_COMPARE, 96
+    PLACE ID_STOP, 34
     PLACE ID_BTN_TA, 56
     PLACE ID_BTN_TB, 56
     PLACE ID_BTN_TC, 40
@@ -1160,7 +1453,11 @@ fm_layout:
     add r13d, r14d
     mov r12d, r14d
     PLACE ID_CHKF, 130
-    PLACE ID_LBLI, 500
+    PLACE ID_LBL_EXCL, 40
+    PLACE ID_FM_EXCL, 180
+    PLACE ID_LBL_FLT, 40
+    PLACE ID_FM_FLT, 160
+    PLACE ID_LBLI, 360
     lea r13d, [r13+r15]
     add r13d, r14d
     mov ebp, [rsp+108]
@@ -1265,6 +1562,14 @@ fm_proc:
     je .notify
     cmp edi, BC_RUN
     je .run
+    cmp edi, BC_STOPPING
+    je .stopping
+    cmp edi, BC_CANCEL
+    je .cancel
+    cmp edi, BC_PROGRESS
+    je .progress
+    cmp edi, BC_DONE
+    je .done
     cmp edi, BC_COLLECT
     je .collect
     cmp edi, BC_THEME
@@ -1289,7 +1594,11 @@ fm_proc:
     invoke calloc, 1, FM_SIZE
     mov r15, rax
     mov [r14+SS_DATA], r15
+    mov [r15+FM_HVIEW], rsi
+    mov [r15+FM_SESS], r14
     invoke pb_create, rsi
+    invoke mk_btn, rsi, &s_stop, ID_STOP
+    invoke icon_set, rsi, ID_STOP, &g_stop, &tt_fmerge_stop
     invoke mk_lbl, rsi, &s_l_base, ID_LBL_BASE
     invoke mk_edit, rsi, ID_EDIT_C
     invoke mk_btn, rsi, &s_dots, ID_BROWSE_C
@@ -1313,6 +1622,10 @@ fm_proc:
     cmp word [r14+SS_OPTS], '1'
     sete r9b
     invoke mk_chk, rsi, &s_c_conf, ID_CHKF, r9
+    invoke mk_lbl, rsi, &s_fm_excl, ID_LBL_EXCL
+    invoke mk_edit, rsi, ID_FM_EXCL
+    invoke mk_lbl, rsi, &s_fm_flt, ID_LBL_FLT
+    invoke mk_edit, rsi, ID_FM_FLT
     invoke mk_lbl, rsi, &s_empty, ID_LBLI
     invoke tips_apply, rsi, &tt_fmerge
     invoke mk, rsi, &cn_listv, 0, LVS_REPORT|LVS_OWNERDATA|LVS_SHOWSELALWAYS|WS_TABSTOP|WS_BORDER, ID_LST
@@ -1365,6 +1678,45 @@ fm_proc:
     jmp .zero
 .run:
     invoke fm_compare, rsi, r15, r14
+    jmp .zero
+.cancel:
+    mov byte [r15+FM_CANCEL], 1
+    jmp .zero
+.progress:
+    invoke _snwprintf, &rsp+96, 100, &s_scanning, r12
+    invoke set_status, &rsp+96
+    jmp .zero
+.done:
+    cmp qword [r15+FM_CLOSING], 0
+    jne .zero
+    cmp qword [r15+FM_RUNNING], 0
+    jne .zero
+    mov rcx, [r15+FM_THREAD]
+    test rcx, rcx
+    jz .noh
+    call CloseHandle
+    mov qword [r15+FM_THREAD], 0
+.noh:
+    test r12, r12
+    jz .done_ok
+    invoke fm_clear, r15
+    invoke fm_refresh, rsi, r15
+    invoke set_status, &s_scan_cancel
+    jmp .zero
+.done_ok:
+    invoke fm_refresh, rsi, r15
+    invoke set_status, &s_done_short
+    invoke wcsrchr, &r15+FM_ROOT, 0x5C
+    lea r13, [r15+FM_ROOT]
+    test rax, rax
+    jz .t
+    cmp word [rax+2], 0
+    je .t
+    lea r13, [rax+2]
+.t:
+    invoke _snwprintf, &rsp+96, 50, &f_title, r13
+    mov word [rsp+96+100], 0
+    invoke set_tab_title, r14, &rsp+96
     test qword [g_batch], 4           ; unattended: the first compare ends the run
     jz .zero
     cmp qword [g_exitcode], 2         ; a folder could not be read: no report of an empty compare
@@ -1394,7 +1746,12 @@ fm_proc:
     invoke batch_done, rax
     jmp .zero
 .doc:
+    cmp qword [r15+FM_RUNNING], 0
+    jne .doc_busy
     invoke fm_export, rsi, r15
+    jmp .zero
+.doc_busy:
+    invoke msgbox, rsi, &s_busy, MB_OK|MB_ICONWARNING
     jmp .zero
 .collect:
     invoke pb_collect, rsi, r14
@@ -1413,6 +1770,8 @@ fm_proc:
     movzx ebx, r12w
     cmp ebx, ID_COMPARE
     je .run
+    cmp ebx, ID_STOP
+    je .cancel
     cmp ebx, ID_BROWSE_A
     je .browse
     cmp ebx, ID_BROWSE_B
@@ -1425,6 +1784,8 @@ fm_proc:
     je .bo
     cmp ebx, ID_CHKF
     je .filter
+    cmp ebx, ID_FM_FLT
+    je .flt_chg
     cmp ebx, ID_BTN_TA
     je .ta
     cmp ebx, ID_BTN_TB
@@ -1462,6 +1823,13 @@ fm_proc:
 .filter:
     invoke fm_refresh, rsi, r15
     jmp .zero
+.flt_chg:
+    mov rax, r12
+    shr eax, 16
+    cmp eax, EN_CHANGE
+    jne .zero
+    invoke fm_refresh, rsi, r15
+    jmp .zero
 .ta:
     invoke fm_setact, rsi, r15, ACT_A
     jmp .zero
@@ -1494,9 +1862,25 @@ fm_proc:
     je .disp
     cmp eax, NM_CUSTOMDRAW
     je .cdraw
+    cmp eax, LVN_COLUMNCLICK
+    je .colclick
     cmp eax, NM_DBLCLK
     je .openm
     jmp .def
+.colclick:
+    mov eax, [r13+28]                ; NMLISTVIEW.iSubItem
+    cmp eax, 6
+    jae .zero
+    cmp eax, [r15+FM_SCOL]
+    jne .newcol
+    xor dword [r15+FM_SDESC], 1
+    jmp .colref
+.newcol:
+    mov [r15+FM_SCOL], eax
+    mov dword [r15+FM_SDESC], 0
+.colref:
+    invoke fm_refresh, rsi, r15
+    jmp .zero
 .disp:
     test dword [r13+DI_MASK], LVIF_TEXT
     jz .zero
@@ -1510,7 +1894,18 @@ fm_proc:
     mov rcx, r15
     mov r8d, [r13+DI_SUB]
     call fm_cell
-    mov [r13+DI_TEXT], rax
+    mov rdx, rax
+    mov rcx, [r13+DI_TEXT]
+    test rcx, rcx
+    jz .zero
+    mov r8d, [r13+DI_CCH]
+    test r8d, r8d
+    jz .zero
+    dec r8d
+    mov rbx, rcx
+    mov rdi, r8
+    invoke wcsncpy, rbx, rdx, rdi
+    mov word [rbx+rdi*2], 0
     jmp .zero
 .cdraw:
     mov eax, [r13+CD_STAGE]
@@ -1557,7 +1952,10 @@ fm_proc:
     jmp .cset
 .c5:
     cmp ecx, 6
+    je .c5b
+    cmp ecx, 10
     jne .c6
+.c5b:
     mov edx, [th_diff]
     jmp .cset
 .c6:
@@ -1576,7 +1974,25 @@ fm_proc:
 .focus:
     invoke SetFocus, [r15+FM_HLIST]
     jmp .zero
+.stopping:
+    mov qword [r15+FM_CLOSING], 1
+    mov byte [r15+FM_CANCEL], 1
+    mov rcx, [r15+FM_THREAD]
+    test rcx, rcx
+    jz .zero
+    invoke WaitForSingleObject, rcx, 0
+    test eax, eax
+    jz .zero
+    mov eax, 1
+    EPILOG 320
 .destroy:
+    mov byte [r15+FM_CANCEL], 1
+    mov rcx, [r15+FM_THREAD]
+    test rcx, rcx
+    jz .nothr
+    invoke WaitForSingleObject, rcx, 0xFFFFFFFF
+    invoke CloseHandle, [r15+FM_THREAD]
+.nothr:
     invoke fm_clear, r15
     invoke free, r15
     mov qword [r14+SS_DATA], 0
@@ -1597,6 +2013,9 @@ WSTR tt_fmerge_2, "병합 결과를 쓸 출력 폴더 경로"
 WSTR tt_fmerge_3, "출력 폴더 찾아보기"
 WSTR tt_fmerge_4, "병합 계획을 워드 파일(.docx)로 저장합니다"
 WSTR tt_fmerge_5, "충돌 항목만 표시합니다"
+WSTR tt_fmerge_stop, "진행 중인 스캔 중지 (Esc)"
+WSTR tt_fmerge_excl, "스캔에서 제외할 이름 패턴 (세미콜론으로 구분, 예: .git;*.tmp)"
+WSTR tt_fmerge_flt, "목록에서 경로에 이 글자가 든 항목만 표시합니다"
 align 8
 tt_fmerge:
     dq ID_EDIT_C, tt_fmerge_0
@@ -1605,5 +2024,7 @@ tt_fmerge:
     dq ID_BROWSE_O, tt_fmerge_3
     dq ID_BTN_DOC, tt_fmerge_4
     dq ID_CHKF, tt_fmerge_5
+    dq ID_FM_EXCL, tt_fmerge_excl
+    dq ID_FM_FLT, tt_fmerge_flt
     dq 0, 0
 section .text

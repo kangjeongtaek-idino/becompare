@@ -209,6 +209,10 @@ static void mergeChecks(void){
  check(none(m,0,0)&&none(m,6,0),"output pane: lines outside a conflict have no background");
  check((GetWindowLongPtrW(l,GWL_STYLE)&ES_READONLY)&&(GetWindowLongPtrW(r,GWL_STYLE)&ES_READONLY),"side panes are read-only again after colouring");
  check(!(GetWindowLongPtrW(m,GWL_STYLE)&ES_READONLY),"output pane stays editable");
+ check(GetDlgItem(GetParent(m),661)&&GetDlgItem(GetParent(m),662)&&GetDlgItem(GetParent(m),663)&&SendMessageW(GetDlgItem(GetParent(m),664),BM_GETCHECK,0,0)==BST_CHECKED,"merge view has ignore-case/space/trim and sync-scroll options");
+ SendMessageW(GetParent(m),WM_COMMAND,647,0);         /* ID_BTN_ALLL: single-pass resolve all conflicts to left */
+ lineText(m,1,t,1024);check(!wcscmp(t,L"int count = 10; // total")&&none(m,1,0),"resolve all (left) replaces every conflict in one pass and clears conflict colours");
+ GetWindowTextW(GetDlgItem(GetParent(m),650),t,1024);check(wcsstr(t,L"\xCDA9\xB3CC 0\xAC1C")!=NULL,"merge info reports 0 conflicts remaining");
  SendMessageW(m,EM_SETMODIFY,0,0);                    /* nothing to save: no question on close */
 }
 /* ---- folder merge: left, right, base and an output folder that already holds two files
@@ -226,6 +230,8 @@ static void fmergeFixture(void){
  CreateDirectoryW(L"fm",NULL);CreateDirectoryW(L"fm\\L",NULL);CreateDirectoryW(L"fm\\R",NULL);CreateDirectoryW(L"fm\\B",NULL);CreateDirectoryW(L"fm\\O",NULL);
  putfile(L"fm\\B\\c1.txt","base");putfile(L"fm\\L\\c1.txt","L");putfile(L"fm\\R\\c1.txt","R");
  putfile(L"fm\\B\\c2.txt","base");putfile(L"fm\\L\\c2.txt","L2");putfile(L"fm\\R\\c2.txt","R2");
+ putfile(L"fm\\B\\auto.txt","top\r\nmid\r\nbot\r\n");putfile(L"fm\\L\\auto.txt","LEFT\r\nmid\r\nbot\r\n");putfile(L"fm\\R\\auto.txt","top\r\nmid\r\nRIGHT\r\n");
+ DeleteFileW(L"fm\\O\\auto.txt");
  putfile(L"fm\\L\\n.txt","new");DeleteFileW(L"fm\\O\\n.txt");
  putfile(L"fm\\O\\c1.txt","stale");stamp(L"fm\\O\\c1.txt",-3*24*60);
  putfile(L"fm\\O\\c2.txt","fresh");stamp(L"fm\\O\\c2.txt",10);
@@ -235,24 +241,38 @@ static const wchar_t*wantCls;
 static BOOL CALLBACK onClass(HWND h,LPARAM l){(void)l;wchar_t c[40];GetClassNameW(h,c,40);if(!wcscmp(c,wantCls)&&(wantedId<0||GetDlgCtrlID(h)==wantedId)){wanted=h;return FALSE;}return TRUE;}
 static HWND wantedClass(const wchar_t*cls,int id){wanted=NULL;wantCls=cls;wantedId=id;EnumChildWindows(frame,onClass,0);return wanted;}
 static void fmergeChecks(void){
- HWND list=NULL,run=NULL;
+ HWND list=NULL,run=NULL,fmv=NULL;wchar_t cell0[256]={0};
  for(int i=0;i<200;i++){
   run=wantedClass(L"Button",ID_BTN_RUNM);
-  if(run){list=FindWindowExW(GetParent(run),NULL,L"SysListView32",NULL);if(list&&SendMessageW(list,LVM_GETITEMCOUNT,0,0)>=3)break;}
+  if(run){fmv=GetParent(run);list=FindWindowExW(fmv,NULL,L"SysListView32",NULL);if(list&&SendMessageW(list,LVM_GETITEMCOUNT,0,0)>=4)break;}
   Sleep(50);
  }
  printf("list rows: %d\n",list?(int)SendMessageW(list,LVM_GETITEMCOUNT,0,0):-1);
- check(run&&list&&SendMessageW(list,LVM_GETITEMCOUNT,0,0)==3,"folder merge lists the three files");
+ check(run&&list&&SendMessageW(list,LVM_GETITEMCOUNT,0,0)==4,"folder merge lists the four files");
  if(!run||!list)return;
+ SetWindowTextW(GetDlgItem(fmv,706),L"auto");
+ check(SendMessageW(list,LVM_GETITEMCOUNT,0,0)==1,"folder merge path filter narrows the visible rows");
+ SetWindowTextW(GetDlgItem(fmv,706),L"");
+ check(SendMessageW(list,LVM_GETITEMCOUNT,0,0)==4,"clearing the folder merge filter restores all rows");
+ {NMLISTVIEW nm;memset(&nm,0,sizeof nm);nm.hdr.hwndFrom=list;nm.hdr.idFrom=700;nm.hdr.code=LVN_COLUMNCLICK;nm.iItem=-1;nm.iSubItem=0;
+  SendMessageW(fmv,WM_NOTIFY,700,(LPARAM)&nm);
+  LVITEMW it;memset(&it,0,sizeof it);it.iSubItem=0;it.pszText=cell0;it.cchTextMax=255;
+  SendMessageW(list,LVM_GETITEMTEXTW,0,(LPARAM)&it);
+  check(!wcscmp(cell0,L"n.txt"),"clicking the path column header reverses sort order");
+  SendMessageW(fmv,WM_NOTIFY,700,(LPARAM)&nm);
+  memset(&it,0,sizeof it);it.iSubItem=0;it.pszText=cell0;it.cchTextMax=255;cell0[0]=0;
+  SendMessageW(list,LVM_GETITEMTEXTW,0,(LPARAM)&it);
+  check(!wcscmp(cell0,L"auto.txt"),"clicking the path column header again sorts A-Z");}
  expectBoxes=1;lastBox[0]=0;
  SendMessageW(run,BM_CLICK,0,0);                      /* asks about the non-empty output folder, then reports */
  expectBoxes=0;
  printf("summary has %d characters, %d boxes shown\n",(int)wcslen(lastBox),shownBoxes);
  check(shownBoxes==2,"one question about the output folder and one summary");
- check(wcsstr(lastBox,L"\xBCD1\xD569 \xD30C\xC77C 1")!=NULL,"an output file newer than the inputs counts as merged");
+ check(wcsstr(lastBox,L"\xBCD1\xD569 \xD30C\xC77C 2")!=NULL,"an output file newer than the inputs and an auto-merged diff3 file both count as merged");
  check(wcsstr(lastBox,L"\xBBF8\xD574\xACB0 \xCDA9\xB3CC 1")!=NULL,"an output file older than the inputs is still a conflict");
  check(wcsstr(lastBox,L"\xBCF5\xC0AC \xC2E4\xD328 0")!=NULL,"no failed copies");
  check(holds(L"fm\\O\\n.txt","new"),"the file only on the left was copied to the output");
+ check(holds(L"fm\\O\\auto.txt","LEFT\r\nmid\r\nRIGHT\r\n"),"non-conflicting 3-way text changes were automatically merged by diff3");
  check(holds(L"fm\\O\\c1.txt","stale")&&holds(L"fm\\O\\c2.txt","fresh"),"conflicting files in the output were not overwritten");
  check(holds(L"fm\\L\\c1.txt","L")&&holds(L"fm\\R\\c1.txt","R")&&holds(L"fm\\B\\c1.txt","base"),"the inputs were not changed");
 }
@@ -906,6 +926,7 @@ static void pvChecks(void){
  check(!dirtyPv(),"nothing changed yet");
  pvClick(PID_CLR);check(waitPane(202,L"left")&&dirtyPv(),"copy the difference from the left to the right: the right pane changes and counts as changed");
  pvClick(PID_SAVE);Sleep(300);check(!dirtyPv()&&holds(L"fp\\b\\b_mod.txt","left\r\n"),"save writes the right file");
+ check(!wcscmp(statusOf(L"b_mod.txt"),G_EQ),"saving the merged pair in the preview immediately updates its folder list row to equal");
  /* changes that are not saved stop a switch to another file */
  selectF(rowNamed(L"c_other.txt"));check(waitPane(201,L"alpha"),"c_other.txt");
  typeInto(201,L"edited ");check(dirtyPv(),"an edit makes the view dirty");
@@ -1022,6 +1043,13 @@ static DWORD WINAPI watcher(void*arg){
  SendMessageW(view,WM_COMMAND,ID_BTN_NEXT,0);check(bothAt(1),"next-difference button");
  SendMessageW(view,WM_COMMAND,ID_BTN_NEXT,0);check(bothAt(3),"next-difference button again");
  SendMessageW(view,WM_COMMAND,ID_BTN_PREV,0);check(bothAt(1),"previous-difference button");
+ /* regex / pattern substitution rule (\w+) in ID_EDIT_RULES (232) */
+ SetWindowTextW(GetDlgItem(view,232),L"count=total;// \\w+=// sum");
+ SendMessageW(view,WM_COMMAND,105,0);
+ check(info(L"차이 3개"),"pattern substitution rule (\\w+) matches and ignores the comment difference");
+ SetWindowTextW(GetDlgItem(view,232),L"");
+ SendMessageW(view,WM_COMMAND,105,0);
+ check(info(L"차이 4개"),"clearing the substitution rule restores all 4 differences");
 
  check(!SendMessageW(ra,EM_GETMODIFY,0,0)&&!SendMessageW(rb,EM_GETMODIFY,0,0),"colouring and navigation leave the panes unmodified");
  tabRowChecks();

@@ -865,6 +865,32 @@ tv_copy:
     mov rbx, rdx
     mov r12, r8
     mov r13d, r9d
+    invoke get_chk, rsi, ID_CHK_FOLD
+    mov [rsp+144], eax               ; remember if folding was on
+    mov dword [rsp+168], 0           ; selection range active?
+    cmp qword [rbx+TV_FOLDED], 0
+    jne .unfold
+    cmp qword [rbx+TV_FORCE], -1
+    jne .unfold
+    mov rdi, [rbx+TV_HA]
+    test r13d, r13d
+    jz .chksel
+    mov rdi, [rbx+TV_HB]
+.chksel:
+    invoke SendMessageW, rdi, EM_EXGETSEL, 0, &rsp+152
+    mov eax, [rsp+152]               ; cpMin
+    mov ecx, [rsp+156]               ; cpMax
+    cmp ecx, eax
+    jbe .unfold
+    mov r14d, eax
+    lea r15d, [rcx-1]
+    invoke SendMessageW, rdi, EM_LINEFROMCHAR, r14, 0
+    mov [rsp+160], eax               ; sel_lo
+    invoke SendMessageW, rdi, EM_LINEFROMCHAR, r15, 0
+    inc eax
+    mov [rsp+164], eax               ; sel_hi (exclusive)
+    mov dword [rsp+168], 1
+.unfold:
     invoke tv_unfold, rsi, rbx
     mov rax, [rbx+TV_FORCE]
     cmp rax, -1
@@ -881,6 +907,22 @@ tv_copy:
     mov r15d, [rcx+r14*8]            ; first row
     mov eax, [rcx+r14*8+4]
     mov [rsp+96], eax                ; end row (exclusive)
+    cmp dword [rsp+168], 0
+    je .setpanes
+    mov ecx, [rsp+160]               ; sel_lo
+    mov edx, [rsp+164]               ; sel_hi
+    cmp ecx, [rsp+96]
+    jae .setpanes
+    cmp edx, r15d
+    jbe .setpanes
+    cmp ecx, r15d
+    jbe .clphi
+    mov r15d, ecx
+.clphi:
+    cmp edx, [rsp+96]
+    jae .setpanes
+    mov [rsp+96], edx
+.setpanes:
     mov rdi, [rbx+TV_HA]             ; source
     mov rbp, [rbx+TV_HB]             ; target
     test r13d, r13d
@@ -929,6 +971,12 @@ tv_copy:
     invoke SendMessageW, rbp, EM_EXSETSEL, 0, &rsp+136
     invoke SendMessageW, rbp, EM_REPLACESEL, 1, r14
     invoke free, r14
+    cmp dword [rsp+144], 0
+    je .recomp
+    invoke text_side, rsi, rbx, 0
+    invoke text_side, rsi, rbx, 1
+    invoke set_chk_id, rsi, ID_CHK_FOLD, 1
+.recomp:
     ; re-compare from the panes and keep the scroll position
     invoke SendMessageW, [rbx+TV_HA], EM_GETFIRSTVISIBLELINE, 0, 0
     mov r14d, eax

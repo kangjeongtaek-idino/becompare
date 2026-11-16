@@ -207,7 +207,19 @@ mg_resolve:
 .picked:
     cmp r14, -1
     je .none
-    ; rebuild the text
+    invoke mg_apply, rsi, rbx, r12, r14
+    EPILOG 192
+.none:
+    invoke set_status, &s_nocur
+    EPILOG 192
+
+; mg_apply(hwnd, mg, choice 0 left / 1 right / 2 both, target conflict index or -1 for all)
+mg_apply:
+    PROLOG 192
+    mov rsi, rcx
+    mov rbx, rdx
+    mov r12d, r8d
+    mov r14, r9
     invoke sb_init, &rsp+96
     xor edi, edi                     ; line
     xor r15d, r15d                   ; next conflict index to meet
@@ -221,8 +233,11 @@ mg_resolve:
     lea rbp, [rcx+rax*4]
     cmp edi, [rbp]
     jne .copy
+    cmp r14, -1
+    je .take
     cmp r15, r14
     jne .keep
+.take:
     ; chosen conflict: left part start+1..mid-1, right part mid+1..end-1
     cmp r12d, 1
     je .right
@@ -270,33 +285,26 @@ mg_resolve:
     jnz .have
     lea rax, [s_empty]
 .have:
-    invoke rich_set_text, [rbx+MG_HM], rax
+    mov r13, rax
+    invoke SendMessageW, [rbx+MG_HM], WM_SETREDRAW, 0, 0
+    invoke rich_set_text, [rbx+MG_HM], r13
     invoke SendMessageW, [rbx+MG_HM], EM_SETMODIFY, 1, 0
     invoke rich_theme, [rbx+MG_HM]
     invoke sb_free, &rsp+96
     invoke mg_colorout, rbx
     invoke mg_info, rsi, rbx
     EPILOG 192
-.none:
-    invoke set_status, &s_nocur
-    EPILOG 192
 
-; mg_resolve_all(hwnd, mg, choice): accept one side for every remaining conflict (TM-05)
+; mg_resolve_all(hwnd, mg, choice): accept one side for every remaining conflict in a single pass (TM-05)
 mg_resolve_all:
     PROLOG 64
     mov rsi, rcx
     mov rbx, rdx
     mov r12d, r8d
-    xor r13d, r13d
-.l:
     invoke mg_scan, rbx
     cmp qword [rbx+MG_CONF+8], 0
     je .d
-    invoke SendMessageW, [rbx+MG_HM], EM_SETSEL, 0, 0
-    invoke mg_resolve, rsi, rbx, r12
-    inc r13d
-    cmp r13d, 100000
-    jb .l
+    invoke mg_apply, rsi, rbx, r12, -1
 .d:
     EPILOG 64
 
@@ -442,6 +450,10 @@ mg_layout:
     PLACE ID_BTN_ALLR, 120
     PLACE ID_BTN_SAVE, 40
     PLACE ID_BTN_DOC, 90
+    PLACE ID_MG_CASE, 110
+    PLACE ID_MG_SPC, 90
+    PLACE ID_MG_TRIM, 120
+    PLACE ID_MG_SCRL, 120
     PLACE ID_LBL_INFO, 300
     ; --- panes
     lea r13d, [r13+r15]
@@ -600,6 +612,10 @@ mg_proc:
     invoke icon_set, rsi, ID_BTN_USER, &g_user, &s_b_user
     invoke icon_set, rsi, ID_BTN_BOTH, &g_both, &s_b_both
     invoke icon_set, rsi, ID_BTN_SAVE, &g_save, &s_b_save
+    invoke mk_chk, rsi, &s_mg_case, ID_MG_CASE, 0
+    invoke mk_chk, rsi, &s_mg_spc, ID_MG_SPC, 0
+    invoke mk_chk, rsi, &s_mg_trim, ID_MG_TRIM, 0
+    invoke mk_chk, rsi, &s_mg_scrl, ID_MG_SCRL, 1
     invoke tips_apply, rsi, &tt_merge
     invoke mk_lbl, rsi, &s_empty, ID_LBL_INFO
     invoke rich_create, rsi, ID_RL
@@ -679,6 +695,15 @@ mg_proc:
 
 .command:
     movzx ebx, r12w
+    mov eax, r12d
+    shr eax, 16
+    mov ebp, eax
+    cmp ebx, ID_RL
+    je .rich
+    cmp ebx, ID_RO
+    je .rich
+    cmp ebx, ID_RR
+    je .rich
     cmp ebx, ID_COMPARE
     je .run
     cmp ebx, ID_BROWSE_A
@@ -713,7 +738,69 @@ mg_proc:
     je .b_aln
     cmp ebx, ID_BTN_ALC
     je .b_alc
+    cmp ebx, ID_MG_CASE
+    je .b_opt
+    cmp ebx, ID_MG_SPC
+    je .b_opt
+    cmp ebx, ID_MG_TRIM
+    je .b_opt
+    cmp ebx, ID_MG_SCRL
+    je .b_scrl
     jmp .def
+.b_opt:
+    cmp qword [r15+MG_PRIS], 0
+    je .zero
+    invoke mg_merge, rsi, r15, r14
+    jmp .zero
+.b_scrl:
+    invoke get_chk, rsi, ID_MG_SCRL
+    test eax, eax
+    jz .zero
+    mov rdi, [r15+MG_HL]
+    jmp .sync_from
+.rich:
+    cmp ebp, EN_VSCROLL
+    jne .zero
+    cmp qword [r15+MG_GUARD], 0
+    jne .zero
+    invoke get_chk, rsi, ID_MG_SCRL
+    test eax, eax
+    jz .zero
+    mov rdi, [r15+MG_HL]
+    cmp ebx, ID_RL
+    je .sync_from
+    mov rdi, [r15+MG_HO]
+    cmp ebx, ID_RO
+    je .sync_from
+    mov rdi, [r15+MG_HR]
+.sync_from:
+    invoke SendMessageW, rdi, EM_GETFIRSTVISIBLELINE, 0, 0
+    mov ebp, eax
+    mov qword [r15+MG_GUARD], 1
+    xor ebx, ebx
+.sync_l:
+    cmp ebx, 3
+    jae .sync_d
+    mov r12, [r15+MG_HL+rbx*8]
+    cmp r12, rdi
+    je .sync_n
+    cmp ebx, 1
+    jne .sync_go
+    cmp qword [r15+MG_THREE], 0
+    je .sync_n
+.sync_go:
+    invoke SendMessageW, r12, EM_GETFIRSTVISIBLELINE, 0, 0
+    mov ecx, ebp
+    sub ecx, eax
+    jz .sync_n
+    movsxd r9, ecx
+    invoke SendMessageW, r12, EM_LINESCROLL, 0, r9
+.sync_n:
+    inc ebx
+    jmp .sync_l
+.sync_d:
+    mov qword [r15+MG_GUARD], 0
+    jmp .zero
 .browse:
     invoke pb_command, rsi, rbx, 0
     jmp .zero
@@ -798,6 +885,10 @@ WSTR tt_merge_5, "지정한 정렬을 모두 해제합니다"
 WSTR tt_merge_6, "남은 충돌을 모두 왼쪽 내용으로 해결합니다"
 WSTR tt_merge_7, "남은 충돌을 모두 오른쪽 내용으로 해결합니다"
 WSTR tt_merge_8, "병합 결과를 워드 파일(.docx)로 저장합니다"
+WSTR tt_merge_case, "병합 비교 시 대소문자 차이를 무시합니다"
+WSTR tt_merge_spc, "병합 비교 시 줄 안의 공백 차이를 무시합니다"
+WSTR tt_merge_trim, "병합 비교 시 줄 앞뒤의 공백 차이를 무시합니다"
+WSTR tt_merge_scrl, "위쪽 입력 창들을 함께 스크롤합니다"
 align 8
 tt_merge:
     dq ID_EDIT_C, tt_merge_0
@@ -809,5 +900,9 @@ tt_merge:
     dq ID_BTN_ALLL, tt_merge_6
     dq ID_BTN_ALLR, tt_merge_7
     dq ID_BTN_DOC, tt_merge_8
+    dq ID_MG_CASE, tt_merge_case
+    dq ID_MG_SPC, tt_merge_spc
+    dq ID_MG_TRIM, tt_merge_trim
+    dq ID_MG_SCRL, tt_merge_scrl
     dq 0, 0
 section .text

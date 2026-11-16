@@ -470,10 +470,154 @@ key_copy:
     shr rax, 1
     EPILOG 96
 
+; pat_char_match(ecx = kind, edx = ch) -> eax 1 if ch matches kind
+pat_char_match:
+    test edx, edx
+    jz .no
+    cmp ecx, '?'
+    je .yes
+    test ecx, 0x10000
+    jz .lit
+    mov eax, ecx
+    and eax, 0xFF
+    cmp eax, 'd'
+    je .digit
+    cmp eax, 'w'
+    je .word
+    cmp eax, 's'
+    je .space
+.lit:
+    movzx ecx, cx
+    cmp edx, ecx
+    je .yes
+    jmp .no
+.digit:
+    cmp edx, '0'
+    jb .no
+    cmp edx, '9'
+    jbe .yes
+    jmp .no
+.word:
+    cmp edx, '_'
+    je .yes
+    cmp edx, 0x80
+    jae .yes
+    cmp edx, '0'
+    jb .no
+    cmp edx, '9'
+    jbe .yes
+    mov eax, edx
+    or eax, 0x20
+    cmp eax, 'a'
+    jb .no
+    cmp eax, 'z'
+    jbe .yes
+    jmp .no
+.space:
+    cmp edx, ' '
+    je .yes
+    cmp edx, 9
+    je .yes
+    cmp edx, 0x3000
+    je .yes
+.no:
+    xor eax, eax
+    ret
+.yes:
+    mov eax, 1
+    ret
+
+; pat_match(rcx = pat, rdx = pat_end, r8 = src) -> rax = end_src (0 if no match)
+pat_match:
+    PROLOG 64
+    mov rsi, rcx
+    mov rdi, rdx
+    mov rbx, r8
+.loop:
+    cmp rsi, rdi
+    jae .matched
+    movzx eax, word [rsi]
+    add rsi, 2
+    cmp eax, 0x5C
+    jne .not_esc
+    cmp rsi, rdi
+    jae .gotatom
+    movzx eax, word [rsi]
+    add rsi, 2
+    cmp eax, 'd'
+    je .esc_cls
+    cmp eax, 'w'
+    je .esc_cls
+    cmp eax, 's'
+    je .esc_cls
+    or eax, 0x20000
+    jmp .gotatom
+.esc_cls:
+    or eax, 0x10000
+    jmp .gotatom
+.not_esc:
+    cmp eax, '*'
+    jne .gotatom
+    mov r12d, '?'
+    xor r13d, r13d
+    jmp .quant
+.gotatom:
+    mov r12d, eax
+    cmp rsi, rdi
+    jae .single
+    movzx eax, word [rsi]
+    cmp eax, '+'
+    je .qplus
+    cmp eax, '*'
+    je .qstar
+.single:
+    movzx edx, word [rbx]
+    mov ecx, r12d
+    call pat_char_match
+    test eax, eax
+    jz .fail
+    add rbx, 2
+    jmp .loop
+.qplus:
+    mov r13d, 1
+    add rsi, 2
+    jmp .quant
+.qstar:
+    xor r13d, r13d
+    add rsi, 2
+.quant:
+    xor r14d, r14d
+.qcnt:
+    movzx edx, word [rbx+r14*2]
+    mov ecx, r12d
+    call pat_char_match
+    test eax, eax
+    jz .qtry
+    inc r14
+    jmp .qcnt
+.qtry:
+    cmp r14, r13
+    jb .fail
+    lea r8, [rbx+r14*2]
+    invoke pat_match, rsi, rdi, r8
+    test rax, rax
+    jnz .done
+    test r14, r14
+    jz .fail
+    dec r14
+    jmp .qtry
+.matched:
+    mov rax, rbx
+    jmp .done
+.fail:
+    xor eax, eax
+.done:
+    EPILOG 64
+
 ; keys_build(LINES*, flags, cprefix, hashes*) -> keys array; keys[n] holds the blob to free (or 0)
 ; rules_apply(src, dst, cap chars) : replace every "old" of g_tc_rules ("old=new;old=new") in src
 rules_apply:
-    PROLOG 96
+    PROLOG 128
     mov rsi, rcx
     mov rdi, rdx
     mov r12, r8
@@ -499,9 +643,8 @@ rules_apply:
     add r8, 2
     jmp .ol
 .gotold:
-    mov r9, r8
-    sub r9, r14
-    shr r9, 1                        ; old length
+    cmp r8, r14
+    jbe .plain
     lea r10, [r8+2]                  ; new text
     mov r11, r10
 .nl:
@@ -516,19 +659,14 @@ rules_apply:
     mov r15, r11
     sub r15, r10
     shr r15, 1                       ; new length
-    ; compare old with src
-    test r9, r9
-    jz .nextrule
-    xor ecx, ecx
-.cmp:
-    cmp rcx, r9
-    jae .match
-    movzx eax, word [r14+rcx*2]
-    cmp ax, [rsi+rcx*2]
-    jne .nextrule
-    inc rcx
-    jmp .cmp
-.match:
+    mov [rsp+96], r10
+    mov [rsp+104], r11
+    invoke pat_match, r14, r8, rsi
+    mov r10, [rsp+96]
+    mov r11, [rsp+104]
+    cmp rax, rsi
+    jbe .nextrule
+    mov rbp, rax                     ; end of matched span in src
     lea rax, [r13+r15]
     cmp rax, r12
     ja .plain
@@ -542,7 +680,7 @@ rules_apply:
     inc rcx
     jmp .cn
 .cnd:
-    lea rsi, [rsi+r9*2]
+    mov rsi, rbp
     jmp .l
 .nextrule:
     movzx eax, word [r11]
@@ -567,7 +705,7 @@ rules_apply:
 .d:
     mov word [rdi+r13*2], 0
     mov rax, r13
-    EPILOG 96
+    EPILOG 128
 
 keys_build:
     PROLOG 128

@@ -834,6 +834,53 @@ fold_theme:
     EPILOG 64
 
 ; ---------------------------------------------------------------- start a comparison
+; fold_watch_close(fold): close directory change notification handles
+fold_watch_close:
+    PROLOG 64
+    mov rbx, rcx
+    mov rcx, [rbx+F_CHGA]
+    test rcx, rcx
+    jz .b
+    cmp rcx, -1
+    je .za
+    call FindCloseChangeNotification
+.za:
+    mov qword [rbx+F_CHGA], 0
+.b:
+    mov rcx, [rbx+F_CHGB]
+    test rcx, rcx
+    jz .d
+    cmp rcx, -1
+    je .zb
+    call FindCloseChangeNotification
+.zb:
+    mov qword [rbx+F_CHGB], 0
+.d:
+    EPILOG 64
+
+; fold_watch_arm(hwnd, fold): arm directory change notifications when auto-refresh is enabled
+fold_watch_arm:
+    PROLOG 64
+    mov rsi, rcx
+    mov rbx, rdx
+    invoke fold_watch_close, rbx
+    invoke get_chk, rsi, ID_CHK_AUTOREF
+    test eax, eax
+    jz .d
+    mov rax, [rbx+F_KIND]
+    or rax, [rbx+F_KIND+8]
+    jnz .d
+    cmp word [rbx+F_ROOTA], 0
+    je .d
+    cmp word [rbx+F_ROOTB], 0
+    je .d
+    invoke FindFirstChangeNotificationW, &rbx+F_ROOTA, 1, 0x1F
+    mov [rbx+F_CHGA], rax
+    invoke FindFirstChangeNotificationW, &rbx+F_ROOTB, 1, 0x1F
+    mov [rbx+F_CHGB], rax
+.d:
+    EPILOG 64
+
 ; fold_start(hwnd, fold)
 fold_start:
     PROLOG 64
@@ -844,6 +891,7 @@ fold_start:
     invoke fold_pv_confirm, rsi, rbx
     test eax, eax
     jz .stay                         ; cancelled: the unsaved changes stay where they are
+    invoke fold_watch_close, rbx
     invoke fold_pv_load, rsi, rbx, -1   ; the entries are replaced: the preview waits for a new choice
     cmp qword [rbx+F_RUNNING], 0
     je .idle
@@ -938,6 +986,7 @@ fold_done:
     je .scanok
     invoke set_status, &s_scanerr_short
 .scanok:
+    invoke fold_watch_arm, rsi, rbx
     jmp .title
 .cancel:
     invoke set_status, &s_scan_cancel
@@ -2440,6 +2489,7 @@ fold_layout:
     PANEL ID_CHK_ASFILE, 250
     PANEL ID_CHK_ACL, 220
     PANEL ID_CHK_LOOSE, 270
+    PANEL ID_CHK_AUTOREF, 130
     PANEL ID_LBL_MASK, 170
     PANEL ID_EDIT_MASK, 200
     cmp qword [rsp+128], 0
@@ -2670,6 +2720,7 @@ fold_proc:
     invoke mk_chk, rsi, &s_c_asfile, ID_CHK_ASFILE, 0
     invoke mk_chk, rsi, &s_c_acl, ID_CHK_ACL, 0
     invoke mk_chk, rsi, &s_c_loose, ID_CHK_LOOSE, 0
+    invoke mk_chk, rsi, &s_c_autoref, ID_CHK_AUTOREF, 0
     invoke mk_lbl, rsi, &s_l_mask, ID_LBL_MASK
     invoke mk_edit, rsi, ID_EDIT_MASK
     invoke mk_chk, rsi, &s_f_same, ID_CHK_SAME, 1
@@ -2874,6 +2925,8 @@ fold_proc:
     je .b_opts
     cmp ebx, ID_FILTER
     je .b_filter
+    cmp ebx, ID_CHK_AUTOREF
+    je .b_autoref
     cmp ebx, ID_PV_PREV
     jb .def
     cmp ebx, ID_BTN_PVTOG
@@ -2942,6 +2995,9 @@ fold_proc:
     jne .zero
     invoke fold_refresh, r15
     jmp .zero
+.b_autoref:
+    invoke fold_watch_arm, rsi, r15
+    jmp .zero
 
 .run:
     invoke fold_start, rsi, r15
@@ -3003,12 +3059,45 @@ fold_proc:
     cmp r12, 52
     jne .zero
     invoke fold_pv_label, rsi, r15
+    invoke get_chk, rsi, ID_CHK_AUTOREF
+    test eax, eax
+    jz .zero
+    cmp qword [r15+F_RUNNING], 0
+    jne .zero
+    cmp qword [r15+F_SYNCRUN], 0
+    jne .zero
+    invoke fold_pv_dirty, r15
+    test eax, eax
+    jnz .zero
+    mov rcx, [r15+F_CHGA]
+    test rcx, rcx
+    jz .chkb
+    cmp rcx, -1
+    je .chkb
+    invoke WaitForSingleObject, rcx, 0
+    test eax, eax
+    jz .autorun
+.chkb:
+    mov rcx, [r15+F_CHGB]
+    test rcx, rcx
+    jz .zero
+    cmp rcx, -1
+    je .zero
+    invoke WaitForSingleObject, rcx, 0
+    test eax, eax
+    jnz .zero
+.autorun:
+    invoke fold_start, rsi, r15
     jmp .zero
 .isdirty:
     invoke fold_pv_dirty, r15
     EPILOG 320
 .savepv:
     invoke SendMessageW, [r15+F_PVVIEW], BC_SAVE, 0, 0
+    invoke SendMessageW, [r15+F_PVVIEW], BC_RUN, 0, 0
+    invoke fold_pv_sync_ent, rsi, r15, 1
+    invoke set_status, &s_pv_saved
+    invoke fold_pv_label, rsi, r15
     jmp .zero
 .nextdiff:
     invoke SendMessageW, [r15+F_PVVIEW], BC_NEXTDIFF, 0, 0
@@ -3351,6 +3440,7 @@ fold_proc:
 .nothr:
     invoke KillTimer, rsi, 51
     invoke KillTimer, rsi, 52
+    invoke fold_watch_close, r15
     mov rcx, [r15+F_PVVIEW]
     test rcx, rcx
     jz .nopv
@@ -3473,6 +3563,7 @@ WSTR tt_folder_20, "← 오른쪽에만 있는 항목을 목록에 표시합니�
 WSTR tt_folder_24, "무엇이 같은지를 정하는 기준. 아래 옵션 줄의 체크 상자와 같이 움직입니다"
 WSTR tt_folder_25, "덜 쓰는 옵션 줄(제외·크기·기간·속성·마스크 등)을 열고 닫습니다"
 WSTR tt_folder_26, "목록에서 이 글자가 이름에 든 항목만 보여 줍니다 (폴더는 안에 든 파일이 맞을 때만 남습니다)"
+WSTR tt_folder_autoref, "양쪽 폴더 안의 파일이 외부에서 바뀌면 자동으로 다시 비교합니다"
 WSTR tt_folder_21, "선택한 항목의 수정 시각과 속성을 왼쪽 값으로 오른쪽에 맞춥니다"
 WSTR tt_folder_22, "선택한 항목의 수정 시각과 속성을 오른쪽 값으로 왼쪽에 맞춥니다"
 WSTR tt_folder_23, "비교 결과를 HTML·엑셀·워드 파일로 내보냅니다"
@@ -3502,5 +3593,6 @@ tt_folder:
     dq ID_CRIT, tt_folder_24
     dq ID_BTN_OPTS, tt_folder_25
     dq ID_FILTER, tt_folder_26
+    dq ID_CHK_AUTOREF, tt_folder_autoref
     dq 0, 0
 section .text
