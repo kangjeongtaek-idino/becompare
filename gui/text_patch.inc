@@ -4,6 +4,8 @@
 ;   "-" lines (kinds 1, 2: the left text) followed by the "+" lines (kinds 1, 3: the right text).
 ;   Three context rows around a change; changes with six or fewer equal rows between them share a hunk.
 ;   The file is UTF-8 without a byte order mark, lines end with LF.
+;   When a file does not end with a line break, its last line is followed by "\ No newline at end of file";
+;   a last line that is equal but ends differently on the two sides is written as a "-" and a "+" line.
 
 %define PT_CTX 3
 
@@ -12,6 +14,9 @@ WSTR s_b_patch, "패치 저장"
 WSTR s_pt_ext, "patch"
 WSTR s_pt_same, "차이가 없어 저장할 패치가 없습니다."
 WSTR f_pt_hunk, "@@ -%u,%u +%u,%u @@"
+WSTR s_b_pclip, "패치 복사"
+WSTR s_pt_copied, "패치를 클립보드에 복사했습니다."
+WSTR s_pt_noeol, "\ No newline at end of file"
 WSTR s_pt_a, "--- "
 WSTR s_pt_b, "+++ "
 pt_flt: dw __utf16__("패치 파일 (*.patch;*.diff)"), 0, __utf16__("*.patch;*.diff"), 0, 0
@@ -38,6 +43,31 @@ pt_line:
     add rdi, 2
     ret
 
+; pt_noeol(rdi = output cursor): the marker behind a last line without a line break (leaf: rax, rdx)
+pt_noeol:
+    lea rdx, [s_pt_noeol]
+    call pt_str
+    mov word [rdi], 10
+    add rdi, 2
+    ret
+
+; pt_last(rcx = TXT*, rdx = number of lines) -> eax index of the last line when the text does not end with a
+;   line break, else -2 (no row has that line index) (leaf: rax, rcx, r8)
+pt_last:
+    mov eax, -2
+    mov r8, [rcx+8]                  ; length
+    test r8, r8
+    jz .e
+    mov rcx, [rcx]
+    movzx ecx, word [rcx+r8*2-2]
+    cmp ecx, 10
+    je .e
+    cmp ecx, 13
+    je .e
+    lea eax, [rdx-1]
+.e:
+    ret
+
 ; pt_str(rdx = zero terminated text, rdi = output cursor) (leaf: rax, rdx)
 pt_str:
     movzx eax, word [rdx]
@@ -62,12 +92,23 @@ pt_str:
 %define PT_T2   168
 %define PT_PATH 176
 %define PT_FMT  192                  ; wchar[64] -> 320
+%define PT_MA   320                  ; left line index that gets the "no newline" marker (-2: none)
+%define PT_MB   328                  ; right line index
 
-; text_patch_path(tv, path) -> eax 1 when written (the view must not be folded / unified)
-text_patch_path:
+; text_patch_build(tv, &length) -> rax malloc'd UTF-16 text of the patch (0: out of memory), *length = characters
+;   (the view must not be folded / unified)
+text_patch_build:
     PROLOG 352
     mov rbx, rcx
-    mov [rsp+PT_PATH], rdx
+    mov [rsp+PT_PATH], rdx           ; where the length goes
+    lea rcx, [rbx+TV_TXA]
+    mov rdx, [rbx+TV_NLA]
+    call pt_last
+    mov [rsp+PT_MA], eax
+    lea rcx, [rbx+TV_TXB]
+    mov rdx, [rbx+TV_NLB]
+    call pt_last
+    mov [rsp+PT_MB], eax
     mov r12, [rbx+TV_ROWS]
     mov r13, [rbx+TV_NROWS]
     lea rcx, [r13*8+8]
@@ -118,7 +159,7 @@ text_patch_path:
     mov rax, [rbx+TV_NBLK]
     shl rax, 6
     add rcx, rax
-    add rcx, 1400
+    add rcx, 1500
     shl rcx, 1
     call malloc
     mov [rsp+PT_OUT], rax
@@ -249,13 +290,42 @@ text_patch_path:
     shl rax, 4
     cmp dword [r12+rax], 0
     jne .chg
+    xor r8d, r8d                     ; is it the last line of a side that has no line break at its end?
+    mov ecx, [r12+rax+4]
+    cmp ecx, [rsp+PT_MA]
+    sete r8b
+    xor r9d, r9d
+    mov ecx, [r12+rax+8]
+    cmp ecx, [rsp+PT_MB]
+    sete r9b
+    cmp r8d, r9d
+    jne .eqsplit
     mov ecx, ' '
     mov rdx, [r14+rsi*8]
     call pt_line
+    test r8d, r8d
+    jz .eqn
+    call pt_noeol
+.eqn:
     inc qword [rsp+PT_NA]
     inc qword [rsp+PT_NB]
     inc rsi
     jmp .body
+.eqsplit:                            ; the same text, but only one side ends with a line break
+    mov ecx, '-'
+    mov rdx, [r14+rsi*8]
+    call pt_line
+    test r8d, r8d
+    jz .es1
+    call pt_noeol
+.es1:
+    mov ecx, '+'
+    mov rdx, [r15+rsi*8]
+    call pt_line
+    test r9d, r9d
+    jz .eqn
+    call pt_noeol
+    jmp .eqn
 .chg:
     mov r8, rsi                      ; the run of changed rows [rsi, r8)
 .c1:
@@ -280,6 +350,13 @@ text_patch_path:
     mov ecx, '-'
     mov rdx, [r14+r9*8]
     call pt_line
+    mov rax, r9
+    shl rax, 4
+    mov eax, [r12+rax+4]
+    cmp eax, [rsp+PT_MA]
+    jne .mne
+    call pt_noeol
+.mne:
     inc qword [rsp+PT_NA]
 .min:
     inc r9
@@ -296,6 +373,13 @@ text_patch_path:
     mov ecx, '+'
     mov rdx, [r15+r9*8]
     call pt_line
+    mov rax, r9
+    shl rax, 4
+    mov eax, [r12+rax+8]
+    cmp eax, [rsp+PT_MB]
+    jne .pne
+    call pt_noeol
+.pne:
     inc qword [rsp+PT_NB]
 .pln:
     inc r9
@@ -307,18 +391,81 @@ text_patch_path:
     mov r8, rdi
     sub r8, [rsp+PT_OUT]
     shr r8, 1
-    mov [rsp+PT_T1], r8
-    invoke write_utf8, [rsp+PT_PATH], [rsp+PT_OUT], [rsp+PT_T1], 0
-    mov ebx, eax
-    invoke free, [rsp+PT_OUT]
+    mov rax, [rsp+PT_PATH]
+    mov [rax], r8
     invoke free, r14
-    mov eax, ebx
+    mov rax, [rsp+PT_OUT]
     EPILOG 352
 .fail1:
     invoke free, r14
 .fail0:
     xor eax, eax
     EPILOG 352
+
+; text_patch_path(tv, path) -> eax 1 when written
+text_patch_path:
+    PROLOG 96
+    mov rsi, rdx
+    invoke text_patch_build, rcx, &rsp+80
+    mov rbx, rax
+    test rax, rax
+    jz .fail
+    invoke write_utf8, rsi, rbx, [rsp+80], 0
+    mov edi, eax
+    invoke free, rbx
+    mov eax, edi
+    EPILOG 96
+.fail:
+    xor eax, eax
+    EPILOG 96
+
+; text_patch_clip(hwnd, tv): the same patch as text on the clipboard (IntelliJ "Copy as Patch to Clipboard")
+text_patch_clip:
+    PROLOG 128
+    mov rsi, rcx
+    mov rbx, rdx
+    invoke tv_unfold, rsi, rbx
+    cmp qword [rbx+TV_NROWS], 0
+    je .norun
+    cmp qword [rbx+TV_NBLK], 0
+    je .same
+    invoke text_patch_build, rbx, &rsp+96
+    mov r12, rax
+    test rax, rax
+    jz .fail
+    mov rcx, [rsp+96]
+    lea r14, [rcx*2+2]
+    invoke GlobalAlloc, 2, r14                         ; GMEM_MOVEABLE
+    mov r13, rax
+    test rax, rax
+    jz .failfree
+    invoke GlobalLock, r13
+    mov rdi, rax
+    mov r14, [rsp+96]
+    shl r14, 1
+    invoke memcpy, rdi, r12, r14
+    mov word [rdi+r14], 0
+    invoke GlobalUnlock, r13
+    invoke OpenClipboard, rsi
+    test eax, eax
+    jz .failfree
+    invoke EmptyClipboard
+    invoke SetClipboardData, 13, r13                   ; CF_UNICODETEXT: the clipboard owns the memory now
+    invoke CloseClipboard
+    invoke free, r12
+    invoke set_status, &s_pt_copied
+    EPILOG 128
+.failfree:
+    invoke free, r12
+.fail:
+    invoke ex_done, rsi, 0
+    EPILOG 128
+.norun:
+    invoke msgbox, rsi, &s_tx_norun, MB_OK|MB_ICONINFO
+    EPILOG 128
+.same:
+    invoke msgbox, rsi, &s_pt_same, MB_OK|MB_ICONINFO
+    EPILOG 128
 
 ; text_patch(hwnd, tv): ask for a file and write the differences as a unified diff
 text_patch:
