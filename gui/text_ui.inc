@@ -1080,6 +1080,7 @@ tv_layout:
     PLACE ID_CHK_WORD, 110
     PLACE ID_CHK_SCRL, 130
     PLACE ID_CHK_WS, 100
+    PLACE ID_CHK_NUM, 90
     PLACE ID_LBL_INFO, 520
     lea r13d, [r13+r15]
     add r13d, r14d
@@ -1344,6 +1345,7 @@ tv_proc:
     invoke mk_chk, rsi, &s_c_word, ID_CHK_WORD, 1
     invoke mk_chk, rsi, &s_c_scrl, ID_CHK_SCRL, 1
     invoke mk_chk, rsi, &s_c_ws, ID_CHK_WS, 0
+    invoke mk_chk, rsi, &s_c_num, ID_CHK_NUM, 1
     invoke mk_lbl, rsi, &s_l_rules, ID_LBL_RULES
     invoke mk_edit, rsi, ID_EDIT_RULES
     invoke mk_lbl, rsi, &s_info0, ID_LBL_INFO
@@ -1481,6 +1483,8 @@ tv_proc:
     je .scrl
     cmp ebx, ID_CHK_WS
     je .doreq
+    cmp ebx, ID_CHK_NUM
+    je .numtog
     cmp ebx, ID_CMB_CTX
     jne .noctx
     cmp ebp, 1                       ; CBN_SELCHANGE
@@ -1561,6 +1565,10 @@ tv_proc:
     invoke text_patch, rsi, r15
     jmp .zero
 .rich:
+    cmp ebp, 0x0100                  ; EN_SETFOCUS / EN_KILLFOCUS: the caret row mark moves to the other gutter
+    je .caretmoved
+    cmp ebp, 0x0200
+    je .caretmoved
     cmp ebp, EN_VSCROLL
     jne .zero
     cmp qword [r15+TV_PEND], 0       ; one redraw request at a time
@@ -1598,6 +1606,14 @@ tv_proc:
     mov rbp, [r15+TV_HB]
     jmp .sync
 
+.numtog:                             ; line numbers on / off: only the gutters are drawn again
+    invoke get_chk, rsi, ID_CHK_NUM
+    xor eax, 1
+    movzx eax, al
+    mov [r15+TV_NONUM], rax
+    invoke tv_redraw_aux, r15
+    jmp .zero
+
 .notify:
     mov eax, [r13+NMH_CODE]
     cmp eax, 0x0702                  ; EN_SELCHANGE
@@ -1609,6 +1625,11 @@ tv_proc:
     mov ecx, 1
 .sl:
     mov [r15+TV_LASTP], rcx
+.caretmoved:                         ; the gutters mark the row of the caret: one redraw request at a time
+    cmp qword [r15+TV_PEND], 0
+    jne .zero
+    mov qword [r15+TV_PEND], 1
+    invoke PostMessageW, rsi, WM_APP+50, 0, 0
     jmp .zero
 
 .cedit:
@@ -1686,6 +1707,7 @@ WSTR tt_text_12, "비교할 때 같은 것으로 볼 문자열 규칙 (old=new;o
 WSTR tt_text_13, "찾을 문자열"
 WSTR tt_text_ctx, "접을 때 변경된 줄 위아래에 남겨 둘 줄 수"
 WSTR tt_text_fold, "변경이 없는 긴 구간을 한 줄로 접어 차이만 모아 봅니다"
+WSTR tt_text_num, "거터의 줄 번호를 보이거나 숨깁니다 (변경 표시는 그대로)"
 WSTR tt_text_ws, "공백을 · 로, 탭을 → 로 표시합니다 (읽기 전용 표시)"
 WSTR tt_text_scrl, "끄면 두 창을 따로 스크롤합니다. 다시 켜면 오른쪽 창이 왼쪽 창 위치로 맞춰집니다"
 WSTR tt_text_word, "줄 안의 바뀐 단어를 따로 강조합니다. 끄면 바뀐 줄 전체만 칠합니다"
@@ -1725,5 +1747,6 @@ tt_text:
     dq ID_CHK_WORD, tt_text_word
     dq ID_CHK_SCRL, tt_text_scrl
     dq ID_CHK_WS, tt_text_ws
+    dq ID_CHK_NUM, tt_text_num
     dq 0, 0
 section .text

@@ -69,7 +69,8 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define TV_WORDS  3896          ; word level highlight option read at the last compare
 %define TV_WS     3904          ; whitespace marks shown: option read at the last compare
 %define TV_CTX    3912          ; folding: rows kept next to a change (read at the last compare)
-%define TV_SIZE   3920
+%define TV_NONUM  3920          ; gutters without line numbers (option "line numbers" off)
+%define TV_SIZE   3928
 %define E_HR      40
 %define ID_ED_FIND   303
 %define ID_ED_NEXT   304
@@ -86,6 +87,7 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define ID_CHK_SCRL  220
 %define ID_CHK_WS    221
 %define ID_CMB_CTX   222
+%define ID_CHK_NUM   223
 %define ID_EDIT_RULES 232
 %define ID_LBL_RULES 233
 %define TV_RULES  3168

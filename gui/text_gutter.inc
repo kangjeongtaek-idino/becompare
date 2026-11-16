@@ -76,6 +76,7 @@ gt_rowh:
 
 ; gt_paint(hwnd, gt)
 %define P_PANE 296
+%define P_CARET 304                  ; row of the caret when the pane has the focus, else -1
 %define P_PS   96
 %define P_RC   176
 %define P_BUF  200
@@ -100,6 +101,14 @@ gt_paint:
     mov r13, [r12+TV_HB]
 .pane:
     mov [rsp+P_PANE], r13
+    mov dword [rsp+P_CARET], -1
+    invoke GetFocus
+    cmp rax, [rsp+P_PANE]
+    jne .nocaret
+    invoke SendMessageW, rax, 0x00C9, -1, 0           ; EM_LINEFROMCHAR: the line of the caret
+    mov [rsp+P_CARET], eax
+.nocaret:
+    mov r13, [rsp+P_PANE]
     invoke gt_metrics, r13, &rsp+P_FIRST, &rsp+P_Y0, &rsp+P_H
     invoke SelectObject, rdi, [g_font]
     invoke SetBkMode, rdi, 1
@@ -149,7 +158,7 @@ gt_paint:
     je .tgap
     mov eax, [rbp]
     test eax, eax
-    jz .notint
+    jz .plain
 .tkind:
     mov ecx, [th_tc_mod]
     cmp eax, 1
@@ -167,6 +176,14 @@ gt_paint:
     mov eax, [rbp]
     test eax, eax
     jnz .tkind
+.plain:                              ; an unchanged row: marked when the caret is on it (IntelliJ caret row)
+    cmp r14d, [rsp+P_CARET]
+    jne .notint
+    mov ecx, 0xEDFAFC                ; #FCFAED
+    cmp qword [g_dark], 0
+    je .tfill
+    mov ecx, 0x2E2826                ; #26282E
+    jmp .tfill
 .tgap2:
     mov ecx, [th_tc_gap]             ; this side has no line in the block
 .tfill:
@@ -258,8 +275,14 @@ gt_paint:
 .idx:
     cmp ecx, -1
     je .next                         ; filler row: nothing to number
+    cmp qword [r12+TV_NONUM], 0      ; line numbers switched off: the bars and glyphs stay
+    jne .nonum
     lea r13d, [rcx+1]
     invoke _snwprintf, &rsp+P_BUF, 12, &f_lineno, r13
+    cmp r14d, [rsp+P_CARET]
+    jne .numc
+    invoke SetTextColor, rdi, #[th_fg]               ; the number of the caret row stands out
+.numc:
     ; rect for the number: [2, y, width-22, y+h]
     mov dword [rsp+P_BR], 2
     mov [rsp+P_BR+4], r15d
@@ -270,6 +293,10 @@ gt_paint:
     add eax, [rsp+P_H]
     mov [rsp+P_BR+12], eax
     invoke DrawTextW, rdi, &rsp+P_BUF, -1, &rsp+P_BR, 0x0826   ; DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX
+    cmp r14d, [rsp+P_CARET]
+    jne .nonum
+    invoke SetTextColor, rdi, #[th_same]
+.nonum:
     mov eax, [rbp]                   ; kind
     test eax, eax
     jz .next
