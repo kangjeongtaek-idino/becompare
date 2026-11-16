@@ -1063,6 +1063,7 @@ tv_layout:
     PLACE ID_BTN_ALN, 100
     PLACE ID_BTN_ALC, 100
     PLACE ID_BTN_XLS, 90
+    PLACE ID_BTN_PATCH, 90
     lea r13d, [r13+r15]
     add r13d, r14d
     mov r12d, r14d
@@ -1312,6 +1313,7 @@ tv_proc:
     invoke mk_btn, rsi, &s_b_aln, ID_BTN_ALN
     invoke mk_btn, rsi, &s_b_alc, ID_BTN_ALC
     invoke mk_btn, rsi, &s_b_xls, ID_BTN_XLS
+    invoke mk_btn, rsi, &s_b_patch, ID_BTN_PATCH
     invoke icon_set, rsi, ID_BTN_PREV, &g_prev, &s_b_prev
     invoke icon_set, rsi, ID_BTN_NEXT, &g_next, &s_b_next
     invoke icon_set, rsi, ID_BTN_CLR, &g_copyr, &s_b_clr
@@ -1453,6 +1455,8 @@ tv_proc:
     je .b_alc
     cmp ebx, ID_BTN_XLS
     je .b_xls
+    cmp ebx, ID_BTN_PATCH
+    je .b_patch
     cmp ebx, ID_CHK_SYN
     je .b_syn
     cmp ebx, ID_ED_NEXT
@@ -1546,6 +1550,9 @@ tv_proc:
     jmp .zero
 .b_xls:
     invoke text_export, rsi, r15
+    jmp .zero
+.b_patch:
+    invoke text_patch, rsi, r15
     jmp .zero
 .rich:
     cmp ebp, EN_VSCROLL
@@ -1660,6 +1667,7 @@ WSTR tt_text_0, "왼쪽 파일을 저장합니다"
 WSTR tt_text_1, "오른쪽 파일을 저장합니다"
 WSTR tt_text_2, "양쪽에서 고른 줄을 같은 위치로 맞춰 다시 비교합니다"
 WSTR tt_text_3, "지정한 정렬을 모두 해제합니다"
+WSTR tt_text_patch, "차이를 패치 파일(unified diff)로 저장합니다"
 WSTR tt_text_4, "비교 결과를 엑셀 파일(.xlsx)로 저장합니다"
 WSTR tt_text_5, "대소문자 차이를 무시합니다"
 WSTR tt_text_6, "줄 안의 공백 차이를 무시합니다"
@@ -1689,6 +1697,7 @@ tt_text:
     dq ID_BTN_ALN, tt_text_2
     dq ID_BTN_ALC, tt_text_3
     dq ID_BTN_XLS, tt_text_4
+    dq ID_BTN_PATCH, tt_text_patch
     dq ID_CHK_CASE, tt_text_5
     dq ID_CHK_SPC, tt_text_6
     dq ID_CHK_TRIM, tt_text_7
