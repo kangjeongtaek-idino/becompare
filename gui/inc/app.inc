@@ -76,6 +76,7 @@
 %define IDM_UPDATE     1070
 %define IDM_CLIP       1071
 %define IDM_PATCH      1072
+%define IDM_BLANK      1073
 %define IDM_SHELL_ON   1061
 %define IDM_SHELL_OFF  1062
 

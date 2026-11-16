@@ -11,12 +11,14 @@ global temp_cleanup
 extern malloc, free, wcslen, wcscat, _snwprintf, memcpy
 extern read_file_bytes, write_utf8, add_session, browse_open, msgbox, set_status
 
-global clip_compare, patch_open, patch_cmd
+global clip_compare, blank_compare, patch_open, patch_cmd
 extern wcsncpy
 
 section .rdata
 WSTR s_tmpdir, "BeCompareAsm\"
 WSTR f_clip, "clipboard_%X.txt"
+WSTR f_blank_l, "blank_%X_left.txt"
+WSTR f_blank_r, "blank_%X_right.txt"
 WSTR f_own, "%X_x\"                  ; this process's own folder in the BeCompareAsm folder
 WSTR f_all, "%s*"
 WSTR f_join, "%s%s"
@@ -169,6 +171,28 @@ clip_compare:
 .none:
     invoke msgbox, rbx, &s_noclip, MB_OK|MB_ICONINFO
     EPILOG 1200
+
+; blank_compare(owner): a new text session with two empty sides to paste or type into (IntelliJ "Blank Diff
+; Window"). The sides are empty temporary files, so the panes can be edited and compared (F5) like any file;
+; the files live in the temporary folder of this process and go away when the application ends.
+blank_compare:
+    PROLOG 2240
+    mov rbx, rcx
+    invoke GetTickCount
+    mov r13d, eax
+    invoke tc_tmp, &rsp+96, &f_blank_l, r13
+    invoke tc_tmp, &rsp+1152, &f_blank_r, r13
+    invoke write_utf8, &rsp+96, &s_empty, 0, 0
+    test eax, eax
+    jz .fail
+    invoke write_utf8, &rsp+1152, &s_empty, 0, 0
+    test eax, eax
+    jz .fail
+    invoke add_session, T_TEXT, &rsp+96, &rsp+1152, 0
+    EPILOG 2240
+.fail:
+    invoke msgbox, rbx, &s_cantwrite, MB_OK|MB_ICONERROR
+    EPILOG 2240
 
 ; tc_put(handle, buf, len)
 tc_put:
