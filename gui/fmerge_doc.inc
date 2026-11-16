@@ -9,7 +9,7 @@ WSTR fd_f_o, "출력 폴더: %s"
 WSTR fd_norun, "먼저 비교를 실행하세요."
 WSTR s_b_doc, "워드 저장"
 fd_widths: dd 5000, 1500, 1800, 1950, 1950, 1950
-fd_fill: dq 0, dwc_blue, dwc_green, dwc_red, dwc_blue, dwc_green, dwc_orange, 0, dwc_orange
+fd_fill: dq 0, dwc_blue, dwc_green, dwc_red, dwc_blue, dwc_green, dwc_orange, 0, dwc_orange, dwc_red, dwc_blue
 
 section .text
 

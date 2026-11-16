@@ -18,12 +18,12 @@ extern mk, reg_class, scl, set_status, msgbox
 extern mk_btn, mk_chk, mk_lbl, mk_edit, get_chk, ctl_color, theme_checks
 extern pb_create, pb_layout, pb_load, pb_collect, pb_command
 extern rich_create, rich_set_text, rich_get_text, rich_bk, rich_theme, rich_unsel, rich_batch
-extern text_load, text_save, lines_split, compare_lines, hunk_free
+extern text_load, text_load_raw, text_save, lines_split, compare_lines, hunk_free, lower_w
 extern sb_init, sb_append, sb_free, vec_push
 extern set_tab_title
 extern browse_open, browse_save
 
-global merge_register, merge_create
+global merge_register, merge_create, diff3_try_file
 
 ; ---- state
 %define MG_HL     0
@@ -44,6 +44,8 @@ global merge_register, merge_create
 %define MG_TXO    184
 %define MG_ANCB   216           ; TM-06: block laid out like a text view (TV_NANC / TV_ANC) so tv_anchor_add / tv_cmp_anch can be shared
 %define MG_PRIS   224           ; pristine generated output, to detect hand edits before regenerating
+%define MG_GUARD  232           ; scroll sync guard
+%define MG_OPTS   240           ; compare options (1 case, 2 space, 4 trim)
 %define MG_SIZE   256
 %define MG_ANCSZ  2960          ; must exceed text.asm TV_NANC (2880) + 4
 
@@ -65,6 +67,10 @@ global merge_register, merge_create
 %define ID_BTN_ALN  653
 %define ID_BTN_ALC  654
 %define ID_BTN_DOC  655
+%define ID_MG_CASE  661
+%define ID_MG_SPC   662
+%define ID_MG_TRIM  663
+%define ID_MG_SCRL  664
 
 section .rdata
 WSTR cn_merge, "BCMerge"
@@ -91,6 +97,10 @@ WSTR s_mode2, "2-way 병합"
 WSTR f_title, "병합 %s"
 WSTR s_b_aln, "정렬 지정"
 WSTR s_b_alc, "정렬 해제"
+WSTR s_mg_case, "대소문자 무시"
+WSTR s_mg_spc, "공백 무시"
+WSTR s_mg_trim, "앞뒤 공백 무시"
+WSTR s_mg_scrl, "스크롤 동기화"
 WSTR s_mg_hint, "정렬 지정: 먼저 병합(F5)을 실행하고, 위쪽 왼쪽·오른쪽 창에서 맞추려는 줄(여러 줄 선택 가능)을 각각 선택한 뒤 누르세요."
 WSTR s_mg_3way, "정렬 지정은 기준 파일이 없는 2-way 병합에서만 사용할 수 있습니다."
 WSTR s_mg_conf, "정렬 지정: 기존 정렬 지점과 순서가 맞지 않아 추가할 수 없습니다."
@@ -102,6 +112,10 @@ WSTR s_nocur, "채택할 충돌이 없습니다."
 WSTR s_noout, "출력 파일 경로를 입력하세요."
 WSTR s_saved, "병합 결과를 저장했습니다."
 WSTR f_leftconf, "해결하지 않은 충돌이 %llu개 남아 있습니다. 그래도 저장할까요?"
+
+section .bss
+alignb 8
+mg_cur_opts: resq 1
 
 section .text
 
@@ -136,6 +150,127 @@ emit_range:
 .d:
     EPILOG 64
 
+; mg_line_cmp(s1, s2) -> eax 0 when equal under [mg_cur_opts]
+mg_line_cmp:
+    PROLOG 96
+    mov rsi, rcx
+    mov rdi, rdx
+    mov r12d, [mg_cur_opts]
+    test r12d, r12d
+    jnz .opts
+    call wcscmp
+    EPILOG 96
+.opts:
+    invoke wcslen, rsi
+    lea r13, [rsi+rax*2]
+    invoke wcslen, rdi
+    lea r14, [rdi+rax*2]
+    test r12d, 4
+    jz .loop
+.lt1:
+    cmp rsi, r13
+    jae .rt1
+    movzx eax, word [rsi]
+    cmp eax, ' '
+    je .lt1a
+    cmp eax, 9
+    jne .rt1
+.lt1a:
+    add rsi, 2
+    jmp .lt1
+.rt1:
+    cmp r13, rsi
+    jbe .lt2
+    movzx eax, word [r13-2]
+    cmp eax, ' '
+    je .rt1a
+    cmp eax, 9
+    jne .lt2
+.rt1a:
+    sub r13, 2
+    jmp .rt1
+.lt2:
+    cmp rdi, r14
+    jae .rt2
+    movzx eax, word [rdi]
+    cmp eax, ' '
+    je .lt2a
+    cmp eax, 9
+    jne .rt2
+.lt2a:
+    add rdi, 2
+    jmp .lt2
+.rt2:
+    cmp r14, rdi
+    jbe .loop
+    movzx eax, word [r14-2]
+    cmp eax, ' '
+    je .rt2a
+    cmp eax, 9
+    jne .loop
+.rt2a:
+    sub r14, 2
+    jmp .rt2
+.loop:
+    test r12d, 2
+    jz .nospc
+.sp1:
+    cmp rsi, r13
+    jae .sp2
+    movzx eax, word [rsi]
+    cmp eax, ' '
+    je .sp1a
+    cmp eax, 9
+    je .sp1a
+    cmp eax, 0x3000
+    jne .sp2
+.sp1a:
+    add rsi, 2
+    jmp .sp1
+.sp2:
+    cmp rdi, r14
+    jae .nospc
+    movzx eax, word [rdi]
+    cmp eax, ' '
+    je .sp2a
+    cmp eax, 9
+    je .sp2a
+    cmp eax, 0x3000
+    jne .nospc
+.sp2a:
+    add rdi, 2
+    jmp .sp2
+.nospc:
+    cmp rsi, r13
+    jae .end1
+    cmp rdi, r14
+    jae .diff
+    movzx ebx, word [rsi]
+    movzx ebp, word [rdi]
+    add rsi, 2
+    add rdi, 2
+    cmp ebx, ebp
+    je .loop
+    test r12d, 1
+    jz .diff
+    mov ecx, ebx
+    call lower_w
+    mov ebx, eax
+    mov ecx, ebp
+    call lower_w
+    cmp ebx, eax
+    je .loop
+    jmp .diff
+.end1:
+    cmp rdi, r14
+    jae .same
+.diff:
+    mov eax, 1
+    EPILOG 96
+.same:
+    xor eax, eax
+    EPILOG 96
+
 ; seg_eq(kx*, xs, xe, ky*, ys, ye) -> eax 1 when the two line segments are identical
 seg_eq:
     PROLOG 64
@@ -157,7 +292,7 @@ seg_eq:
     mov rcx, [rsi+rax*8]
     lea rax, [r14+rbx]
     mov rdx, [r13+rax*8]
-    call wcscmp
+    call mg_line_cmp
     test eax, eax
     jnz .no
     inc rbx
@@ -573,6 +708,18 @@ mg_merge:
     mov [rsp+M_H2+8], rax
     mov [rsp+M_H2+16], rax
     mov qword [rbx+MG_NAUTO], 0
+    xor eax, eax
+    mov [rsp+504], rax
+    invoke get_chk, rsi, ID_MG_CASE
+    or [rsp+504], eax
+    invoke get_chk, rsi, ID_MG_SPC
+    shl eax, 1
+    or [rsp+504], eax
+    invoke get_chk, rsi, ID_MG_TRIM
+    shl eax, 2
+    or eax, [rsp+504]
+    mov [rbx+MG_OPTS], rax
+    mov [mg_cur_opts], rax
     invoke sb_init, &rsp+M_SB
     mov rax, [rsp+M_SB]
     ; block pointer for conflict(): sb at +0, LL +8 ...
@@ -585,7 +732,7 @@ mg_merge:
     test r13d, r13d
     jnz .three
     ; ---------------- 2-way: every differing hunk is a conflict
-    invoke tv_cmp_anch, [rbx+MG_ANCB], &rsp+M_LL, &rsp+M_LR, 0, &rsp+M_CP, &rsp+M_H1
+    invoke tv_cmp_anch, [rbx+MG_ANCB], &rsp+M_LL, &rsp+M_LR, [rbx+MG_OPTS], &rsp+M_CP, &rsp+M_H1
     xor r14d, r14d
 .h2:
     cmp r14, [rsp+M_H1+8]
@@ -616,8 +763,8 @@ mg_merge:
     jmp .h2
     ; ---------------- 3-way
 .three:
-    invoke compare_lines, &rsp+M_LO, &rsp+M_LL, 0, &rsp+M_CP, &rsp+M_H1
-    invoke compare_lines, &rsp+M_LO, &rsp+M_LR, 0, &rsp+M_CP, &rsp+M_H2
+    invoke compare_lines, &rsp+M_LO, &rsp+M_LL, [rbx+MG_OPTS], &rsp+M_CP, &rsp+M_H1
+    invoke compare_lines, &rsp+M_LO, &rsp+M_LR, [rbx+MG_OPTS], &rsp+M_CP, &rsp+M_H2
     mov rax, [rsp+M_LO+8]
     lea rcx, [rax*4+8]
     call malloc
@@ -792,6 +939,163 @@ mg_merge:
     invoke msgbox, rsi, &s_cantread, MB_OK|MB_ICONWARNING
     xor eax, eax
     EPILOG 512
+
+; diff3_try_file(pathL, pathR, pathB, pathOut_or_0) -> eax 1 when cleanly 3-way merged (0 conflicts), 0 otherwise
+%define D3_PL   96
+%define D3_PR   104
+%define D3_PB   112
+%define D3_PO   120
+%define D3_TXL  128                  ; 32
+%define D3_TXR  160                  ; 32
+%define D3_TXO  192                  ; 32
+%define D3_LL   224                  ; 16
+%define D3_LR   240                  ; 16
+%define D3_LO   256                  ; 16
+%define D3_H1   272                  ; 24
+%define D3_H2   296                  ; 24
+%define D3_MO   320
+%define D3_MR   328
+%define D3_SB   336                  ; 24
+%define D3_LJ   360
+%define D3_RJ   368
+%define D3_EOL  376
+%define D3_ENC  380
+diff3_try_file:
+    PROLOG 416
+    mov [rsp+D3_PL], rcx
+    mov [rsp+D3_PR], rdx
+    mov [rsp+D3_PB], r8
+    mov [rsp+D3_PO], r9
+    invoke memset, &rsp+D3_TXL, 0, 256
+    xor ebx, ebx
+    invoke text_load_raw, [rsp+D3_PL], &rsp+D3_TXL
+    test eax, eax
+    jz .cleanup
+    invoke text_load_raw, [rsp+D3_PR], &rsp+D3_TXR
+    test eax, eax
+    jz .cleanup
+    invoke text_load_raw, [rsp+D3_PB], &rsp+D3_TXO
+    test eax, eax
+    jz .cleanup
+    mov eax, [rsp+D3_TXL+24]
+    mov [rsp+D3_EOL], eax
+    mov eax, [rsp+D3_TXL+20]
+    shl eax, 8
+    or eax, [rsp+D3_TXL+16]
+    mov [rsp+D3_ENC], eax
+    invoke lines_split, [rsp+D3_TXL], [rsp+D3_TXL+8], &rsp+D3_LL
+    invoke lines_split, [rsp+D3_TXR], [rsp+D3_TXR+8], &rsp+D3_LR
+    invoke lines_split, [rsp+D3_TXO], [rsp+D3_TXO+8], &rsp+D3_LO
+    mov qword [mg_cur_opts], 0
+    invoke compare_lines, &rsp+D3_LO, &rsp+D3_LL, 0, &s_empty, &rsp+D3_H1
+    invoke compare_lines, &rsp+D3_LO, &rsp+D3_LR, 0, &s_empty, &rsp+D3_H2
+    mov rax, [rsp+D3_LO+8]
+    lea rcx, [rax*4+8]
+    call malloc
+    mov [rsp+D3_MO], rax
+    mov rax, [rsp+D3_LO+8]
+    lea rcx, [rax*4+8]
+    call malloc
+    mov [rsp+D3_MR], rax
+    invoke match_build, &rsp+D3_H1, [rsp+D3_MO], [rsp+D3_LO+8]
+    invoke match_build, &rsp+D3_H2, [rsp+D3_MR], [rsp+D3_LO+8]
+    invoke sb_init, &rsp+D3_SB
+    xor r13d, r13d                   ; oi
+    xor r14d, r14d                   ; li
+    xor r15d, r15d                   ; ri
+.loop:
+    mov rcx, r13
+.find:
+    cmp rcx, [rsp+D3_LO+8]
+    jae .end
+    mov rax, [rsp+D3_MO]
+    mov edx, [rax+rcx*4]
+    cmp edx, -1
+    je .nj
+    mov rax, [rsp+D3_MR]
+    mov r8d, [rax+rcx*4]
+    cmp r8d, -1
+    jne .have
+.nj:
+    inc rcx
+    jmp .find
+.end:
+    mov rcx, [rsp+D3_LO+8]
+    mov rdx, [rsp+D3_LL+8]
+    mov r8, [rsp+D3_LR+8]
+.have:
+    mov rbp, rcx                     ; j
+    mov [rsp+D3_LJ], rdx
+    mov [rsp+D3_RJ], r8
+    invoke seg_eq, [rsp+D3_LO], r13, rbp, [rsp+D3_LL], r14, [rsp+D3_LJ]
+    mov edi, eax                     ; eqOL
+    invoke seg_eq, [rsp+D3_LO], r13, rbp, [rsp+D3_LR], r15, [rsp+D3_RJ]
+    mov esi, eax                     ; eqOR
+    test edi, edi
+    jz .notol
+    test esi, esi
+    jnz .emit_o
+    invoke emit_range, &rsp+D3_SB, &rsp+D3_LR, r15, [rsp+D3_RJ]
+    jmp .after
+.emit_o:
+    invoke emit_range, &rsp+D3_SB, &rsp+D3_LO, r13, rbp
+    jmp .after
+.notol:
+    test esi, esi
+    jnz .emit_l
+    invoke seg_eq, [rsp+D3_LL], r14, [rsp+D3_LJ], [rsp+D3_LR], r15, [rsp+D3_RJ]
+    test eax, eax
+    jz .cleanup                      ; conflict!
+.emit_l:
+    invoke emit_range, &rsp+D3_SB, &rsp+D3_LL, r14, [rsp+D3_LJ]
+.after:
+    cmp rbp, [rsp+D3_LO+8]
+    jae .built
+    lea rax, [rbp+1]
+    invoke emit_range, &rsp+D3_SB, &rsp+D3_LO, rbp, rax
+    lea r13, [rbp+1]
+    mov rax, [rsp+D3_LJ]
+    lea r14, [rax+1]
+    mov rax, [rsp+D3_RJ]
+    lea r15, [rax+1]
+    jmp .loop
+.built:
+    cmp qword [rsp+D3_PO], 0
+    je .ok
+    cmp dword [rsp+D3_EOL], 0
+    jne .write
+    mov rax, [rsp+D3_SB+8]
+    test rax, rax
+    jz .write
+    dec rax
+    mov [rsp+D3_SB+8], rax
+    mov rcx, [rsp+D3_SB]
+    mov word [rcx+rax*2], 0
+.write:
+    mov rax, [rsp+D3_SB]
+    test rax, rax
+    jnz .w2
+    lea rax, [s_empty]
+.w2:
+    invoke text_save, [rsp+D3_PO], rax, [rsp+D3_SB+8], #[rsp+D3_ENC]
+    mov ebx, eax
+    jmp .cleanup
+.ok:
+    mov ebx, 1
+.cleanup:
+    invoke free, [rsp+D3_TXL]
+    invoke free, [rsp+D3_TXR]
+    invoke free, [rsp+D3_TXO]
+    invoke free, [rsp+D3_LL]
+    invoke free, [rsp+D3_LR]
+    invoke free, [rsp+D3_LO]
+    invoke free, [rsp+D3_MO]
+    invoke free, [rsp+D3_MR]
+    invoke hunk_free, &rsp+D3_H1
+    invoke hunk_free, &rsp+D3_H2
+    invoke sb_free, &rsp+D3_SB
+    mov eax, ebx
+    EPILOG 416
 
 %include "merge_ui.inc"
 %include "merge_doc.inc"

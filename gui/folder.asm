@@ -5,8 +5,9 @@
 %include "inc/app.inc"
 
 extern FindFirstFileW, FindNextFileW, FindClose, CreateFileW, ReadFile, CloseHandle, CreateThread
+extern FindFirstChangeNotificationW, FindCloseChangeNotification
 extern Sleep
-extern WaitForSingleObject, CopyFileW, RemoveDirectoryW, GetFileAttributesW
+extern WaitForSingleObject, CopyFileW, RemoveDirectoryW, GetFileAttributesW, GetFileAttributesExW
 extern SHCreateDirectoryExW, SHFileOperationW, SetWindowTheme
 extern CreateWindowExW, DefWindowProcW, SendMessageW, PostMessageW, MoveWindow, GetClientRect, GetWindowRect
 extern GetDlgItem, GetWindowTextW, SetWindowTextW, SetWindowLongPtrW, GetWindowLongPtrW, FillRect
@@ -114,7 +115,9 @@ extern g_batch, g_rep_path, g_exitcode, g_hframe, g_snap_path
 %define F_AVAIL   5552
 %define F_PVPA    5568              ; wchar[520]: the pair shown in the preview
 %define F_PVPB    6608
-%define F_SIZE    7648
+%define F_CHGA    7648              ; directory change notification handle A
+%define F_CHGB    7656              ; directory change notification handle B
+%define F_SIZE    7664
 %define ID_LBL_ATTRX 168
 %define ID_BTN_OPTS  178             ; opens / closes the row of less used options
 %define ID_LBL_CRIT  179
@@ -123,6 +126,7 @@ extern g_batch, g_rep_path, g_exitcode, g_hframe, g_snap_path
 %define ID_FILTER    182             ; shows only the names that contain this text
 %define ID_LBL_HINT  183
 %define ID_LBL_PVMSG 184
+%define ID_CHK_AUTOREF 185
 %define ID_PV_PREV   190             ; the toolbar of the preview
 %define ID_PV_NEXT   191
 %define ID_PV_SRC    192
@@ -326,6 +330,7 @@ WSTR s_b_stamplr, "→ 시각·속성 맞춤"
 WSTR s_b_stamprl, "← 시각·속성 맞춤"
 WSTR s_c_acl, "복사 시 NTFS 권한(ACL) 포함"
 WSTR s_c_loose, "이름 느슨하게 맞춤(유니코드·확장자)"
+WSTR s_c_autoref, "자동 새로고침"
 WSTR s_l_mask, "마스크(*.txt=*.bak;..):"
 WSTR s_c_asfile, "압축 파일을 하나의 파일로 비교(헥스)"
 WSTR s_lbl_attrx, "제외 속성(R H S A L C O E):"

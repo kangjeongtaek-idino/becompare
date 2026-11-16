@@ -22,7 +22,7 @@ WSTR s_pv_side, "나란히"
 WSTR s_pv_uni, "합쳐서"
 WSTR f_pv_count, "차이점 %u개"
 WSTR s_pv_unsaved, "미리보기에서 바꾼 내용이 저장되지 않았습니다. 저장할까요?"
-WSTR s_pv_saved, "저장했습니다. 폴더 비교 목록에 반영하려면 비교(F5)를 다시 실행하세요."
+WSTR s_pv_saved, "저장하고 폴더 비교 목록에 반영했습니다."
 WSTR s_pv_nofile, "더 비교할 다른 파일이 없습니다."
 g_pvup:   dw 0xE74A, 0
 g_pvdn:   dw 0xE74B, 0
@@ -238,12 +238,156 @@ fold_pv_confirm:
     invoke fold_pv_dirty, rbx
     test eax, eax
     jnz .no
+    invoke fold_pv_sync_ent, rsi, rbx, 0
 .yes:
     mov eax, 1
     EPILOG 64
 .no:
     xor eax, eax
     EPILOG 64
+
+; fold_pv_sync_ent(hwnd, fold, keep_sel): after saving in the preview, refresh the entry, parent folder statuses and counts
+fold_pv_sync_ent:
+    PROLOG 704
+    mov rsi, rcx
+    mov rbx, rdx
+    mov r14d, r8d
+    invoke fold_pv_dirty, rbx
+    test eax, eax
+    jnz .d
+    mov r12, [rbx+F_PVENT]
+    test r12, r12
+    js .d
+    cmp r12, [rbx+F_NENT]
+    jae .d
+    cmp qword [rbx+F_RUNNING], 0
+    jne .d
+    cmp qword [rbx+F_SYNCRUN], 0
+    jne .d
+    mov rax, [rbx+F_KIND]
+    or rax, [rbx+F_KIND+8]
+    jnz .d
+    mov rdi, r12
+    shl rdi, 6
+    add rdi, [rbx+F_ENTS]
+    test dword [rdi+E_FLAGS], EF_DIRA|EF_DIRB
+    jnz .d
+    mov eax, [rdi+E_FLAGS]
+    and eax, EF_EXA|EF_EXB
+    cmp eax, EF_EXA|EF_EXB
+    jne .d
+    invoke GetFileAttributesExW, &rbx+F_PVPA, 0, &rsp+96
+    test eax, eax
+    jz .d
+    mov eax, [rsp+96+20]
+    mov edx, [rsp+96+24]
+    shl rdx, 32
+    or rax, rdx
+    mov [rdi+E_MTA], rax
+    mov eax, [rsp+96+32]
+    mov edx, [rsp+96+28]
+    shl rdx, 32
+    or rax, rdx
+    mov [rdi+E_SIZEA], rax
+    invoke GetFileAttributesExW, &rbx+F_PVPB, 0, &rsp+96
+    test eax, eax
+    jz .d
+    mov eax, [rsp+96+20]
+    mov edx, [rsp+96+24]
+    shl rdx, 32
+    or rax, rdx
+    mov [rdi+E_MTB], rax
+    mov eax, [rsp+96+32]
+    mov edx, [rsp+96+28]
+    shl rdx, 32
+    or rax, rdx
+    mov [rdi+E_SIZEB], rax
+    mov r13d, ST_DIFF
+    mov rax, [rdi+E_SIZEA]
+    cmp rax, [rdi+E_SIZEB]
+    jne .setst
+    invoke files_equal, rbx, &rbx+F_PVPA, &rbx+F_PVPB
+    test eax, eax
+    jz .setst
+    mov r13d, ST_SAME
+    and dword [rdi+E_FLAGS], ~(7 << EF_ACTSH)
+.setst:
+    mov [rdi+E_STATUS], r13d
+    ; recompute file status counts and folder masks from bottom to top
+    xor eax, eax
+    mov [rbx+F_CNT], rax
+    mov [rbx+F_CNT+8], rax
+    mov [rbx+F_CNT+16], rax
+    mov [rbx+F_CNT+24], rax
+    mov [rbx+F_CNT+32], rax
+    mov rcx, [rbx+F_NENT]
+.recalc:
+    test rcx, rcx
+    jz .recalcdone
+    dec rcx
+    mov rax, rcx
+    shl rax, 6
+    add rax, [rbx+F_ENTS]
+    mov r15, rax
+    test dword [r15+E_FLAGS], EF_DIRA|EF_DIRB
+    jnz .isdir
+    mov eax, [r15+E_STATUS]
+    inc qword [rbx+F_CNT+rax*8]
+    mov edx, 1
+    mov r8, rcx
+    mov ecx, eax
+    shl edx, cl
+    mov rcx, r8
+    mov [r15+E_MASK], edx
+    jmp .recalc
+.isdir:
+    lea r8, [rcx+1]
+    mov r9d, [r15+E_SUBEND]
+    xor r10d, r10d
+    mov r11, [rbx+F_ENTS]
+.subm:
+    cmp r8, r9
+    jae .submd
+    mov rax, r8
+    shl rax, 6
+    or r10d, [r11+rax+E_MASK]
+    inc r8
+    jmp .subm
+.submd:
+    mov eax, [r15+E_FLAGS]
+    and eax, EF_EXA|EF_EXB
+    cmp eax, EF_EXA|EF_EXB
+    jne .dirown
+    cmp dword [r15+E_STATUS], ST_TYPE
+    je .dirown
+    mov dword [r15+E_STATUS], ST_SAME
+    test r10d, 0x1E
+    jz .dirown
+    mov dword [r15+E_STATUS], ST_DIFF
+.dirown:
+    mov eax, [r15+E_STATUS]
+    mov edx, 1
+    mov r8, rcx
+    mov ecx, eax
+    shl edx, cl
+    mov rcx, r8
+    or edx, r10d
+    mov [r15+E_MASK], edx
+    jmp .recalc
+.recalcdone:
+    invoke fold_refresh, rbx
+    test r14d, r14d
+    jz .stat
+    mov rcx, rbx
+    call fold_pv_row
+    test rax, rax
+    js .stat
+    invoke fold_pv_select, rbx, rax
+.stat:
+    invoke _snwprintf, &rsp+160, 250, &s_scan_done, [rbx+F_CNT], [rbx+F_CNT+8], [rbx+F_CNT+16], [rbx+F_CNT+24], [rbx+F_CNT+32]
+    invoke set_status_part, 1, &rsp+160
+.d:
+    EPILOG 704
 
 ; fold_pv_load(hwnd, fold, row): show the pair of the row (a file on both sides that is text), or nothing
 %define PL_A 96                      ; wchar[520]
@@ -463,8 +607,10 @@ fold_pv_cmd:
     jmp .lbl
 .save:
     invoke SendMessageW, r12, BC_SAVE, 0, 0
+    invoke SendMessageW, r12, BC_RUN, 0, 0
+    invoke fold_pv_sync_ent, rsi, rbx, 1
     invoke set_status, &s_pv_saved
-    jmp .d
+    jmp .lbl
 .fold:
     invoke get_chk, rsi, ID_PV_FOLD
     mov ebp, eax

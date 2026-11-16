@@ -33,12 +33,12 @@ r=run(["python","tools/hazard.py"])
 assert "hazards: 0" in r.stdout
 run(["gcc",ROOT/"tools/test_safe_save.c",OUT/"engine.obj",OUT/"textlib.obj",*["-Wl,--wrap="+x for x in ["WriteFile","FlushFileBuffers","ReplaceFileW","ReadFile"]],"-o",OUT/"test_safe_save.exe"])
 defs={}
-for name in ["inc/app.inc","text.asm","edit_ui.inc","hex.asm","merge.asm","folder.asm"]:
+for name in ["inc/app.inc","text.asm","edit_ui.inc","hex.asm","merge.asm","folder.asm","fmerge.asm"]:
     for line in (ROOT/"gui"/name).read_text(encoding="utf-8").splitlines():
-        m=re.match(r"^%define\s+((?:SS_|TV_|HX_|MG_|F_|BC_)[A-Z0-9_]+|E_HR|E_SIZE)\s+([^;]+)",line)
+        m=re.match(r"^%define\s+((?:SS_|TV_|HX_|MG_|F_|FM_|BC_)[A-Z0-9_]+|E_HR|E_SIZE)\s+([^;]+)",line)
         if m: defs[m[1]]=m[2].strip()
 (OUT/"test_layout.h").write_text("\n".join("#define "+k+" "+v for k,v in defs.items()),encoding="utf-8")
-exports={"main":["view_can_close","frame_proc","g_nsess","g_sess"],"text":["text_compare","tv_proc","ed_proc"],"hex":["hx_proc"],"merge":["mg_proc"],"folder":["fold_proc","sync_thread"]}
+exports={"main":["view_can_close","frame_proc","g_nsess","g_sess"],"text":["text_compare","tv_proc","ed_proc"],"hex":["hx_proc"],"merge":["mg_proc"],"folder":["fold_proc","sync_thread"],"fmerge":["fm_proc"]}
 for mod,names in exports.items():
     run(["objcopy",*["--globalize-symbol="+n for n in names],OUT/(mod+".obj"),OUT/(mod+".test.obj")])
 run(["gcc","-I",OUT,ROOT/"tools/test_view_state.c",*[OUT/(m+(".test" if m in exports else "")+".obj") for m in MODS],*["-Wl,--wrap="+x for x in ["SendMessageW","GetWindowLongPtrW","GetDlgItem","GetWindowTextW","SetWindowTextW","InvalidateRect","msgbox","DestroyWindow","EnableWindow","SetTimer","KillTimer"]],*LIBS,"-o",OUT/"test_view_state.exe"])
@@ -228,4 +228,4 @@ assert not any((ex/f).exists() for f in ["w1.xlsx","w2.docx","w3.xlsx","w4.xlsx"
 assert not any((ex/f).exists() for f in ["e4.docx","e7.docx"])
 print("PASS export file contents")
 (fixtures/"cli-results.json").write_text(json.dumps(LOG,indent=2),encoding="utf-8")
-print("All regression checks passed: 44 save + 19 state/worker +",ui_checks,"UI +",len(LOG),"CLI cases + 1 temporary-folder check")
+print("All regression checks passed: 44 save + 21 state/worker +",ui_checks,"UI +",len(LOG),"CLI cases + 1 temporary-folder check")

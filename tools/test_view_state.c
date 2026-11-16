@@ -17,7 +17,7 @@ UINT_PTR WINAPI __wrap_SetTimer(HWND h,UINT_PTR id,UINT ms,TIMERPROC p){timerCal
 BOOL WINAPI __wrap_KillTimer(HWND h,UINT_PTR id){return TRUE;}
 extern int text_compare(HWND,void*,void*);
 extern DWORD WINAPI sync_thread(void*);
-extern LRESULT tv_proc(HWND,UINT,WPARAM,LPARAM),ed_proc(HWND,UINT,WPARAM,LPARAM),mg_proc(HWND,UINT,WPARAM,LPARAM),hx_proc(HWND,UINT,WPARAM,LPARAM),fold_proc(HWND,UINT,WPARAM,LPARAM);
+extern LRESULT tv_proc(HWND,UINT,WPARAM,LPARAM),ed_proc(HWND,UINT,WPARAM,LPARAM),mg_proc(HWND,UINT,WPARAM,LPARAM),hx_proc(HWND,UINT,WPARAM,LPARAM),fold_proc(HWND,UINT,WPARAM,LPARAM),fm_proc(HWND,UINT,WPARAM,LPARAM);
 static unsigned char sess[SS_SIZE],tv[TV_SIZE];
 static wchar_t pane[2][256];static int dirty[2],answer=IDCANCEL,checks,failed,prompts,closeMode,saveWorks;
 static void check(int ok,const char*n){checks++;printf("%s %s\n",ok?"PASS":"FAIL",n);if(!ok)failed++;}
@@ -63,6 +63,9 @@ int main(void){
  SetEvent(scan);check(fold_proc((HWND)999,BC_STOPPING,0,0)==1,"close waits for sync after scan finishes");SetEvent(sync);check(!fold_proc((HWND)999,BC_STOPPING,0,0),"close allowed only after both workers finish");CloseHandle(scan);CloseHandle(sync);
  memset(fold,0,sizeof fold);uint32_t plan[2]={5,0};unsigned char entry[64]={0};q(entry,0,(uintptr_t)L"must-not-create");q(fold,F_ENTS,(uintptr_t)entry);q(fold,F_PLAN,(uintptr_t)plan);q(fold,F_NPLAN,1);q(fold,F_PAUSED,1);q(fold,F_SYNCRUN,1);wcscpy((wchar_t*)(fold+F_ROOTA),L".");wcscpy((wchar_t*)(fold+F_ROOTB),L".");q(sess,SS_DATA,(uintptr_t)fold);
  HANDLE worker=CreateThread(NULL,0,sync_thread,fold,0,NULL);q(fold,F_SYNCTHR,(uintptr_t)worker);check(worker&&WaitForSingleObject(worker,120)==WAIT_TIMEOUT,"paused worker cooperatively waits");fold_proc((HWND)999,BC_STOPPING,0,0);check(WaitForSingleObject(worker,2000)==WAIT_OBJECT_0&&GetFileAttributesW(L"must-not-create")==INVALID_FILE_ATTRIBUTES,"cancel releases paused worker without executing operation");CloseHandle(worker);
+ unsigned char fm[FM_SIZE]={0};HANDLE fmscan=CreateEventW(NULL,TRUE,FALSE,NULL);q(fm,FM_THREAD,(uintptr_t)fmscan);q(sess,SS_DATA,(uintptr_t)fm);
+ check(fm_proc((HWND)999,BC_STOPPING,0,0)==1&&fm[FM_CANCEL]&&get(fm,FM_CLOSING),"folder merge close cancels scan and waits while worker is active");
+ SetEvent(fmscan);check(!fm_proc((HWND)999,BC_STOPPING,0,0),"folder merge close allowed after scan worker finishes");CloseHandle(fmscan);
  closeMode=2;dirty[0]=dirty[1]=0;g_nsess=1;g_sess[0]=sess;q(sess,SS_HVIEW,999);workerBusy=1;frame_proc((HWND)999,WM_CLOSE,0,0);check(!destroyCalls&&timerCalls==1,"frame defers destruction while worker is busy");workerBusy=0;frame_proc((HWND)999,WM_TIMER,91,0);check(destroyCalls==1,"frame timer closes after worker completion");
  printf("%d checks, %d failures\n",checks,failed);return failed?1:0;
 }
