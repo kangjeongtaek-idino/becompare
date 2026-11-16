@@ -34,7 +34,7 @@ extern props_register, props_create, edit_create
 extern fmerge_register, fmerge_create
 extern script_check, shell_early, shell_pending, shell_install
 extern temp_cleanup, mk_btn, icon_set
-extern settings_show, policy_load, keys_load, g_keytab, update_check, update_start, clip_compare, patch_open, patch_cmd
+extern settings_show, policy_load, keys_load, g_keytab, update_check, update_start, clip_compare, blank_compare, patch_open, patch_cmd
 
 global WinMain
 global add_session, sess_new, sess_open, set_tab_title, type_for_path, cur_view
@@ -96,6 +96,7 @@ WSTR m_cn, `취소\tEsc`
 WSTR m_sv, `저장\tCtrl+S`
 WSTR m_upd, "업데이트 확인..."
 WSTR m_clip, "클립보드와 텍스트 비교"
+WSTR m_blank, "빈 텍스트 비교 창"
 WSTR m_patch, "패치 파일(diff) 보기..."
 WSTR m_ab, "정보"
 WSTR s_about, `BeCompare\nx64 NASM / Win32 GUI\n\nPRD(파일·폴더 비교 도구 기능 정리)를 기반으로 한 구현입니다.`
@@ -344,6 +345,7 @@ build_menu:
     invoke AppendMenuW, rbx, MF_STRING, IDM_NEW_EDIT, &m_ned
     invoke AppendMenuW, rbx, MF_STRING, IDM_NEW_FMERGE, &m_nfm
     invoke AppendMenuW, rbx, MF_STRING, IDM_CLIP, &m_clip
+    invoke AppendMenuW, rbx, MF_STRING, IDM_BLANK, &m_blank
     invoke AppendMenuW, rbx, MF_STRING, IDM_PATCH, &m_patch
     invoke AppendMenuW, rbx, MF_SEPARATOR, 0, 0
     invoke AppendMenuW, rbx, MF_STRING, IDM_OPEN_SESS, &m_os
@@ -1911,6 +1913,8 @@ frame_proc:
     je .c_update
     cmp eax, IDM_CLIP
     je .c_clip
+    cmp eax, IDM_BLANK
+    je .c_blank
     cmp eax, IDM_PATCH
     je .c_patch
     cmp eax, IDM_ABOUT
@@ -1976,6 +1980,9 @@ frame_proc:
     jmp .ok0
 .c_clip:
     invoke clip_compare, rsi
+    jmp .ok0
+.c_blank:
+    invoke blank_compare, rsi
     jmp .ok0
 .c_patch:
     invoke patch_open, rsi
