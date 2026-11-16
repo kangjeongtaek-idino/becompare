@@ -5,7 +5,7 @@
 %include "inc/app.inc"
 %include "inc/export.inc"
 
-extern PostMessageW, wcsstr, ShowWindow, mk, write_utf8, browse_save_as
+extern PostMessageW, wcsstr, ShowWindow, mk, write_utf8, browse_save_as, input_box, wcstoul
 extern g_batch, g_xl_path, g_exitcode, g_hframe, batch_done
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetFocus, GetWindowTextW, SetWindowTextW
@@ -266,6 +266,7 @@ sum_len:
 %include "text_ui.inc"
 %include "text_xl.inc"
 %include "text_patch.inc"
+%include "text_goline.inc"
 %include "text_word.inc"
 %include "text_fold.inc"
 %include "text_uni.inc"
