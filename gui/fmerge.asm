@@ -20,6 +20,7 @@ extern set_tab_title, str_dup, fmt_size, vec_push, read_file_bytes, crc32_update
 extern sb_free, PostMessageW, g_batch, g_dx_path, g_exitcode, g_hframe, batch_done
 extern sess_new, sess_open, type_for_path, diff3_try_file
 extern icon_set, g_usel, g_user, g_base, g_del, g_edit, g_run
+extern us_push, us_pop, us_clear, us_free, s_un_done, s_un_redone, s_un_none, s_un_noredo, us_focus_edit
 
 global fmerge_register, fmerge_create
 
@@ -43,6 +44,7 @@ global fmerge_register, fmerge_create
 %define FM_EXCL    4680              ; wchar[256]
 %define FM_SCOL    5192              ; sort column (0..5)
 %define FM_SDESC   5196              ; 1 = descending
+%define FM_UST     5200              ; undo / redo steps (undo.asm): the manual actions of all entries
 %define FM_SIZE    5208
 
 ; FE (64 bytes)
@@ -260,6 +262,7 @@ fm_rawcmp:
 fm_clear:
     PROLOG 64
     mov rbx, rcx
+    invoke us_clear, &rbx+FM_UST, 2  ; the steps belong to the entries that go away
     xor esi, esi
 .l:
     cmp rsi, [rbx+FM_ENT+8]
@@ -1068,6 +1071,8 @@ fm_setact:
     invoke SendMessageW, [rbx+FM_HLIST], LVM_GETSELECTEDCOUNT, 0, 0
     test eax, eax
     jz .nosel
+    invoke us_clear, &rbx+FM_UST, 1  ; the actions before this choice become an undo step
+    invoke fm_us_snap, rbx, 0
     mov rdi, -1
 .n:
     invoke SendMessageW, [rbx+FM_HLIST], LVM_GETNEXTITEM, rdi, LVNI_SELECTED
@@ -1107,6 +1112,88 @@ fm_setact:
 .busy:
     invoke msgbox, rsi, &s_busy, MB_OK|MB_ICONWARNING
     EPILOG 64
+
+; ---------------------------------------------------------------- undo / redo (Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z)
+; What can be taken back is the choice of an action (A / B / base / delete) for the selected rows: a step
+; (undo.asm) holds the manual action of every entry, its tag is the number of entries. Files that "실행"
+; has written are not touched.
+
+; fm_us_snap(fm, which 0 undo / 1 redo): the manual actions of all entries as a step
+fm_us_snap:
+    PROLOG 96
+    mov rbx, rcx
+    mov r12d, edx
+    mov rsi, [rbx+FM_ENT+8]
+    lea rcx, [rsi*4+8]
+    call malloc
+    test rax, rax
+    jz .d
+    mov [rsp+64], rsi
+    mov [rsp+72], rax
+    lea rcx, [rsi*4]
+    mov [rsp+80], rcx
+    mov rdx, [rbx+FM_ENT]
+    xor ecx, ecx
+.l:
+    cmp rcx, rsi
+    jae .push
+    mov r8d, [rdx+FE_MAN]
+    mov [rax+rcx*4], r8d
+    add rdx, FE_BYTES
+    inc rcx
+    jmp .l
+.push:
+    invoke us_push, &rbx+FM_UST, r12, &rsp+64
+.d:
+    EPILOG 96
+
+; fm_undo(hwnd, fm, redo 0 / 1)
+fm_undo:
+    PROLOG 128
+    mov rsi, rcx
+    mov rbx, rdx
+    mov r12d, r8d
+    cmp qword [rbx+FM_RUNNING], 0
+    jne .d
+    invoke us_pop, &rbx+FM_UST, r12, &rsp+96
+    test eax, eax
+    jz .none
+    mov rax, [rsp+96]
+    cmp rax, [rbx+FM_ENT+8]          ; not the list it was taken from
+    jne .stale
+    mov edi, r12d
+    xor edi, 1
+    invoke fm_us_snap, rbx, rdi
+    mov rax, [rsp+104]
+    mov rdx, [rbx+FM_ENT]
+    xor ecx, ecx
+.l:
+    cmp rcx, [rsp+96]
+    jae .put
+    mov r8d, [rax+rcx*4]
+    mov [rdx+FE_MAN], r8d
+    add rdx, FE_BYTES
+    inc rcx
+    jmp .l
+.put:
+    invoke free, [rsp+104]
+    invoke fm_refresh, rsi, rbx
+    lea rcx, [s_un_done]
+    test r12d, r12d
+    jz .say
+    lea rcx, [s_un_redone]
+.say:
+    call set_status
+.d:
+    EPILOG 128
+.stale:
+    invoke free, [rsp+104]
+.none:
+    lea rcx, [s_un_none]
+    test r12d, r12d
+    jz .say
+    lea rcx, [s_un_noredo]
+    jmp .say
 
 ; fm_path(fm, e, side, out): full path of an entry on one side
 fm_path:
@@ -1572,6 +1659,10 @@ fm_proc:
     je .done
     cmp edi, BC_COLLECT
     je .collect
+    cmp edi, BC_UNDO
+    je .undo
+    cmp edi, BC_REDO
+    je .undo
     cmp edi, BC_THEME
     je .theme
     cmp edi, WM_CTLCOLOREDIT
@@ -1974,6 +2065,16 @@ fm_proc:
 .focus:
     invoke SetFocus, [r15+FM_HLIST]
     jmp .zero
+.undo:                               ; not in a path or filter box: those edit boxes undo by themselves
+    call us_focus_edit
+    test eax, eax
+    jnz .zero
+    xor r8d, r8d
+    cmp edi, BC_REDO
+    sete r8b
+    invoke fm_undo, rsi, r15, r8
+    mov eax, 1
+    EPILOG 320
 .stopping:
     mov qword [r15+FM_CLOSING], 1
     mov byte [r15+FM_CANCEL], 1
@@ -1994,6 +2095,7 @@ fm_proc:
     invoke CloseHandle, [r15+FM_THREAD]
 .nothr:
     invoke fm_clear, r15
+    invoke us_free, &r15+FM_UST
     invoke free, r15
     mov qword [r14+SS_DATA], 0
 .zero:

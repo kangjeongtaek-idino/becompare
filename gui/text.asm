@@ -6,6 +6,7 @@
 %include "inc/export.inc"
 
 extern PostMessageW, wcsstr, ShowWindow, mk, write_utf8, browse_save_as, input_box, wcstoul
+extern us_push, us_pop, us_clear, us_free, s_un_done, s_un_redone, s_un_none, s_un_noredo, us_focus_edit, us_same_text
 extern OpenClipboard, EmptyClipboard, SetClipboardData, CloseClipboard, GlobalAlloc, GlobalLock, GlobalUnlock
 extern g_batch, g_xl_path, g_exitcode, g_hframe, batch_done
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem
@@ -71,7 +72,9 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define TV_WS     3904          ; whitespace marks shown: option read at the last compare
 %define TV_CTX    3912          ; folding: rows kept next to a change (read at the last compare)
 %define TV_NONUM  3920          ; gutters without line numbers (option "line numbers" off)
-%define TV_SIZE   3928
+%define TV_UST    3928          ; undo / redo steps (undo.asm), the tag of a step is the side
+%define TV_USLD   3936          ; set by text_side when it read a file
+%define TV_SIZE   3944
 %define E_HR      40
 %define ID_ED_FIND   303
 %define ID_ED_NEXT   304
@@ -271,6 +274,7 @@ sum_len:
 %include "text_xl.inc"
 %include "text_patch.inc"
 %include "text_goline.inc"
+%include "text_undo.inc"
 %include "text_word.inc"
 %include "text_fold.inc"
 %include "text_uni.inc"

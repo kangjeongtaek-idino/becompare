@@ -432,7 +432,24 @@ text_side:
     mov r13, rax
     invoke strip_fillers, r13, [rsp+1140]
     mov r14, rax                     ; new length (free() would clobber rax)
+    cmp qword [r15], 0
+    je .same
+    invoke us_same_text, r13, r14, [r15], [r15+8]
+    test eax, eax
+    jnz .same
+.changed:                            ; edited since the last compare: the stored text becomes an undo step
+    mov [rsp+1152], r12
+    mov rax, [r15]
+    mov [rsp+1160], rax
+    mov rax, [r15+8]
+    lea rax, [rax*2+2]
+    mov [rsp+1168], rax
+    invoke us_clear, &rbx+TV_UST, 1
+    invoke us_push, &rbx+TV_UST, 0, &rsp+1152
+    jmp .store
+.same:
     invoke free, [r15]
+.store:
     mov [r15], r13
     mov [r15+8], r14
     mov eax, 1
@@ -448,6 +465,8 @@ text_side:
     invoke free, [r15]
     mov qword [r15], 0
 .fresh:
+    invoke us_clear, &rbx+TV_UST, 2  ; another file: the steps do not belong to it
+    mov qword [rbx+TV_USLD], 1
     mov dword [rbp], 0
     invoke text_load, &rsp+96, r15
     test eax, eax
@@ -1316,6 +1335,10 @@ tv_proc:
     je .b_prev
     cmp edi, BC_GOTOLINE
     je .m_goto
+    cmp edi, BC_UNDO
+    je .m_undo
+    cmp edi, BC_REDO
+    je .m_undo
     cmp edi, BC_COLLECT
     je .collect
     cmp edi, BC_ISDIRTY
@@ -1562,6 +1585,16 @@ tv_proc:
     invoke tv_gotoline, rsi, r15
     mov eax, 1
     EPILOG 320
+.m_undo:                             ; not in a path or the find box: those edit boxes undo by themselves
+    call us_focus_edit
+    test eax, eax
+    jnz .zero
+    xor r9d, r9d
+    cmp edi, BC_REDO
+    sete r9b
+    invoke tv_undo, rsi, r15, r14, r9
+    mov eax, 1
+    EPILOG 320
 .m_bm:
     invoke tv_bm_toggle, rsi, r15
     mov eax, 1
@@ -1709,6 +1742,7 @@ tv_proc:
     invoke free, [r15+TV_BUFB]
     invoke free, [r15+TV_TXA]
     invoke free, [r15+TV_TXB]
+    invoke us_free, &r15+TV_UST
     invoke free, r15
     mov qword [r14+SS_DATA], 0
 .zero:

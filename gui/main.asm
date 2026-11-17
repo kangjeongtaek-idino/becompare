@@ -444,6 +444,21 @@ pre_key:
     cmp ebp, 1
     je .gotoline
 .nog:
+    cmp edi, 'Z'                     ; Ctrl+Z: undo, Ctrl+Shift+Z / Ctrl+Y: redo (only when the view takes it)
+    jne .noz
+    mov r13d, BC_UNDO
+    cmp ebp, 1
+    je .markmsg
+    mov r13d, BC_REDO
+    cmp ebp, 3
+    je .markmsg
+.noz:
+    cmp edi, 'Y'
+    jne .noy
+    mov r13d, BC_REDO
+    cmp ebp, 1
+    je .markmsg
+.noy:
     cmp edi, VK_ESCAPE
     je .esc
     cmp edi, VK_RETURN
