@@ -20,7 +20,8 @@ extern set_tab_title, str_dup, fmt_size, vec_push, read_file_bytes, crc32_update
 extern sb_free, PostMessageW, g_batch, g_dx_path, g_exitcode, g_hframe, batch_done
 extern sess_new, sess_open, type_for_path, diff3_try_file
 extern icon_set, g_usel, g_user, g_base, g_del, g_edit, g_run
-extern us_push, us_pop, us_clear, us_free, s_un_done, s_un_redone, s_un_none, s_un_noredo, us_focus_edit
+extern us_push, us_pop, us_clear, us_free, s_un_done, s_un_redone, s_un_none, s_un_noredo, us_focus_edit, us_keep_journals
+extern fj_begin, fj_file, fj_dirs, fj_commit, fj_step
 
 global fmerge_register, fmerge_create
 
@@ -262,7 +263,7 @@ fm_rawcmp:
 fm_clear:
     PROLOG 64
     mov rbx, rcx
-    invoke us_clear, &rbx+FM_UST, 2  ; the steps belong to the entries that go away
+    invoke us_keep_journals, &rbx+FM_UST   ; the action steps belong to the entries that go away
     xor esi, esi
 .l:
     cmp rsi, [rbx+FM_ENT+8]
@@ -1115,8 +1116,8 @@ fm_setact:
 
 ; ---------------------------------------------------------------- undo / redo (Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z)
 ; What can be taken back is the choice of an action (A / B / base / delete) for the selected rows: a step
-; (undo.asm) holds the manual action of every entry, its tag is the number of entries. Files that "실행"
-; has written are not touched.
+; (undo.asm) holds the manual action of every entry, its tag is the number of entries. "실행" is a step too:
+; a journal (fjournal.asm) of the folders it made and the files it wrote or replaced in the output folder.
 
 ; fm_us_snap(fm, which 0 undo / 1 redo): the manual actions of all entries as a step
 fm_us_snap:
@@ -1159,6 +1160,13 @@ fm_undo:
     test eax, eax
     jz .none
     mov rax, [rsp+96]
+    cmp rax, -1                      ; a run ("실행"): the files it wrote
+    jne .acts
+    invoke fj_step, rsi, &rbx+FM_UST, &rsp+96, r12
+    test eax, eax
+    jz .d
+    jmp .said
+.acts:
     cmp rax, [rbx+FM_ENT+8]          ; not the list it was taken from
     jne .stale
     mov edi, r12d
@@ -1178,6 +1186,7 @@ fm_undo:
 .put:
     invoke free, [rsp+104]
     invoke fm_refresh, rsi, rbx
+.said:
     lea rcx, [s_un_done]
     test r12d, r12d
     jz .say
@@ -1318,6 +1327,9 @@ fm_run:
     xor r14d, r14d                    ; excluded
     xor r15d, r15d                    ; unresolved
     mov dword [rsp+4512], 0           ; copy failures
+    call fj_begin                     ; what is written from here on can be taken back (Ctrl+Z)
+    mov [rsp+4592], rax
+    invoke fj_dirs, [rsp+4592], &rbx+FM_OUT, 0
     invoke SHCreateDirectoryExW, 0, &rbx+FM_OUT, 0
     xor edi, edi
 .e:
@@ -1354,6 +1366,7 @@ fm_run:
     shl eax, cl
     test [rbp+FE_FLAGS], eax
     jz .file
+    invoke fj_dirs, [rsp+4592], &rsp+2300, 0
     invoke SHCreateDirectoryExW, 0, &rsp+2300, 0
     jmp .e
 .file:
@@ -1361,9 +1374,11 @@ fm_run:
     test rax, rax
     jz .cp
     mov word [rax], 0
+    invoke fj_dirs, [rsp+4592], &rsp+2300, 0
     invoke SHCreateDirectoryExW, 0, &rsp+2300, 0
     invoke _snwprintf, &rsp+2300, 1090, &f_full, &rbx+FM_OUT, [rbp+FE_NAME]
 .cp:
+    invoke fj_file, [rsp+4592], &rsp+2300
     invoke CopyFileW, &rsp+96, &rsp+2300, 0
     test eax, eax
     jnz .copied
@@ -1377,9 +1392,11 @@ fm_run:
     test rax, rax
     jz .am_go
     mov word [rax], 0
+    invoke fj_dirs, [rsp+4592], &rsp+2300, 0
     invoke SHCreateDirectoryExW, 0, &rsp+2300, 0
     invoke _snwprintf, &rsp+2300, 1090, &f_full, &rbx+FM_OUT, [rbp+FE_NAME]
 .am_go:
+    invoke fj_file, [rsp+4592], &rsp+2300
     invoke fm_exec_auto, rbx, rbp, &rsp+2300
     test eax, eax
     jz .am_fail
@@ -1427,6 +1444,7 @@ fm_run:
     inc r15d
     jmp .e
 .summary:
+    invoke fj_commit, &rbx+FM_UST, [rsp+4592]
     mov eax, [rsp+4512]
     mov [rsp+4572], eax
     invoke SetCursor, [rsp+4576]

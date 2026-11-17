@@ -833,6 +833,14 @@ static void folderChecks(void){
   check(GetFileAttributesW(L"fc\\a\\only_right.json")!=INVALID_FILE_ATTRIBUTES,"a new item on the right was copied to the left");
   check(GetFileAttributesW(L"fc\\b\\only_left.cs")==INVALID_FILE_ATTRIBUTES,"the item set to skip was not copied");
   check(holds(L"fc\\a\\diff.txt","right!\r\n"),"of two different files the newer one went over");
+  /* Ctrl+Z takes the sync back (the test answers its question with Yes), Ctrl+Y does it again */
+  expectBoxes=1;shownBoxes=0;SendMessageW(fv,WM_APP+36,0,0);Sleep(300);
+  check(shownBoxes==1,"undo asks before it changes files");
+  check(GetFileAttributesW(L"fc\\b\\\xBCF4\xACE0\xC11C.txt")==INVALID_FILE_ATTRIBUTES&&GetFileAttributesW(L"fc\\a\\only_right.json")==INVALID_FILE_ATTRIBUTES,"undo: the files the sync copied are gone again");
+  check(holds(L"fc\\a\\diff.txt","left\r\n"),"undo: the overwritten file has its old content back");
+  for(int i=0;i<60&&!holds(L"fc\\a\\diff.txt","right!\r\n");i++){SendMessageW(fv,WM_APP+37,0,0);Sleep(100);}   /* not while the list is read again */
+  check(holds(L"fc\\a\\diff.txt","right!\r\n")&&GetFileAttributesW(L"fc\\b\\\xBCF4\xACE0\xC11C.txt")!=INVALID_FILE_ATTRIBUTES&&GetFileAttributesW(L"fc\\a\\only_right.json")!=INVALID_FILE_ATTRIBUTES,"redo: the sync is done again");
+  expectBoxes=0;
   menuAnswer=0;}
 }
 /* ---- folder compare: the preview under the list */

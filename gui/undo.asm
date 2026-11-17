@@ -2,15 +2,16 @@
 ;
 ;   A view keeps one pointer (the "slot", 0 until the first step). It points to a block with two stacks,
 ;   0 = undo and 1 = redo, of up to US_MAX steps each. A step is three qwords:
-;       +0  tag    (meaning is up to the view: which side, how many entries, ...)
+;       +0  tag    (meaning is up to the view: which side, how many entries, ...); -1 marks a journal of
+;                  file operations (fjournal.asm): ptr is the journal and it is discarded, not freed
 ;       +8  ptr    malloc'd snapshot, owned by the stack while it is stored
 ;       +16 bytes  size of the snapshot (only used for the memory budget)
 ;   A full stack, or one that holds more than US_BUDGET bytes, drops its oldest steps.
 %include "inc/macros.inc"
 
-extern calloc, free, memmove, GetFocus, GetClassNameW, _wcsicmp
+extern calloc, free, memmove, GetFocus, GetClassNameW, _wcsicmp, fj_discard
 
-global us_push, us_pop, us_clear, us_free, us_count, us_focus_edit, us_same_text
+global us_push, us_pop, us_clear, us_free, us_count, us_focus_edit, us_same_text, us_keep_journals
 global s_un_done, s_un_redone, s_un_none, s_un_noredo
 
 section .rdata
@@ -28,11 +29,64 @@ WSTR s_un_edit, "Edit"
 
 section .text
 
+; us_free_step(rcx = tag, rdx = ptr): release what a step holds
+us_free_step:
+    sub rsp, 40
+    cmp rcx, -1
+    jne .mem
+    mov rcx, rdx
+    call fj_discard
+    jmp .e
+.mem:
+    mov rcx, rdx
+    call free
+.e:
+    add rsp, 40
+    ret
+
+; us_sift(r13 = address of the count, r14 = first step): keep the journal steps, forget the others
+us_sift:
+    push rsi
+    push rdi
+    sub rsp, 40
+    xor esi, esi
+    xor edi, edi
+.l:
+    cmp rsi, [r13]
+    jae .e
+    imul rax, rsi, US_ENT
+    add rax, r14
+    cmp qword [rax], -1
+    jne .drop
+    imul rdx, rdi, US_ENT
+    add rdx, r14
+    mov rcx, [rax]
+    mov [rdx], rcx
+    mov rcx, [rax+8]
+    mov [rdx+8], rcx
+    mov rcx, [rax+16]
+    mov [rdx+16], rcx
+    inc rdi
+    jmp .n
+.drop:
+    mov rcx, [rax+8]
+    call free
+.n:
+    inc rsi
+    jmp .l
+.e:
+    mov [r13], rdi
+    add rsp, 40
+    pop rdi
+    pop rsi
+    ret
+
 ; us_drop(r13 = address of the count, r14 = first step): forget the oldest step
 us_drop:
     sub rsp, 40
-    mov rcx, [r14+8]
-    call free
+    mov rcx, [r14]
+    mov rdx, [r14+8]
+    call us_free_step
     mov r8, [r13]
     dec r8
     mov [r13], r8
@@ -52,8 +106,9 @@ us_wipe:
     cmp rsi, [r13]
     jae .e
     imul rax, rsi, US_ENT
-    mov rcx, [r14+rax+8]
-    call free
+    mov rcx, [r14+rax]
+    mov rdx, [r14+rax+8]
+    call us_free_step
     inc rsi
     jmp .l
 .e:
@@ -208,7 +263,9 @@ us_push:
     mov eax, 1
     EPILOG 64
 .fail:
-    invoke free, [rsi+8]
+    mov rcx, [rsi]
+    mov rdx, [rsi+8]
+    call us_free_step
     xor eax, eax
     EPILOG 64
 
@@ -267,6 +324,22 @@ us_clear:
     lea r13, [rbx+8]
     lea r14, [rbx+16+US_STK]
     call us_wipe
+.d:
+    EPILOG 64
+
+; us_keep_journals(slot*): forget every step except the journals of file operations (the list the other
+;   steps belong to is going away, the files on disk are not)
+us_keep_journals:
+    PROLOG 64
+    mov rbx, [rcx]
+    test rbx, rbx
+    jz .d
+    mov r13, rbx
+    lea r14, [rbx+16]
+    call us_sift
+    lea r13, [rbx+8]
+    lea r14, [rbx+16+US_STK]
+    call us_sift
 .d:
     EPILOG 64
 
