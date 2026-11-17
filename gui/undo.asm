@@ -12,7 +12,7 @@
 extern calloc, free, memmove, GetFocus, GetClassNameW, _wcsicmp, fj_discard
 
 global us_push, us_pop, us_clear, us_free, us_count, us_focus_edit, us_same_text, us_keep_journals
-global s_un_done, s_un_redone, s_un_none, s_un_noredo
+global s_un_done, s_un_redone, s_un_none, s_un_noredo, s_b_undo, s_b_redo
 
 section .rdata
 WSTR s_un_done, "되돌렸습니다."
@@ -20,6 +20,8 @@ WSTR s_un_redone, "다시 실행했습니다."
 WSTR s_un_none, "되돌릴 내용이 없습니다."
 WSTR s_un_noredo, "다시 실행할 내용이 없습니다."
 WSTR s_un_edit, "Edit"
+WSTR s_b_undo, "되돌리기 (Ctrl+Z)"
+WSTR s_b_redo, "다시 실행 (Ctrl+Y)"
 
 %define US_MAX    64
 %define US_ENT    24

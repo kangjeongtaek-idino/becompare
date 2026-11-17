@@ -2516,6 +2516,9 @@ fold_layout:
     PLACE ID_BTN_SYNC, 40
     PLACE ID_BTN_PAUSE, 40
     SEP
+    PLACE ID_BTN_UNDO, 40
+    PLACE ID_BTN_REDO, 40
+    SEP
     PLACE ID_BTN_REPORT, 96
     PLACE ID_BTN_SNAP, 40
     SEP
@@ -2825,6 +2828,10 @@ fold_proc:
     invoke icon_set, rsi, ID_BTN_DEL, &g_del, &s_b_del
     invoke icon_set, rsi, ID_BTN_SYNC, &g_sync, &s_b_sync
     invoke icon_set, rsi, ID_BTN_PAUSE, &g_pause, &s_b_pause
+    invoke mk_btn, rsi, &s_b_undo, ID_BTN_UNDO
+    invoke mk_btn, rsi, &s_b_redo, ID_BTN_REDO
+    invoke icon_set, rsi, ID_BTN_UNDO, &g_undo, &s_b_undo
+    invoke icon_set, rsi, ID_BTN_REDO, &g_redo, &s_b_redo
     invoke icon_set, rsi, ID_BTN_SNAP, &g_snap, &s_b_snap
     invoke icon_set, rsi, ID_BTN_EXPAND, &g_expand, &s_b_expand
     invoke icon_set, rsi, ID_BTN_COLLAP, &g_collapse, &s_b_collap
@@ -2973,6 +2980,10 @@ fold_proc:
     je .b_del
     cmp ebx, ID_BTN_SYNC
     je .b_sync
+    cmp ebx, ID_BTN_UNDO
+    je .btn_undo
+    cmp ebx, ID_BTN_REDO
+    je .btn_redo
     cmp ebx, ID_BTN_REPORT
     je .b_rep
     cmp ebx, ID_BTN_SNAP
@@ -3160,6 +3171,12 @@ fold_proc:
 .isdirty:
     invoke fold_pv_dirty, r15
     EPILOG 320
+.btn_undo:                           ; the toolbar buttons do what Ctrl+Z / Ctrl+Y do
+    invoke SendMessageW, rsi, BC_UNDO, 0, 0
+    jmp .zero
+.btn_redo:
+    invoke SendMessageW, rsi, BC_REDO, 0, 0
+    jmp .zero
 .undo:                               ; not in a path or filter box: those edit boxes undo by themselves
     call us_focus_edit
     test eax, eax

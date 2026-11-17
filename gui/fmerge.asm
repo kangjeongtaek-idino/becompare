@@ -20,7 +20,7 @@ extern set_tab_title, str_dup, fmt_size, vec_push, read_file_bytes, crc32_update
 extern sb_free, PostMessageW, g_batch, g_dx_path, g_exitcode, g_hframe, batch_done
 extern sess_new, sess_open, type_for_path, diff3_try_file
 extern icon_set, g_usel, g_user, g_base, g_del, g_edit, g_run
-extern us_push, us_pop, us_clear, us_free, s_un_done, s_un_redone, s_un_none, s_un_noredo, us_focus_edit, us_keep_journals
+extern us_push, us_pop, us_clear, us_free, s_un_done, s_un_redone, s_un_none, s_un_noredo, us_focus_edit, us_keep_journals, s_b_undo, s_b_redo, g_undo, g_redo
 extern fj_begin, fj_file, fj_dirs, fj_commit, fj_step
 
 global fmerge_register, fmerge_create
@@ -81,6 +81,8 @@ global fmerge_register, fmerge_create
 %define ID_BTN_TD 714
 %define ID_BTN_OPENM 715
 %define ID_BTN_DOC 716
+%define ID_BTN_UNDO 717
+%define ID_BTN_REDO 718
 %define ID_LBL_BASE 651
 %define ID_LBL_OUT  652
 
@@ -1550,6 +1552,8 @@ fm_layout:
     PLACE ID_BTN_TB, 56
     PLACE ID_BTN_TC, 40
     PLACE ID_BTN_TD, 40
+    PLACE ID_BTN_UNDO, 40
+    PLACE ID_BTN_REDO, 40
     PLACE ID_BTN_OPENM, 40
     PLACE ID_BTN_RUNM, 40
     PLACE ID_BTN_DOC, 90
@@ -1725,6 +1729,10 @@ fm_proc:
     invoke icon_set, rsi, ID_BTN_TB, &g_user, &s_b_tb
     invoke icon_set, rsi, ID_BTN_TC, &g_base, &s_b_tc
     invoke icon_set, rsi, ID_BTN_TD, &g_del, &s_b_td
+    invoke mk_btn, rsi, &s_b_undo, ID_BTN_UNDO
+    invoke mk_btn, rsi, &s_b_redo, ID_BTN_REDO
+    invoke icon_set, rsi, ID_BTN_UNDO, &g_undo, &s_b_undo
+    invoke icon_set, rsi, ID_BTN_REDO, &g_redo, &s_b_redo
     invoke icon_set, rsi, ID_BTN_OPENM, &g_edit, &s_b_openm
     invoke icon_set, rsi, ID_BTN_RUNM, &g_run, &s_b_runm
     xor r9d, r9d
@@ -1903,6 +1911,10 @@ fm_proc:
     je .tc
     cmp ebx, ID_BTN_TD
     je .td
+    cmp ebx, ID_BTN_UNDO
+    je .btn_undo
+    cmp ebx, ID_BTN_REDO
+    je .btn_redo
     cmp ebx, ID_BTN_OPENM
     je .openm
     cmp ebx, ID_BTN_RUNM
@@ -2082,6 +2094,12 @@ fm_proc:
     EPILOG 320
 .focus:
     invoke SetFocus, [r15+FM_HLIST]
+    jmp .zero
+.btn_undo:                           ; the toolbar buttons do what Ctrl+Z / Ctrl+Y do
+    invoke SendMessageW, rsi, BC_UNDO, 0, 0
+    jmp .zero
+.btn_redo:
+    invoke SendMessageW, rsi, BC_REDO, 0, 0
     jmp .zero
 .undo:                               ; not in a path or filter box: those edit boxes undo by themselves
     call us_focus_edit

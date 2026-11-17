@@ -12,7 +12,7 @@ extern th_bg, th_fg, th_panel, th_bgbrush, th_panelbrush
 global mk_icon, tip_add, glyph_swap, icon_set, tips_apply
 global g_base, g_edit, g_run
 global g_rot, g_flh, g_flv, g_zout, g_zin, g_fit, g_usel, g_user, g_both, g_save
-global g_copyr, g_copyl, g_mover, g_movel, g_del, g_sync, g_pause, g_report, g_snap, g_expand, g_collapse, g_prev, g_next
+global g_copyr, g_copyl, g_mover, g_movel, g_del, g_sync, g_pause, g_report, g_snap, g_expand, g_collapse, g_prev, g_next, g_undo, g_redo
 extern GetDlgItem, SetWindowTextW
 global ctl_color, mk_btn, mk_chk, mk_lbl, mk_edit, get_chk
 global pb_create, pb_layout, pb_load, pb_collect, pb_command
@@ -473,6 +473,8 @@ g_base:     dw 0xE81C, 0
 g_edit:     dw 0xE70F, 0
 g_run:      dw 0xE768, 0
 g_next:     dw 0xE70D, 0
+g_undo:     dw 0xE7A7, 0
+g_redo:     dw 0xE7A6, 0
 section .text
 
 ; icon_set(parent, id, glyph, tooltip): turn an existing button into a glyph button with a tooltip

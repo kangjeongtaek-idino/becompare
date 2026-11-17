@@ -22,7 +22,7 @@ extern text_load, text_load_raw, text_save, lines_split, compare_lines, hunk_fre
 extern sb_init, sb_append, sb_free, vec_push
 extern set_tab_title
 extern browse_open, browse_save
-extern us_push, us_pop, us_clear, us_free, s_un_done, s_un_redone, s_un_none, s_un_noredo, us_focus_edit
+extern us_push, us_pop, us_clear, us_free, s_un_done, s_un_redone, s_un_none, s_un_noredo, us_focus_edit, s_b_undo, s_b_redo, g_undo, g_redo
 
 global merge_register, merge_create, diff3_try_file
 
@@ -69,6 +69,8 @@ global merge_register, merge_create, diff3_try_file
 %define ID_BTN_ALN  653
 %define ID_BTN_ALC  654
 %define ID_BTN_DOC  655
+%define ID_BTN_UNDO 656
+%define ID_BTN_REDO 657
 %define ID_MG_CASE  661
 %define ID_MG_SPC   662
 %define ID_MG_TRIM  663

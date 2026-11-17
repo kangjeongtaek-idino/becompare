@@ -6,7 +6,7 @@
 %include "inc/export.inc"
 
 extern PostMessageW, wcsstr, ShowWindow, mk, write_utf8, browse_save_as, input_box, wcstoul
-extern us_push, us_pop, us_clear, us_free, s_un_done, s_un_redone, s_un_none, s_un_noredo, us_focus_edit, us_same_text
+extern us_push, us_pop, us_clear, us_free, s_un_done, s_un_redone, s_un_none, s_un_noredo, us_focus_edit, us_same_text, s_b_undo, s_b_redo, g_undo, g_redo
 extern OpenClipboard, EmptyClipboard, SetClipboardData, CloseClipboard, GlobalAlloc, GlobalLock, GlobalUnlock
 extern g_batch, g_xl_path, g_exitcode, g_hframe, batch_done
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem
@@ -121,6 +121,8 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define ID_LBL_INFO 250
 %define ID_BTN_PATCH 252
 %define ID_BTN_PCLIP 253
+%define ID_BTN_UNDO  254
+%define ID_BTN_REDO  255
 %define FILLER      0x200B
 
 section .rdata

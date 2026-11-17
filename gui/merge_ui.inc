@@ -519,6 +519,8 @@ mg_layout:
     PLACE ID_BTN_USEL, 56
     PLACE ID_BTN_USER, 56
     PLACE ID_BTN_BOTH, 40
+    PLACE ID_BTN_UNDO, 40
+    PLACE ID_BTN_REDO, 40
     PLACE ID_BTN_ALN, 80
     PLACE ID_BTN_ALC, 80
     PLACE ID_BTN_ALLL, 110
@@ -690,6 +692,10 @@ mg_proc:
     invoke icon_set, rsi, ID_BTN_USEL, &g_usel, &s_b_usel
     invoke icon_set, rsi, ID_BTN_USER, &g_user, &s_b_user
     invoke icon_set, rsi, ID_BTN_BOTH, &g_both, &s_b_both
+    invoke mk_btn, rsi, &s_b_undo, ID_BTN_UNDO
+    invoke mk_btn, rsi, &s_b_redo, ID_BTN_REDO
+    invoke icon_set, rsi, ID_BTN_UNDO, &g_undo, &s_b_undo
+    invoke icon_set, rsi, ID_BTN_REDO, &g_redo, &s_b_redo
     invoke icon_set, rsi, ID_BTN_SAVE, &g_save, &s_b_save
     invoke mk_chk, rsi, &s_mg_case, ID_MG_CASE, 0
     invoke mk_chk, rsi, &s_mg_spc, ID_MG_SPC, 0
@@ -805,6 +811,10 @@ mg_proc:
     je .b_r
     cmp ebx, ID_BTN_BOTH
     je .b_b
+    cmp ebx, ID_BTN_UNDO
+    je .btn_undo
+    cmp ebx, ID_BTN_REDO
+    je .btn_redo
     cmp ebx, ID_BTN_ALLL
     je .b_al
     cmp ebx, ID_BTN_ALLR
@@ -941,6 +951,12 @@ mg_proc:
 .isdirty:
     invoke SendMessageW, [r15+MG_HM], EM_GETMODIFY, 0, 0
     EPILOG 320
+.btn_undo:                           ; the toolbar buttons do what Ctrl+Z / Ctrl+Y do
+    invoke SendMessageW, rsi, BC_UNDO, 0, 0
+    jmp .zero
+.btn_redo:
+    invoke SendMessageW, rsi, BC_REDO, 0, 0
+    jmp .zero
 .undo:                               ; not in a path box: those edit boxes undo by themselves
     call us_focus_edit
     test eax, eax

@@ -1125,6 +1125,8 @@ tv_layout:
     PLACE ID_BTN_NEXT, 40
     PLACE ID_BTN_CLR, 56
     PLACE ID_BTN_CRL, 56
+    PLACE ID_BTN_UNDO, 40
+    PLACE ID_BTN_REDO, 40
     PLACE ID_BTN_SVL, 90
     PLACE ID_BTN_SVR, 100
     PLACE ID_BTN_ALN, 100
@@ -1394,6 +1396,10 @@ tv_proc:
     invoke icon_set, rsi, ID_BTN_NEXT, &g_next, &s_b_next
     invoke icon_set, rsi, ID_BTN_CLR, &g_copyr, &s_b_clr
     invoke icon_set, rsi, ID_BTN_CRL, &g_copyl, &s_b_crl
+    invoke mk_btn, rsi, &s_b_undo, ID_BTN_UNDO
+    invoke mk_btn, rsi, &s_b_redo, ID_BTN_REDO
+    invoke icon_set, rsi, ID_BTN_UNDO, &g_undo, &s_b_undo
+    invoke icon_set, rsi, ID_BTN_REDO, &g_redo, &s_b_redo
     invoke mk_chk, rsi, &s_c_case, ID_CHK_CASE, 0
     invoke mk_chk, rsi, &s_c_spc, ID_CHK_SPC, 0
     invoke mk_chk, rsi, &s_c_trim, ID_CHK_TRIM, 0
@@ -1536,6 +1542,10 @@ tv_proc:
     je .b_patch
     cmp ebx, ID_BTN_PCLIP
     je .b_pclip
+    cmp ebx, ID_BTN_UNDO
+    je .btn_undo
+    cmp ebx, ID_BTN_REDO
+    je .btn_redo
     cmp ebx, ID_CHK_SYN
     je .b_syn
     cmp ebx, ID_ED_NEXT
@@ -1651,6 +1661,12 @@ tv_proc:
     jmp .zero
 .b_pclip:
     invoke text_patch_clip, rsi, r15
+    jmp .zero
+.btn_undo:                           ; the toolbar buttons do what Ctrl+Z / Ctrl+Y do
+    invoke SendMessageW, rsi, BC_UNDO, 0, 0
+    jmp .zero
+.btn_redo:
+    invoke SendMessageW, rsi, BC_REDO, 0, 0
     jmp .zero
 .rich:
     cmp ebp, 0x0100                  ; EN_SETFOCUS / EN_KILLFOCUS: the caret row mark moves to the other gutter
