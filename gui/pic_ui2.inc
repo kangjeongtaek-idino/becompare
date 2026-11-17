@@ -207,7 +207,7 @@ pv_layout:
     PLACE ID_BTN_ZOUT, 40
     PLACE ID_BTN_ZIN, 40
     PLACE ID_BTN_FIT, 40
-    PLACE ID_BTN_DOC, 96
+    PLACE ID_BTN_DOC, 90
     ; the combo box owns its drop-down height
     mov ecx, 190
     call scl

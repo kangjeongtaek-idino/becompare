@@ -664,7 +664,7 @@ hx_layout:
     PLACE ID_CHK_ONLY, 130
     PLACE ID_BTN_SVA, 90
     PLACE ID_BTN_SVB, 100
-    PLACE ID_BTN_XLS, 96
+    PLACE ID_BTN_XLS, 90
     lea r13d, [r13+r15]
     add r13d, r14d
     mov r12d, r14d

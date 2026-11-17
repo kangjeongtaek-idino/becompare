@@ -99,7 +99,7 @@ WSTR m_clip, "클립보드와 텍스트 비교"
 WSTR m_blank, "빈 텍스트 비교 창"
 WSTR m_patch, "패치 파일(diff) 보기..."
 WSTR m_ab, "정보"
-WSTR s_about, `BeCompare\nx64 NASM / Win32 GUI\n\nPRD(파일·폴더 비교 도구 기능 정리)를 기반으로 한 구현입니다.`
+WSTR s_about, `BeCompare\nx64 NASM / Win32 GUI\n\n폴더·파일·텍스트·표·16진·이미지 비교 및 3-way 병합,\n초고속 파일 검색, Excel/Word/HTML 내보내기를 지원하는\n고성능 비교 및 병합 도구입니다.\n\nMade by Charles  AI supported`
 
 WSTR tt_home, "홈"
 WSTR tt_folder, "폴더 비교"

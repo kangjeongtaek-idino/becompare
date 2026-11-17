@@ -1409,7 +1409,7 @@ tb_layout:
     PLACE ID_CHK_TRIM, 120
     PLACE ID_CHK_DIFF, 100
     PLACE ID_CHK_SORT, 90
-    PLACE ID_BTN_XLS, 96
+    PLACE ID_BTN_XLS, 90
     lea r13d, [r13+r15]
     add r13d, r14d
     mov r12d, r14d

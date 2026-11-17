@@ -1556,7 +1556,7 @@ fm_layout:
     PLACE ID_BTN_REDO, 40
     PLACE ID_BTN_OPENM, 40
     PLACE ID_BTN_RUNM, 40
-    PLACE ID_BTN_DOC, 96
+    PLACE ID_BTN_DOC, 90
     ; row 4
     lea r13d, [r13+r15]
     add r13d, r14d
