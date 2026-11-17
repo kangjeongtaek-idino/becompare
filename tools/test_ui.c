@@ -64,6 +64,12 @@ extern uint32_t th_lonly, th_ronly, th_conf;
 #define ID_FIND_RESET 3020
 #define ID_FIND_CLR 3021
 #define ID_FIND_PBROWSE 3022
+#define ID_FIND_SELALL 3023
+#define ID_FIND_COPY 3024
+#define ID_FIND_SHARE 3025
+#define ID_FIND_EMAIL 3026
+#define ID_FIND_DEL 3027
+#define ID_FIND_PROPS 3028
 #define IDM_LIGHT 1030
 #define IDM_DARK 1031
 
@@ -571,7 +577,18 @@ static void findChecks(void){
  selectRow(list,0);shCalls=0;doubleClick(home,0);
  check(shCalls==1&&!wcscmp(shVerb,L"open")&&!_wcsicmp(shFile,want)&&!shArgs[0],"double click opens the file with its registered program");
  menuAnswer=0;menuShown=0;shCalls=0;SendMessageW(home,WM_CONTEXTMENU,(WPARAM)list,(LPARAM)-1);
- check(menuShown==6&&shCalls==0,"the menu has five actions and a separator; leaving it does nothing");
+ check(menuShown==13&&shCalls==0,"the menu has ten actions and three separators; leaving it does nothing");
+ {HWND bSelAll=GetDlgItem(home,ID_FIND_SELALL),bCopy=GetDlgItem(home,ID_FIND_COPY),bShare=GetDlgItem(home,ID_FIND_SHARE),bEmail=GetDlgItem(home,ID_FIND_EMAIL),bDel=GetDlgItem(home,ID_FIND_DEL),bProps=GetDlgItem(home,ID_FIND_PROPS);
+  check(bSelAll&&bCopy&&bShare&&bEmail&&bDel&&bProps,"action buttons (select all, copy, share, email, del, props) exist");
+  check(shown(bSelAll)&&shown(bCopy)&&shown(bDel)&&shown(bProps),"action buttons are shown with search results");
+  SendMessageW(bSelAll,BM_CLICK,0,0);
+  GetWindowTextW(GetDlgItem(home,ID_RLABEL),label,200);
+  check(wcsstr(label,L"\xC120\xD0DD\xB428")!=NULL,"select all checks items and updates count label");
+  clipText[0]=0;SendMessageW(bCopy,BM_CLICK,0,0);
+  check(wcsstr(clipText,L"other.bin")!=NULL,"copy copies checked items to clipboard");
+  SendMessageW(bSelAll,BM_CLICK,0,0);
+  GetWindowTextW(GetDlgItem(home,ID_RLABEL),label,200);
+  check(wcsstr(label,L"\xC120\xD0DD\xB428")==NULL,"select all again unchecks items");}
  menuAnswer=2;shCalls=0;SendMessageW(home,WM_CONTEXTMENU,(WPARAM)list,(LPARAM)-1);
  check(shCalls==1&&!wcscmp(shVerb,L"openas")&&!_wcsicmp(shFile,want),"menu: choose the program");
  menuAnswer=3;shCalls=0;SendMessageW(home,WM_CONTEXTMENU,(WPARAM)list,(LPARAM)-1);
@@ -802,9 +819,10 @@ static void folderChecks(void){
  for(int i=0;i<60&&!waitRows(7);i++);
  /* status filters */
  check(frows()==7,"seven rows");
- toggle(FID_SAME);
+ toggle(FID_SAME);for(int i=0;i<60&&frows()!=4;i++)Sleep(50);
  check(frows()==4&&rowNamed(L"same.txt")<0&&rowNamed(L"sub")<0,"same off: the identical files and the folder of them go");
- toggle(FID_SAME);check(frows()==7,"same on");
+ toggle(FID_SAME);for(int i=0;i<60&&frows()!=7;i++)Sleep(50);
+ check(frows()==7,"same on");
  toggle(FID_LONLY);check(rowNamed(L"only_left.cs")<0&&rowNamed(L"only_right.json")>=0,"left only off");
  toggle(FID_LONLY);
  /* the name filter */

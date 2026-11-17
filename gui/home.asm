@@ -23,8 +23,10 @@ extern lv_dark_header, fmt_size, FileTimeToLocalFileTime, FileTimeToSystemTime, 
 extern browse_folder, GetWindowTextLengthW, SetWindowPos
 extern ShellExecuteW, CreatePopupMenu, AppendMenuW, TrackPopupMenu, DestroyMenu, ScreenToClient, GetWindowRect
 extern OpenClipboard, EmptyClipboard, SetClipboardData, CloseClipboard, GlobalAlloc, GlobalLock, GlobalUnlock
-extern memcpy, wcslen, CharLowerBuffW, set_status
+extern memcpy, memset, wcslen, CharLowerBuffW, set_status
 extern type_for_path, add_session, GetFileAttributesW
+extern SHFileOperationW, SHObjectProperties, free, LoadLibraryW, GetProcAddress, FreeLibrary, GetAsyncKeyState
+extern ImageList_Create, ImageList_AddMasked, GetDC, ReleaseDC, CreateCompatibleDC, CreateCompatibleBitmap, DeleteDC, DrawFrameControl, FindWindowW, SetForegroundWindow
 
 global home_register, home_create, ini_path_init, settings_load, recent_add, g_ini
 
@@ -46,6 +48,12 @@ global home_register, home_create, ini_path_init, settings_load, recent_add, g_i
 %define ID_FIND_RESET 3020
 %define ID_FIND_CLR   3021
 %define ID_FIND_PBROWSE 3022
+%define ID_FIND_SELALL  3023
+%define ID_FIND_COPY    3024
+%define ID_FIND_SHARE   3025
+%define ID_FIND_EMAIL   3026
+%define ID_FIND_DEL     3027
+%define ID_FIND_PROPS   3028
 %define FIND_TIMER2  78                 ; search a moment after the last key
 %define HF_CAP       4000000            ; results kept (and sorted) at most
 %define HF_DIRSORT   50000              ; sorting by folder builds two paths per comparison
@@ -54,6 +62,11 @@ global home_register, home_create, ini_path_init, settings_load, recent_add, g_i
 %define FA_SHOW   3
 %define FA_BC     4
 %define FA_COPY   5
+%define FA_SHARE  6
+%define FA_EMAIL  7
+%define FA_DEL    8
+%define FA_SELALL 9
+%define FA_PROPS  10
 %define FIND_TIMER   77
 %define BS_OWNERDRAW 0x000B
 %define MAX_RECENT 10
@@ -137,6 +150,46 @@ WSTR s_explorer, "explorer.exe"
 WSTR f_select, `/select,"%s"`
 WSTR s_copied, "경로를 클립보드에 복사했습니다."
 WSTR s_noapp, "이 파일을 열 프로그램을 찾지 못했습니다."
+WSTR s_find_selall, "전체 선택"
+WSTR s_find_copy,   "복사"
+WSTR s_find_share,  "공유"
+WSTR s_find_email,  "이메일"
+WSTR s_find_del,    "삭제"
+WSTR s_find_props,  "속성"
+WSTR s_tip_find_selall, "모든 검색 결과 항목의 체크를 켜거나 끕니다 (Ctrl+A)"
+WSTR s_tip_find_copy,   "선택한 항목을 파일 및 경로로 클립보드에 복사합니다 (Ctrl+C)"
+WSTR s_tip_find_share,  "선택한 항목을 SNS(카카오톡, 문자 등)로 공유·전송합니다"
+WSTR s_tip_find_email,  "선택한 파일을 전자 메일에 첨부하여 보냅니다"
+WSTR s_tip_find_del,    "선택한 항목을 휴지통으로 이동합니다 (Del)"
+WSTR s_tip_find_props,  "선택한 파일·폴더의 등록정보 속성 창을 엽니다 (Alt+Enter)"
+WSTR s_fm_share,    "공유 (카카오톡·문자)…"
+WSTR s_fm_email,    "이메일로 보내기…"
+WSTR s_fm_del,      "삭제 (휴지통으로)"
+WSTR s_fm_props,    "속성(&R)"
+WSTR s_fm_selall,   "모두 선택 / 해제"
+WSTR s_sm_kakao,    "💬 카카오톡으로 전송"
+WSTR s_sm_sms,      "📱 문자(메시지)로 전송"
+WSTR s_sm_clip,     "📋 메신저 대화창 붙여넣기 복사 (Ctrl+V)"
+WSTR s_sm_nearby,   "🌐 Windows 주변 기기 공유"
+WSTR s_status_copied, "%u개 항목을 클립보드에 복사했습니다."
+WSTR s_status_deleted, "%u개 항목을 휴지통으로 이동했습니다."
+WSTR s_status_email, "이메일 프로그램을 열었습니다. 본문에 Ctrl+V로 파일을 첨부하세요."
+WSTR s_status_props, "파일 속성 창을 열었습니다."
+WSTR s_status_kakao, "파일을 복사했습니다. 카카오톡 대화창에서 Ctrl+V로 전송하세요."
+WSTR s_status_sms,   "문자(메시지) 앱을 열었습니다. 대화창에서 Ctrl+V로 전송하세요."
+WSTR s_status_sns_clip, "SNS·메신저(카카오톡, 문자 등)에 붙여넣기(Ctrl+V)할 수 있도록 복사했습니다."
+WSTR s_status_share, "공유 메뉴를 열었습니다."
+WSTR s_status_none,  "선택된 항목이 없습니다."
+WSTR s_kakao_exe,   `C:\Program Files (x86)\Kakao\KakaoTalk\KakaoTalk.exe`
+WSTR s_kakao_wnd,   "EVA_Window_DClose"
+WSTR s_kakao_title, "카카오톡"
+WSTR s_proto_sms,   "ms-phone:"
+WSTR s_proto_share, "ms-crossdevice-share:"
+WSTR s_mapi32,       "mapi32.dll"
+s_mapisendmailw:    db "MAPISendMailW", 0
+WSTR s_mail_sub,     "BeCompare 파일 공유"
+WSTR f_mailto,       "mailto:?subject=BeCompare%20File%20Share"
+WSTR f_find_ready_chk, "파일 찾기 결과 %u개 (%u개 선택됨) · 색인 %llu개"
 %macro EXTS 1-*
   %rep %0
     dw __utf16__(%1), 0
@@ -243,7 +296,10 @@ alignb 8
 g_ini: resw 520
 alignb 8
 hf_ids:  resq 1                     ; ids of the search results, in the order shown
+hf_chk:  resq 1                     ; checked state (1 byte per item in hf_ids)
+hf_chk_cnt: resq 1                  ; count of checked items
 hf_n:    resq 1
+hf_state_il: resq 1                  ; state image list for checkboxes
 hf_key:  resq 1                     ; sort column: 0 name, 1 date, 2 type, 3 size, 4 folder
 hf_desc: resq 1
 hf_init: resq 1
@@ -648,15 +704,50 @@ home_layout:
     call scl
     add ebp, eax                     ; rlabel_y
 
+    ; Lay out action buttons for find results on the right of rlabel_y:
+    mov eax, r12d
+    add eax, [rsp+128]
+    mov [rsp+232], rax               ; current right edge
+    mov ecx, 26
+    call scl
+    mov [rsp+240], rax               ; button height = scl(26)
+    mov ecx, 6
+    call scl
+    mov [rsp+192], rax               ; gap = scl(6)
+
+%macro FBTN 2
+    mov ecx, %2
+    call scl
+    mov rdi, rax                     ; btn width
+    mov rax, [rsp+232]
+    sub rax, rdi
+    mov [rsp+232], rax               ; new x
+    invoke GetDlgItem, rsi, %1
+    mov [rsp+248], rax
+    invoke MoveWindow, [rsp+248], [rsp+232], rbp, rdi, [rsp+240], 1
+    mov rax, [rsp+192]
+    sub [rsp+232], rax               ; subtract gap for next button
+%endmacro
+
+    FBTN ID_FIND_PROPS, 64
+    FBTN ID_FIND_DEL, 64
+    FBTN ID_FIND_EMAIL, 68
+    FBTN ID_FIND_SHARE, 64
+    FBTN ID_FIND_COPY, 64
+    FBTN ID_FIND_SELALL, 80
+
     ; RLABEL
     invoke GetDlgItem, rsi, ID_RLABEL
     mov [rsp+112], rax
     mov ecx, 24
     call scl
     mov [rsp+116], eax               ; rlabel height
-    mov ecx, 560
-    call scl
-    mov edi, eax                     ; rlabel width (it also shows the search result counts)
+    mov rdi, [rsp+232]
+    sub edi, r12d                    ; rlabel width
+    cmp edi, 150
+    jge .lbl_w_ok
+    mov edi, 150
+.lbl_w_ok:
     movsxd rbp, ebp
     invoke MoveWindow, [rsp+112], r12, rbp, rdi, [rsp+116], 1
 
@@ -796,6 +887,18 @@ home_proc:
     invoke tip_add, rax, &s_tip_find_reset
     invoke mk, rsi, &cn_button, &s_find_btn, WS_TABSTOP, ID_FIND_BTN
     invoke tip_add, rax, &s_tip_find_btn
+    invoke mk, rsi, &cn_button, &s_find_selall, WS_TABSTOP, ID_FIND_SELALL
+    invoke tip_add, rax, &s_tip_find_selall
+    invoke mk, rsi, &cn_button, &s_find_copy, WS_TABSTOP, ID_FIND_COPY
+    invoke tip_add, rax, &s_tip_find_copy
+    invoke mk, rsi, &cn_button, &s_find_share, WS_TABSTOP, ID_FIND_SHARE
+    invoke tip_add, rax, &s_tip_find_share
+    invoke mk, rsi, &cn_button, &s_find_email, WS_TABSTOP, ID_FIND_EMAIL
+    invoke tip_add, rax, &s_tip_find_email
+    invoke mk, rsi, &cn_button, &s_find_del, WS_TABSTOP, ID_FIND_DEL
+    invoke tip_add, rax, &s_tip_find_del
+    invoke mk, rsi, &cn_button, &s_find_props, WS_TABSTOP, ID_FIND_PROPS
+    invoke tip_add, rax, &s_tip_find_props
     ; filters: kind, extensions, folder path
     invoke mk, rsi, &cn_combo, &s_empty, 3|WS_VSCROLL|WS_TABSTOP, ID_FIND_KIND      ; CBS_DROPDOWNLIST
     mov rbx, rax
@@ -832,11 +935,12 @@ home_proc:
     invoke SendMessageW, rbx, 0x014E, 0, 0
     invoke tip_add, rbx, &s_tip_find_cloud
     ; results: a details list like Explorer's; a click on a column header sorts by it
-    invoke mk, rsi, &cn_lview, 0, LVS_REPORT|LVS_OWNERDATA|LVS_SHOWSELALWAYS|0x0004|WS_TABSTOP|WS_BORDER, ID_FIND_LIST   ; single selection
+    invoke mk, rsi, &cn_lview, 0, LVS_REPORT|LVS_OWNERDATA|LVS_SHOWSELALWAYS|WS_TABSTOP|WS_BORDER, ID_FIND_LIST
     mov rbx, rax
     invoke ShowWindow, rbx, 0
-    invoke SendMessageW, rbx, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER
+    invoke SendMessageW, rbx, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_CHECKBOXES
     invoke lv_dark_header, rbx
+    invoke home_find_init_il, rbx
     xor r14d, r14d
 .fcol:
     xor eax, eax
@@ -867,6 +971,7 @@ home_proc:
     mov qword [hf_desc], 1
 .fsorted:
     invoke home_find_theme, rsi
+    invoke home_find_show_actions, rsi, 0
     invoke fill_recent, rsi
     xor eax, eax
     EPILOG 192
@@ -906,6 +1011,18 @@ home_proc:
     je .find_reset
     cmp eax, ID_FIND_PBROWSE
     je .find_browse
+    cmp eax, ID_FIND_SELALL
+    je .find_selall
+    cmp eax, ID_FIND_COPY
+    je .find_copy
+    cmp eax, ID_FIND_SHARE
+    je .find_share
+    cmp eax, ID_FIND_EMAIL
+    je .find_email
+    cmp eax, ID_FIND_DEL
+    je .find_del
+    cmp eax, ID_FIND_PROPS
+    je .find_props
     cmp eax, ID_RDEL
     je .rdel
     cmp eax, ID_RECENT
@@ -1014,6 +1131,31 @@ home_proc:
     invoke home_find_browse, rsi
     test eax, eax
     jz .none
+    jmp .find
+.find_selall:
+    invoke home_find_selall, rsi
+    xor eax, eax
+    EPILOG 192
+.find_copy:
+    invoke home_find_do_copy, rsi
+    xor eax, eax
+    EPILOG 192
+.find_share:
+    invoke home_find_do_share, rsi
+    xor eax, eax
+    EPILOG 192
+.find_email:
+    invoke home_find_do_email, rsi
+    xor eax, eax
+    EPILOG 192
+.find_del:
+    invoke home_find_do_del, rsi
+    xor eax, eax
+    EPILOG 192
+.find_props:
+    invoke home_find_do_props, rsi
+    xor eax, eax
+    EPILOG 192
 .find:
     invoke KillTimer, rsi, FIND_TIMER2
     invoke home_find, rsi
@@ -1040,7 +1182,120 @@ home_proc:
     je .n_open
     cmp eax, -4                       ; NM_RETURN
     je .n_enter
+    cmp eax, -2                       ; NM_CLICK
+    je .n_click
+    cmp eax, -155                     ; LVN_KEYDOWN
+    je .n_keydown
+    cmp eax, -110                     ; LVN_ITEMCHANGED
+    je .n_selchange
+    cmp eax, -113                     ; LVN_ODSTATECHANGED
+    je .n_selchange
     jmp .def
+.n_selchange:
+    invoke home_find_update_chk_lbl, rsi
+    xor eax, eax
+    EPILOG 192
+.n_click:
+    mov eax, [r13+32]                 ; ptAction.x
+    mov [rsp+96], eax
+    mov eax, [r13+36]                 ; ptAction.y
+    mov [rsp+100], eax
+    invoke SendMessageW, [r13+NMH_FROM], 0x1012, 0, &rsp+96   ; LVM_HITTEST
+    cmp eax, -1
+    je .none
+    test dword [rsp+104], 8          ; LVHT_ONITEMSTATEICON
+    jz .none
+    cmp rax, [hf_n]
+    jae .none
+    mov rcx, [hf_chk]
+    test rcx, rcx
+    jz .none
+    xor byte [rcx+rax], 1
+    invoke SendMessageW, [r13+NMH_FROM], 0x1015, rax, rax     ; LVM_REDRAWITEMS
+    invoke home_find_update_chk_lbl, rsi
+    xor eax, eax
+    EPILOG 192
+.n_keydown:
+    movzx eax, word [r13+24]         ; NMLVKEYDOWN.wVKey
+    cmp eax, 0x20                    ; VK_SPACE
+    je .k_space
+    cmp eax, 0x2E                    ; VK_DELETE
+    je .k_del
+    cmp eax, 'A'
+    je .k_a
+    cmp eax, 'a'
+    je .k_a
+    cmp eax, 'C'
+    je .k_c
+    cmp eax, 'c'
+    je .k_c
+    cmp eax, 0x0D                    ; VK_RETURN
+    jne .def
+    invoke GetAsyncKeyState, 0x12    ; VK_MENU (Alt)
+    test ax, 0x8000
+    jz .def
+    invoke home_find_do_props, rsi
+    xor eax, eax
+    EPILOG 192
+.k_space:
+    invoke SendMessageW, [r13+NMH_FROM], 0x1032, 0, 0 ; LVM_GETSELECTEDCOUNT
+    cmp eax, 1
+    jle .k_space_single
+    mov r12, [r13+NMH_FROM]
+    mov r14, -1
+.k_sp_loop:
+    invoke SendMessageW, r12, LVM_GETNEXTITEM, r14, 2 ; LVNI_SELECTED
+    cmp eax, -1
+    je .k_sp_done
+    movsxd r14, eax
+    cmp r14, [hf_n]
+    jae .k_sp_done
+    mov rcx, [hf_chk]
+    test rcx, rcx
+    jz .k_sp_done
+    xor byte [rcx+r14], 1
+    invoke SendMessageW, r12, 0x1015, r14, r14 ; LVM_REDRAWITEMS
+    jmp .k_sp_loop
+.k_sp_done:
+    invoke home_find_update_chk_lbl, rsi
+    xor eax, eax
+    EPILOG 192
+.k_space_single:
+    invoke SendMessageW, [r13+NMH_FROM], LVM_GETNEXTITEM, -1, 1 ; LVNI_FOCUSED
+    cmp eax, -1
+    jne .k_toggle
+    invoke SendMessageW, [r13+NMH_FROM], LVM_GETNEXTITEM, -1, 2 ; LVNI_SELECTED
+    cmp eax, -1
+    je .none
+.k_toggle:
+    cmp rax, [hf_n]
+    jae .none
+    mov rcx, [hf_chk]
+    test rcx, rcx
+    jz .none
+    xor byte [rcx+rax], 1
+    invoke SendMessageW, [r13+NMH_FROM], 0x1015, rax, rax     ; LVM_REDRAWITEMS
+    invoke home_find_update_chk_lbl, rsi
+    xor eax, eax
+    EPILOG 192
+.k_del:
+    invoke home_find_do_del, rsi
+    xor eax, eax
+    EPILOG 192
+.k_a:
+    invoke GetAsyncKeyState, 0x11    ; VK_CONTROL
+    test ax, 0x8000
+    jz .def
+    invoke home_find_selall, rsi
+    xor eax, eax
+    EPILOG 192
+.k_c:
+    invoke GetAsyncKeyState, 0x11    ; VK_CONTROL
+    test ax, 0x8000
+    jz .def
+    invoke home_find_do_copy, rsi
+    xor eax, eax
+    EPILOG 192
 .n_disp:
     invoke home_find_disp, r13
     xor eax, eax
@@ -1054,6 +1309,13 @@ home_proc:
     movsxd rbx, dword [r13+24]        ; NMITEMACTIVATE.iItem
     test rbx, rbx
     js .none
+    mov eax, [r13+32]
+    mov [rsp+96], eax
+    mov eax, [r13+36]
+    mov [rsp+100], eax
+    invoke SendMessageW, [r13+NMH_FROM], 0x1012, 0, &rsp+96   ; LVM_HITTEST
+    test dword [rsp+104], 8          ; LVHT_ONITEMSTATEICON
+    jnz .none
     invoke home_find_act, rbx, FA_OPEN
     xor eax, eax
     EPILOG 192
@@ -1127,6 +1389,63 @@ home_find_browse:
     xor eax, eax
     EPILOG 1200
 
+; home_find_init_il(hList): creates state image list with checkbox states (1=unchecked, 2=checked)
+home_find_init_il:
+    PROLOG 256
+    mov r12, rcx                     ; r12 = hList
+    cmp qword [hf_state_il], 0
+    jne .set_il
+    mov ecx, 16
+    call scl
+    movsxd rbx, eax                  ; rbx = size (e.g. 16 or scaled)
+    invoke ImageList_Create, rbx, rbx, 0x0021, 3, 1  ; ILC_MASK | ILC_COLOR32
+    test rax, rax
+    jz .d
+    mov [hf_state_il], rax
+
+    invoke GetDC, 0
+    mov r13, rax                     ; r13 = hdcScreen
+    invoke CreateCompatibleDC, r13
+    mov r14, rax                     ; r14 = hdcMem
+    invoke CreateCompatibleBitmap, r13, rbx, rbx
+    mov r15, rax                     ; r15 = hbm
+    invoke SelectObject, r14, r15
+    mov [rsp+128], rax               ; [rsp+128] = oldBm
+
+    invoke CreateSolidBrush, 0x00FF00FF ; magenta mask brush
+    mov rbp, rax
+
+    ; RECT rc = { 0, 0, ebx, ebx }
+    mov dword [rsp+96], 0
+    mov dword [rsp+100], 0
+    mov [rsp+104], ebx
+    mov [rsp+108], ebx
+
+    ; Image 0: dummy
+    invoke FillRect, r14, &rsp+96, rbp
+    invoke ImageList_AddMasked, [hf_state_il], r15, 0x00FF00FF
+
+    ; Image 1: unchecked checkbox
+    invoke FillRect, r14, &rsp+96, rbp
+    invoke DrawFrameControl, r14, &rsp+96, 4, 0x4000 ; DFC_BUTTON, DFCS_BUTTONCHECK | DFCS_FLAT
+    invoke ImageList_AddMasked, [hf_state_il], r15, 0x00FF00FF
+
+    ; Image 2: checked checkbox
+    invoke FillRect, r14, &rsp+96, rbp
+    invoke DrawFrameControl, r14, &rsp+96, 4, 0x4400 ; DFC_BUTTON, DFCS_BUTTONCHECK | DFCS_CHECKED | DFCS_FLAT
+    invoke ImageList_AddMasked, [hf_state_il], r15, 0x00FF00FF
+
+    invoke DeleteObject, rbp
+    invoke SelectObject, r14, [rsp+128]
+    invoke DeleteObject, r15
+    invoke DeleteDC, r14
+    invoke ReleaseDC, 0, r13
+
+.set_il:
+    invoke SendMessageW, r12, 0x1003, 2, [hf_state_il] ; LVM_SETIMAGELIST, LVSIL_STATE (2), himl
+.d:
+    EPILOG 256
+
 ; home_find_theme(hwnd): colours of the result list
 home_find_theme:
     PROLOG 64
@@ -1191,6 +1510,13 @@ home_find:
     jz .ret
     mov [hf_ids], rax
 .have:
+    cmp qword [hf_chk], 0
+    jne .have_chk
+    invoke malloc, HF_CAP
+    test rax, rax
+    jz .ret
+    mov [hf_chk], rax
+.have_chk:
     invoke GetDlgItem, rsi, ID_FIND_EDIT
     invoke GetWindowTextW, rax, &rsp+HF_TXT, 199
     invoke GetDlgItem, rsi, ID_FIND_EXT
@@ -1298,8 +1624,10 @@ home_find:
     invoke ShowWindow, r13, 5
     invoke GetDlgItem, rsi, ID_RDEL
     invoke ShowWindow, rax, 5
+    invoke home_find_show_actions, rsi, 0
     invoke GetDlgItem, rsi, ID_RLABEL
     invoke SetWindowTextW, rax, &s_rlabel
+    mov qword [hf_chk_cnt], 0
     EPILOG 1184
 .q:
     call find_start
@@ -1315,6 +1643,11 @@ home_find:
     mov r15d, HF_CAP
 .c:
     mov [hf_n], r15
+    mov qword [hf_chk_cnt], 0
+    cmp qword [hf_chk], 0
+    jz .skip_memset
+    invoke memset, [hf_chk], 0, r15
+.skip_memset:
     invoke home_find_resort, rsi
     invoke SendMessageW, r12, LVM_SETITEMCOUNT, r15, 0
     invoke InvalidateRect, r12, 0, 1
@@ -1322,6 +1655,7 @@ home_find:
     invoke ShowWindow, r12, 5
     invoke GetDlgItem, rsi, ID_RDEL                  ; "clear history" belongs to the recent sessions
     invoke ShowWindow, rax, 0
+    invoke home_find_show_actions, rsi, 5
     invoke home_find_drives, rsi
     lea rdi, [f_find_ready]
     cmp r14d, HF_CAP
@@ -1442,6 +1776,23 @@ home_find_col:
 home_find_disp:
     PROLOG 160
     mov rbx, rcx
+    test dword [rbx+DI_MASK], 8      ; LVIF_STATE
+    jz .chk_text
+    mov eax, [rbx+DI_ITEM]
+    cmp rax, [hf_n]
+    jae .chk_uncheck
+    mov rcx, [hf_chk]
+    test rcx, rcx
+    jz .chk_uncheck
+    cmp byte [rcx+rax], 0
+    je .chk_uncheck
+    mov dword [rbx+36], 0x2000       ; checked (state image 2)
+    mov dword [rbx+40], 0xF000
+    jmp .chk_text
+.chk_uncheck:
+    mov dword [rbx+36], 0x1000       ; unchecked (state image 1)
+    mov dword [rbx+40], 0xF000
+.chk_text:
     test dword [rbx+DI_MASK], LVIF_TEXT
     jz .d
     mov eax, [rbx+DI_ITEM]
@@ -1644,6 +1995,9 @@ home_find_menu:
     movsxd r13, eax
     test r13, r13
     js .cur
+    invoke SendMessageW, rbx, 0x102C, r13, 2          ; LVM_GETITEMSTATE, r13, LVIS_SELECTED
+    test eax, 2
+    jnz .cur
     xor eax, eax
     mov [rsp+FN_IT], rax
     mov [rsp+FN_IT+8], rax
@@ -1667,6 +2021,13 @@ home_find_menu:
     invoke AppendMenuW, r15, MF_SEPARATOR, 0, 0
     invoke AppendMenuW, r15, MF_STRING, FA_BC, &s_fm_bc
     invoke AppendMenuW, r15, MF_STRING, FA_COPY, &s_fm_copy
+    invoke AppendMenuW, r15, MF_STRING, FA_SHARE, &s_fm_share
+    invoke AppendMenuW, r15, MF_STRING, FA_EMAIL, &s_fm_email
+    invoke AppendMenuW, r15, MF_STRING, FA_DEL, &s_fm_del
+    invoke AppendMenuW, r15, MF_SEPARATOR, 0, 0
+    invoke AppendMenuW, r15, MF_STRING, FA_PROPS, &s_fm_props
+    invoke AppendMenuW, r15, MF_SEPARATOR, 0, 0
+    invoke AppendMenuW, r15, MF_STRING, FA_SELALL, &s_fm_selall
     mov edi, [rsp+FN_PT]
     mov ebp, [rsp+FN_PT+4]
     invoke TrackPopupMenu, r15, TPM_RETURNCMD|TPM_RIGHTBUTTON, rdi, rbp, 0, rsi, 0
@@ -1674,7 +2035,38 @@ home_find_menu:
     invoke DestroyMenu, r15
     test r13d, r13d
     jz .d
+    cmp r13d, FA_COPY
+    je .act_copy
+    cmp r13d, FA_SHARE
+    je .act_share
+    cmp r13d, FA_EMAIL
+    je .act_email
+    cmp r13d, FA_DEL
+    je .act_del
+    cmp r13d, FA_PROPS
+    je .act_props
+    cmp r13d, FA_SELALL
+    je .act_selall
     invoke home_find_act, r14, r13
+    jmp .d
+.act_copy:
+    invoke home_find_do_copy, rsi
+    jmp .d
+.act_share:
+    invoke home_find_do_share, rsi
+    jmp .d
+.act_email:
+    invoke home_find_do_email, rsi
+    jmp .d
+.act_del:
+    invoke home_find_do_del, rsi
+    jmp .d
+.act_props:
+    invoke home_find_do_props, rsi
+    jmp .d
+.act_selall:
+    invoke home_find_selall, rsi
+    jmp .d
 .d:
     EPILOG 176
 
@@ -1690,6 +2082,464 @@ home_find_open:
     invoke open_any_file, &rsp+96
 .d:
     EPILOG 1696
+
+; home_find_update_chk_lbl(hwnd): count checked items and update ID_RLABEL
+home_find_update_chk_lbl:
+    PROLOG 256
+    mov rsi, rcx
+    mov r8, [hf_n]
+    test r8, r8
+    jz .d
+    mov rcx, [hf_chk]
+    test rcx, rcx
+    jz .d
+    xor edx, edx                     ; checked count
+    xor eax, eax                     ; index
+.chk_cnt_loop:
+    cmp rax, r8
+    jae .chk_cnt_done
+    movzx r9d, byte [rcx+rax]
+    add edx, r9d
+    inc rax
+    jmp .chk_cnt_loop
+.chk_cnt_done:
+    mov [hf_chk_cnt], rdx
+    test edx, edx
+    jz .chk_none_maybe_sel
+    mov r12, rdx
+    mov r13, [fi_vis]
+    invoke _snwprintf, &rsp+96, 99, &f_find_ready_chk, [hf_n], r12, r13
+    invoke GetDlgItem, rsi, ID_RLABEL
+    invoke SetWindowTextW, rax, &rsp+96
+    jmp .d
+.chk_none_maybe_sel:
+    invoke GetDlgItem, rsi, ID_FIND_LIST
+    invoke SendMessageW, rax, 0x1032, 0, 0            ; LVM_GETSELECTEDCOUNT
+    cmp eax, 1
+    jle .chk_none
+    movsxd r12, eax
+    mov r13, [fi_vis]
+    invoke _snwprintf, &rsp+96, 99, &f_find_ready_chk, [hf_n], r12, r13
+    invoke GetDlgItem, rsi, ID_RLABEL
+    invoke SetWindowTextW, rax, &rsp+96
+    jmp .d
+.chk_none:
+    mov r13, [fi_vis]
+    invoke _snwprintf, &rsp+96, 99, &f_find_ready, [hf_n], r13
+    invoke GetDlgItem, rsi, ID_RLABEL
+    invoke SetWindowTextW, rax, &rsp+96
+.d:
+    EPILOG 256
+
+; home_find_show_actions(hwnd, show_flag)
+home_find_show_actions:
+    PROLOG 64
+    mov rsi, rcx
+    mov ebx, edx
+    invoke GetDlgItem, rsi, ID_FIND_SELALL
+    invoke ShowWindow, rax, rbx
+    invoke GetDlgItem, rsi, ID_FIND_COPY
+    invoke ShowWindow, rax, rbx
+    invoke GetDlgItem, rsi, ID_FIND_SHARE
+    invoke ShowWindow, rax, rbx
+    invoke GetDlgItem, rsi, ID_FIND_EMAIL
+    invoke ShowWindow, rax, rbx
+    invoke GetDlgItem, rsi, ID_FIND_DEL
+    invoke ShowWindow, rax, rbx
+    invoke GetDlgItem, rsi, ID_FIND_PROPS
+    invoke ShowWindow, rax, rbx
+    EPILOG 64
+
+; home_find_selall(hwnd)
+home_find_selall:
+    PROLOG 64
+    mov rsi, rcx
+    mov r8, [hf_n]
+    test r8, r8
+    jz .d
+    mov rcx, [hf_chk]
+    test rcx, rcx
+    jz .d
+    xor edx, edx
+    mov rax, [hf_chk_cnt]
+    cmp rax, r8
+    je .do_set
+    mov dl, 1
+.do_set:
+    mov rcx, [hf_chk]
+    mov r8, [hf_n]
+    call memset
+    invoke GetDlgItem, rsi, ID_FIND_LIST
+    invoke InvalidateRect, rax, 0, 0
+    invoke home_find_update_chk_lbl, rsi
+.d:
+    EPILOG 64
+
+; home_find_get_targets(hwnd, out_ids, max_count) -> eax = count
+home_find_get_targets:
+    PROLOG 128
+    mov rsi, rcx
+    mov rdi, rdx
+    mov rbp, r8
+    xor ebx, ebx                     ; count = 0
+    cmp qword [hf_chk_cnt], 0
+    jz .check_sel
+    mov r8, [hf_n]
+    xor ecx, ecx                     ; index
+.chk_loop:
+    cmp rcx, r8
+    jae .done_chk
+    cmp rbx, rbp
+    jae .done_chk
+    mov rax, [hf_chk]
+    cmp byte [rax+rcx], 0
+    jz .chk_next
+    mov rax, [hf_ids]
+    mov edx, [rax+rcx*4]
+    mov [rdi+rbx*4], edx
+    inc rbx
+.chk_next:
+    inc rcx
+    jmp .chk_loop
+.done_chk:
+    test rbx, rbx
+    jnz .ret_count
+
+.check_sel:
+    invoke GetDlgItem, rsi, ID_FIND_LIST
+    mov r12, rax
+    mov r13, -1                      ; item index iterator
+.sel_loop:
+    cmp rbx, rbp
+    jae .done_sel
+    invoke SendMessageW, r12, LVM_GETNEXTITEM, r13, 2 ; LVNI_SELECTED
+    cmp eax, -1
+    je .done_sel
+    movsxd r13, eax
+    cmp r13, [hf_n]
+    jae .done_sel
+    mov rax, [hf_ids]
+    mov edx, [rax+r13*4]
+    mov [rdi+rbx*4], edx
+    inc rbx
+    jmp .sel_loop
+.done_sel:
+    test rbx, rbx
+    jnz .ret_count
+
+.ret_none:
+    xor ebx, ebx
+.ret_count:
+    mov eax, ebx
+    EPILOG 128
+
+; home_find_do_copy(hwnd)
+home_find_do_copy:
+    PROLOG 1600
+    mov rsi, rcx
+    invoke malloc, 40000
+    test rax, rax
+    jz .none
+    mov r12, rax                     ; r12 = ids
+    invoke home_find_get_targets, rsi, r12, 10000
+    test eax, eax
+    jz .free_ids
+    mov r13d, eax                    ; r13d = count
+
+    imul r14, r13, 1600
+    add r14, 128
+    invoke malloc, r14
+    test rax, rax
+    jz .free_ids
+    mov r15, rax                     ; r15 = multi_sz_buf
+
+    mov rdi, r15
+    xor ebx, ebx
+.cp_fill:
+    cmp ebx, r13d
+    jae .cp_fill_done
+    mov edx, [r12+rbx*4]
+    invoke find_path, rdx, rdi, 790
+    test eax, eax
+    jz .cp_fill_skip
+    lea rdi, [rdi+rax*2+2]
+.cp_fill_skip:
+    inc ebx
+    jmp .cp_fill
+.cp_fill_done:
+    mov word [rdi], 0
+    add rdi, 2
+    sub rdi, r15                     ; rdi = total bytes
+
+    mov qword [rsp+96], 0            ; hDrop
+    mov qword [rsp+104], 0           ; hText
+
+    ; Allocate CF_HDROP
+    lea rbp, [rdi+20]
+    invoke GlobalAlloc, 2, rbp       ; GMEM_MOVEABLE = 2
+    test rax, rax
+    jz .skip_alloc_drop
+    mov [rsp+96], rax
+    invoke GlobalLock, rax
+    test rax, rax
+    jz .skip_alloc_drop
+    mov rbx, rax
+    mov dword [rbx], 20              ; pFiles
+    mov dword [rbx+4], 0             ; pt.x
+    mov dword [rbx+8], 0             ; pt.y
+    mov dword [rbx+12], 0            ; fNC
+    mov dword [rbx+16], 1            ; fWide
+    lea rax, [rbx+20]
+    invoke memcpy, rax, r15, rdi
+    invoke GlobalUnlock, [rsp+96]
+.skip_alloc_drop:
+
+    ; Allocate CF_UNICODETEXT
+    lea rbp, [rdi + r13*2 + 8]
+    invoke GlobalAlloc, 2, rbp
+    test rax, rax
+    jz .set_clip
+    mov [rsp+104], rax
+    invoke GlobalLock, rax
+    test rax, rax
+    jz .set_clip
+    mov rbx, rax
+    mov rdx, r15
+    xor ecx, ecx
+.txt_copy:
+    cmp ecx, r13d
+    jae .txt_done
+    movzx eax, word [rdx]
+    test eax, eax
+    jz .txt_next_file
+    mov word [rbx], ax
+    add rdx, 2
+    add rbx, 2
+    jmp .txt_copy
+.txt_next_file:
+    inc ecx
+    cmp ecx, r13d
+    jae .txt_no_crlf
+    mov word [rbx], 13               ; '\r'
+    mov word [rbx+2], 10             ; '\n'
+    add rbx, 4
+.txt_no_crlf:
+    add rdx, 2
+    jmp .txt_copy
+.txt_done:
+    mov word [rbx], 0
+    invoke GlobalUnlock, [rsp+104]
+
+.set_clip:
+    invoke OpenClipboard, [g_hframe]
+    test eax, eax
+    jz .free_msz
+    call EmptyClipboard
+    cmp qword [rsp+96], 0
+    jz .skip_hdrop
+    invoke SetClipboardData, 15, [rsp+96]
+.skip_hdrop:
+    cmp qword [rsp+104], 0
+    jz .skip_htext
+    invoke SetClipboardData, 13, [rsp+104]
+.skip_htext:
+    call CloseClipboard
+
+    movsxd r13, r13d
+    invoke _snwprintf, &rsp+112, 99, &s_status_copied, r13
+    invoke set_status, &rsp+112
+
+.free_msz:
+    invoke free, r15
+.free_ids_ok:
+    invoke free, r12
+    mov eax, r13d
+    EPILOG 1600
+.free_ids:
+    invoke free, r12
+.none:
+    xor eax, eax
+    EPILOG 1600
+
+; home_find_do_share(hwnd): SNS (카카오톡, 문자 등) 전송
+home_find_do_share:
+    PROLOG 256
+    mov rsi, rcx
+    invoke home_find_do_copy, rsi
+    test eax, eax
+    jz .d
+
+    invoke GetDlgItem, rsi, ID_FIND_SHARE
+    mov rbx, rax
+    invoke GetWindowRect, rbx, &rsp+96
+    mov edi, [rsp+96]                ; left
+    mov ebp, [rsp+108]               ; bottom
+
+    call CreatePopupMenu
+    mov r12, rax
+    invoke AppendMenuW, r12, MF_STRING, 1, &s_sm_kakao
+    invoke AppendMenuW, r12, MF_STRING, 2, &s_sm_sms
+    invoke AppendMenuW, r12, MF_SEPARATOR, 0, 0
+    invoke AppendMenuW, r12, MF_STRING, 3, &s_sm_clip
+    invoke AppendMenuW, r12, MF_STRING, 4, &s_sm_nearby
+
+    invoke TrackPopupMenu, r12, TPM_RETURNCMD|TPM_RIGHTBUTTON, rdi, rbp, 0, rsi, 0
+    mov r13d, eax
+    invoke DestroyMenu, r12
+
+    test r13d, r13d
+    jz .d
+
+    cmp r13d, 1
+    je .sh_kakao
+    cmp r13d, 2
+    je .sh_sms
+    cmp r13d, 3
+    je .sh_clip
+    cmp r13d, 4
+    je .sh_nearby
+    jmp .d
+
+.sh_kakao:
+    invoke FindWindowW, &s_kakao_wnd, 0
+    test rax, rax
+    jnz .act_k
+    invoke FindWindowW, 0, &s_kakao_title
+    test rax, rax
+    jnz .act_k
+    invoke ShellExecuteW, [g_hframe], &s_v_open, &s_kakao_exe, 0, 0, 1
+    invoke set_status, &s_status_kakao
+    jmp .d
+.act_k:
+    mov rbx, rax
+    invoke ShowWindow, rbx, 9        ; SW_RESTORE
+    invoke SetForegroundWindow, rbx
+    invoke set_status, &s_status_kakao
+    jmp .d
+
+.sh_sms:
+    invoke ShellExecuteW, [g_hframe], &s_v_open, &s_proto_sms, 0, 0, 1
+    invoke set_status, &s_status_sms
+    jmp .d
+
+.sh_clip:
+    invoke set_status, &s_status_sns_clip
+    jmp .d
+
+.sh_nearby:
+    invoke ShellExecuteW, [g_hframe], &s_v_open, &s_proto_share, 0, 0, 1
+    invoke set_status, &s_status_share
+    jmp .d
+
+.d:
+    EPILOG 256
+
+; home_find_do_props(hwnd): 속성 창 열기 (Alt+Enter)
+home_find_do_props:
+    PROLOG 2048
+    mov rsi, rcx
+    invoke malloc, 4000
+    test rax, rax
+    jz .d
+    mov r12, rax
+    invoke home_find_get_targets, rsi, r12, 1000
+    test eax, eax
+    jz .none_props
+    mov r13d, eax
+
+    mov edx, [r12]
+    invoke find_path, rdx, &rsp+96, 790
+    invoke free, r12
+    test eax, eax
+    jz .d
+
+    invoke SHObjectProperties, [g_hframe], 2, &rsp+96, 0
+    invoke set_status, &s_status_props
+    jmp .d
+
+.none_props:
+    invoke free, r12
+    invoke set_status, &s_status_none
+.d:
+    EPILOG 2048
+
+; home_find_do_email(hwnd)
+home_find_do_email:
+    PROLOG 2048
+    mov rsi, rcx
+    invoke home_find_do_copy, rsi
+    test eax, eax
+    jz .none_email
+
+    invoke ShellExecuteW, [g_hframe], &s_v_open, &f_mailto, 0, 0, 1
+    invoke set_status, &s_status_email
+    jmp .d
+
+.none_email:
+    invoke set_status, &s_status_none
+.d:
+    EPILOG 2048
+
+; home_find_do_del(hwnd)
+home_find_do_del:
+    PROLOG 256
+    mov rsi, rcx
+    invoke malloc, 40000
+    test rax, rax
+    jz .d
+    mov r12, rax
+    invoke home_find_get_targets, rsi, r12, 10000
+    test eax, eax
+    jz .none_del
+    mov r13d, eax
+
+    imul r14, r13, 1600
+    add r14, 64
+    invoke malloc, r14
+    test rax, rax
+    jz .none_del
+    mov r15, rax
+
+    mov rdi, r15
+    xor ebx, ebx
+.del_fill:
+    cmp ebx, r13d
+    jae .del_filled
+    mov edx, [r12+rbx*4]
+    invoke find_path, rdx, rdi, 790
+    test eax, eax
+    jz .del_skip
+    lea rdi, [rdi+rax*2+2]
+.del_skip:
+    inc ebx
+    jmp .del_fill
+.del_filled:
+    mov word [rdi], 0
+
+    invoke memset, &rsp+96, 0, 56
+    mov rax, [g_hframe]
+    mov [rsp+96], rax
+    mov dword [rsp+104], 3           ; FO_DELETE
+    mov [rsp+112], r15
+    mov qword [rsp+120], 0
+    mov word [rsp+128], 0x0040       ; FOF_ALLOWUNDO
+    invoke SHFileOperationW, &rsp+96
+
+    invoke free, r15
+    invoke free, r12
+
+    invoke home_find, rsi
+    invoke home_find_update_chk_lbl, rsi
+    movsxd r13, r13d
+    invoke _snwprintf, &rsp+96, 99, &s_status_deleted, r13
+    invoke set_status, &rsp+96
+    jmp .d
+
+.none_del:
+    invoke free, r12
+    invoke set_status, &s_status_none
+.d:
+    EPILOG 256
 
 ; ---------------------------------------------------------------- owner-drawn cards & controls
 
