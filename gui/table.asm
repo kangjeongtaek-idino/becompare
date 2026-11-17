@@ -1409,7 +1409,7 @@ tb_layout:
     PLACE ID_CHK_TRIM, 120
     PLACE ID_CHK_DIFF, 100
     PLACE ID_CHK_SORT, 90
-    PLACE ID_BTN_XLS, 90
+    PLACE ID_BTN_XLS, 96
     lea r13d, [r13+r15]
     add r13d, r14d
     mov r12d, r14d
@@ -1811,7 +1811,7 @@ tt_table:
     dq ID_CHK_TRIM, tt_table_2
     dq ID_CHK_DIFF, tt_table_3
     dq ID_CHK_SORT, tt_table_4
-    dq ID_BTN_XLS, tt_table_5
+    dq ID_BTN_XLS, s_tip_report
     dq ID_EDIT_KEY, tt_table_6
     dq ID_EDIT_TOL, tt_table_7
     dq ID_EDIT_IGN, tt_table_8

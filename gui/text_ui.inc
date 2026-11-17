@@ -1131,7 +1131,7 @@ tv_layout:
     PLACE ID_BTN_SVR, 100
     PLACE ID_BTN_ALN, 100
     PLACE ID_BTN_ALC, 100
-    PLACE ID_BTN_XLS, 90
+    PLACE ID_BTN_XLS, 96
     PLACE ID_BTN_PATCH, 90
     PLACE ID_BTN_PCLIP, 90
     lea r13d, [r13+r15]
@@ -1830,7 +1830,7 @@ tt_text:
     dq ID_BTN_SVR, tt_text_1
     dq ID_BTN_ALN, tt_text_2
     dq ID_BTN_ALC, tt_text_3
-    dq ID_BTN_XLS, tt_text_4
+    dq ID_BTN_XLS, s_tip_report
     dq ID_BTN_PATCH, tt_text_patch
     dq ID_BTN_PCLIP, tt_text_pclip
     dq ID_CHK_CASE, tt_text_5

@@ -28,4 +28,7 @@ extern ex_pick, ex_done, s_xw_cap
 extern xw_begin, xw_cell, xw_numcell, xw_endrow, xw_save
 extern dw_begin, dw_para, dw_tbl_begin, dw_row_begin, dw_cell, dw_row_end, dw_tbl_end, dw_save
 extern dwc_red, dwc_green, dwc_blue, dwc_orange, dwc_gray
+extern ex_menu_choose, ex_done_open, s_b_report, s_tip_report, s_tip_report_merge
+extern s_htm_doctype, s_htm_style, s_htm_tbl_begin, s_htm_tbl_end
+extern sb_init, sb_append, sb_append_esc, sb_free, write_utf8
 %endif

@@ -653,6 +653,6 @@ WSTR tt_props_1, "비교 결과를 워드 파일(.docx)로 저장합니다"
 align 8
 tt_props:
     dq ID_CHKD, tt_props_0
-    dq ID_BTN_DOC, tt_props_1
+    dq ID_BTN_DOC, s_tip_report
     dq 0, 0
 section .text

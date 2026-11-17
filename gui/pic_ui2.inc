@@ -207,7 +207,7 @@ pv_layout:
     PLACE ID_BTN_ZOUT, 40
     PLACE ID_BTN_ZIN, 40
     PLACE ID_BTN_FIT, 40
-    PLACE ID_BTN_DOC, 90
+    PLACE ID_BTN_DOC, 96
     ; the combo box owns its drop-down height
     mov ecx, 190
     call scl
@@ -482,7 +482,7 @@ WSTR tt_pic_1, "차이를 화면에 표시하는 방식을 고릅니다"
 WSTR tt_pic_2, "같은 색으로 볼 RGB 허용 오차 (0~255)"
 align 8
 tt_pic:
-    dq ID_BTN_DOC, tt_pic_0
+    dq ID_BTN_DOC, s_tip_report
     dq ID_COMBO, tt_pic_1
     dq ID_EDIT_TOL, tt_pic_2
     dq 0, 0

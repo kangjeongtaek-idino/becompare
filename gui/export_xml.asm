@@ -10,18 +10,38 @@
 extern malloc, free, wcslen, _snwprintf
 extern sb_init, sb_append, sb_free, browse_save_as, set_status, msgbox
 extern xlsx_save3, docx_save3
+extern CreatePopupMenu, AppendMenuW, GetDlgItem, GetWindowRect, TrackPopupMenu, DestroyMenu, wcscpy, ShellExecuteW
 
 global ex_pick, ex_done, ex_esc, xw_colname, s_xw_cap
 global xw_begin, xw_cell, xw_numcell, xw_endrow, xw_save
 global dw_begin, dw_para, dw_tbl_begin, dw_row_begin, dw_cell, dw_row_end, dw_tbl_end, dw_save
 global dwc_red, dwc_green, dwc_blue, dwc_orange, dwc_gray
+global ex_menu_choose, ex_done_open, s_b_report, s_tip_report, s_tip_report_merge
+global s_htm_doctype, s_htm_style, s_htm_tbl_begin, s_htm_tbl_end
 
 section .rdata
-WSTR s_ex_xlsx, "xlsx"
-WSTR s_ex_docx, "docx"
+flt_html: dw __utf16__("HTML 보고서 (*.html)"), 0, __utf16__("*.html"), 0, 0
 flt_xlsx: dw __utf16__("Excel 통합 문서 (*.xlsx)"), 0, __utf16__("*.xlsx"), 0, 0
 flt_docx: dw __utf16__("Word 문서 (*.docx)"), 0, __utf16__("*.docx"), 0, 0
-WSTR s_ex_ok, "내보내기를 완료했습니다."
+WSTR s_ex_html, "html"
+WSTR s_ex_xlsx, "xlsx"
+WSTR s_ex_docx, "docx"
+WSTR s_xm_html, "HTML 보고서(.html)…"
+WSTR s_xm_xlsx, "Excel 통합 문서(.xlsx)로 내보내기…"
+WSTR s_xm_docx, "Word 문서(.docx)로 내보내기…"
+WSTR s_x_open, "저장했습니다. 지금 열어 볼까요?"
+WSTR s_x_verb, "open"
+WSTR s_b_report, "내보내기…"
+WSTR s_tip_report, "비교 결과를 HTML·엑셀·워드 파일로 내보냅니다"
+WSTR s_tip_report_merge, "병합 결과를 HTML·엑셀·워드 파일로 내보냅니다"
+align 8
+ex_flt: dq 0, flt_xlsx, flt_docx, flt_html
+ex_ext: dq 0, s_ex_xlsx, s_ex_docx, s_ex_html
+WSTR s_htm_doctype, `<!doctype html><html><head><meta charset="utf-8"><title>`
+WSTR s_htm_style, `</title><style>\nbody{font-family:Consolas,'Segoe UI',sans-serif;font-size:13px;margin:16px}\nh3{margin:0 0 12px 0}\np{margin:4px 0;color:#555}\ntable{border-collapse:collapse;width:100%;margin-top:12px}\nth{background:#f0f0f0;border:1px solid #ccc;padding:4px 8px;text-align:left;font-weight:bold}\ntd{border:1px solid #ddd;padding:3px 6px;vertical-align:top;white-space:pre-wrap;word-break:break-all}\ntd.num{text-align:right;color:#888;width:4em}\ntr.diff,td.diff{background:#ffd7d7}\ntr.same,td.same{background:#ffffff}\ntr.lonly,td.lonly{background:#d7f0d7}\ntr.ronly,td.ronly{background:#d7e1ff}\ntr.type,td.type{background:#ffe6be}\n</style></head><body><h3>`
+WSTR s_htm_tbl_begin, `</h3><table>\n`
+WSTR s_htm_tbl_end, `</table></body></html>\n`
+WSTR s_ex_ok, "비교 결과를 내보냈습니다."
 WSTR s_ex_fail, "파일을 저장하지 못했습니다. 경로와 쓰기 권한, 파일이 다른 프로그램에서 열려 있는지 확인하세요."
 WSTR s_xw_cap, "행이 많아 처음 1,048,575행만 내보냈습니다 (Excel 시트의 최대 행 수)."
 WSTR e_amp, "&amp;"
@@ -168,6 +188,62 @@ ex_done:
     EPILOG 64
 .fail:
     invoke msgbox, rcx, &s_ex_fail, MB_OK|MB_ICONERROR
+    EPILOG 64
+
+; ex_menu_choose(rcx=hwnd, edx=ctrl_id, r8=default_name, r9=out_path_buf) -> eax format: 1 xlsx, 2 docx, 3 html, 0 cancel
+ex_menu_choose:
+    PROLOG 160
+    mov rsi, rcx
+    mov r12d, edx
+    mov r13, r8
+    mov r14, r9
+    call CreatePopupMenu
+    mov rbx, rax
+    invoke AppendMenuW, rbx, MF_STRING, 1, &s_xm_xlsx
+    invoke AppendMenuW, rbx, MF_STRING, 2, &s_xm_docx
+    invoke AppendMenuW, rbx, MF_SEPARATOR, 0, 0
+    invoke AppendMenuW, rbx, MF_STRING, 3, &s_xm_html
+    invoke GetDlgItem, rsi, r12
+    invoke GetWindowRect, rax, &rsp+96
+    mov r12d, [rsp+96]
+    mov r15d, [rsp+108]
+    invoke TrackPopupMenu, rbx, TPM_RETURNCMD|TPM_RIGHTBUTTON, r12, r15, 0, rsi, 0
+    mov r12d, eax
+    invoke DestroyMenu, rbx
+    test r12d, r12d
+    jz .cancel
+    invoke wcscpy, r14, r13
+    lea rax, [ex_flt]
+    mov r8, [rax+r12*8]
+    lea rax, [ex_ext]
+    mov r9, [rax+r12*8]
+    invoke browse_save_as, rsi, r14, r8, r9
+    test eax, eax
+    jz .cancel
+    mov eax, r12d
+    EPILOG 160
+.cancel:
+    xor eax, eax
+    EPILOG 160
+
+; ex_done_open(rcx=hwnd, edx=ok, r8=path)
+ex_done_open:
+    PROLOG 64
+    mov rsi, rcx
+    mov r12d, edx
+    mov r13, r8
+    test r12d, r12d
+    jz .fail
+    invoke set_status, &s_ex_ok
+    invoke msgbox, rsi, &s_x_open, MB_YESNO|MB_ICONQUESTION
+    cmp eax, IDYES
+    jne .d
+    invoke ShellExecuteW, rsi, &s_x_verb, r13, 0, 0, SW_SHOWNORMAL
+.d:
+    EPILOG 64
+.fail:
+    invoke set_status, &s_ex_fail
+    invoke msgbox, rsi, &s_ex_fail, MB_OK|MB_ICONWARNING
     EPILOG 64
 
 ; ================================================================ XLSX

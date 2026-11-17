@@ -526,7 +526,7 @@ mg_layout:
     PLACE ID_BTN_ALLL, 110
     PLACE ID_BTN_ALLR, 120
     PLACE ID_BTN_SAVE, 40
-    PLACE ID_BTN_DOC, 90
+    PLACE ID_BTN_DOC, 96
     PLACE ID_MG_CASE, 110
     PLACE ID_MG_SPC, 90
     PLACE ID_MG_TRIM, 120
@@ -1005,7 +1005,7 @@ tt_merge:
     dq ID_BTN_ALC, tt_merge_5
     dq ID_BTN_ALLL, tt_merge_6
     dq ID_BTN_ALLR, tt_merge_7
-    dq ID_BTN_DOC, tt_merge_8
+    dq ID_BTN_DOC, s_tip_report_merge
     dq ID_MG_CASE, tt_merge_case
     dq ID_MG_SPC, tt_merge_spc
     dq ID_MG_TRIM, tt_merge_trim

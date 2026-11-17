@@ -1556,7 +1556,7 @@ fm_layout:
     PLACE ID_BTN_REDO, 40
     PLACE ID_BTN_OPENM, 40
     PLACE ID_BTN_RUNM, 40
-    PLACE ID_BTN_DOC, 90
+    PLACE ID_BTN_DOC, 96
     ; row 4
     lea r13d, [r13+r15]
     add r13d, r14d
@@ -2160,7 +2160,7 @@ tt_fmerge:
     dq ID_BROWSE_C, tt_fmerge_1
     dq ID_EDIT_O, tt_fmerge_2
     dq ID_BROWSE_O, tt_fmerge_3
-    dq ID_BTN_DOC, tt_fmerge_4
+    dq ID_BTN_DOC, s_tip_report_merge
     dq ID_CHKF, tt_fmerge_5
     dq ID_FM_EXCL, tt_fmerge_excl
     dq ID_FM_FLT, tt_fmerge_flt

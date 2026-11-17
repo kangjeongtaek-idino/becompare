@@ -664,7 +664,7 @@ hx_layout:
     PLACE ID_CHK_ONLY, 130
     PLACE ID_BTN_SVA, 90
     PLACE ID_BTN_SVB, 100
-    PLACE ID_BTN_XLS, 90
+    PLACE ID_BTN_XLS, 96
     lea r13d, [r13+r15]
     add r13d, r14d
     mov r12d, r14d
@@ -921,7 +921,7 @@ tt_hex:
     dq ID_CHK_ONLY, tt_hex_0
     dq ID_BTN_SVA, tt_hex_1
     dq ID_BTN_SVB, tt_hex_2
-    dq ID_BTN_XLS, tt_hex_3
+    dq ID_BTN_XLS, s_tip_report
     dq ID_EDIT_FIND, tt_hex_4
     dq ID_BTN_FIND, tt_hex_5
     dq ID_EDIT_REPL, tt_hex_6
