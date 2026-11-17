@@ -27,7 +27,7 @@ WSTR s_b_redo, "다시 실행 (Ctrl+Y)"
 %define US_ENT    24
 %define US_STK    (US_MAX*US_ENT)
 %define US_SIZE   (16 + 2*US_STK)        ; {undo count, redo count, undo steps, redo steps}
-%define US_BUDGET 0x4000000              ; 64 MB of snapshots in one stack
+%define US_BUDGET 0x10000000             ; 256 MB of snapshots in one stack
 
 section .text
 
