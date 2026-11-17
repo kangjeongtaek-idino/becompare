@@ -20,6 +20,8 @@ extern set_tab_title, str_dup, fmt_size, vec_push, read_file_bytes, crc32_update
 extern sb_free, PostMessageW, g_batch, g_dx_path, g_exitcode, g_hframe, batch_done
 extern sess_new, sess_open, type_for_path, diff3_try_file
 extern icon_set, g_usel, g_user, g_base, g_del, g_edit, g_run
+extern us_push, us_pop, us_clear, us_free, s_un_done, s_un_redone, s_un_none, s_un_noredo, us_focus_edit, us_keep_journals, s_b_undo, s_b_redo, g_undo, g_redo
+extern fj_begin, fj_file, fj_dirs, fj_commit, fj_step
 
 global fmerge_register, fmerge_create
 
@@ -43,6 +45,7 @@ global fmerge_register, fmerge_create
 %define FM_EXCL    4680              ; wchar[256]
 %define FM_SCOL    5192              ; sort column (0..5)
 %define FM_SDESC   5196              ; 1 = descending
+%define FM_UST     5200              ; undo / redo steps (undo.asm): the manual actions of all entries
 %define FM_SIZE    5208
 
 ; FE (64 bytes)
@@ -78,6 +81,8 @@ global fmerge_register, fmerge_create
 %define ID_BTN_TD 714
 %define ID_BTN_OPENM 715
 %define ID_BTN_DOC 716
+%define ID_BTN_UNDO 717
+%define ID_BTN_REDO 718
 %define ID_LBL_BASE 651
 %define ID_LBL_OUT  652
 
@@ -260,6 +265,7 @@ fm_rawcmp:
 fm_clear:
     PROLOG 64
     mov rbx, rcx
+    invoke us_keep_journals, &rbx+FM_UST   ; the action steps belong to the entries that go away
     xor esi, esi
 .l:
     cmp rsi, [rbx+FM_ENT+8]
@@ -1068,6 +1074,8 @@ fm_setact:
     invoke SendMessageW, [rbx+FM_HLIST], LVM_GETSELECTEDCOUNT, 0, 0
     test eax, eax
     jz .nosel
+    invoke us_clear, &rbx+FM_UST, 1  ; the actions before this choice become an undo step
+    invoke fm_us_snap, rbx, 0
     mov rdi, -1
 .n:
     invoke SendMessageW, [rbx+FM_HLIST], LVM_GETNEXTITEM, rdi, LVNI_SELECTED
@@ -1107,6 +1115,96 @@ fm_setact:
 .busy:
     invoke msgbox, rsi, &s_busy, MB_OK|MB_ICONWARNING
     EPILOG 64
+
+; ---------------------------------------------------------------- undo / redo (Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z)
+; What can be taken back is the choice of an action (A / B / base / delete) for the selected rows: a step
+; (undo.asm) holds the manual action of every entry, its tag is the number of entries. "실행" is a step too:
+; a journal (fjournal.asm) of the folders it made and the files it wrote or replaced in the output folder.
+
+; fm_us_snap(fm, which 0 undo / 1 redo): the manual actions of all entries as a step
+fm_us_snap:
+    PROLOG 96
+    mov rbx, rcx
+    mov r12d, edx
+    mov rsi, [rbx+FM_ENT+8]
+    lea rcx, [rsi*4+8]
+    call malloc
+    test rax, rax
+    jz .d
+    mov [rsp+64], rsi
+    mov [rsp+72], rax
+    lea rcx, [rsi*4]
+    mov [rsp+80], rcx
+    mov rdx, [rbx+FM_ENT]
+    xor ecx, ecx
+.l:
+    cmp rcx, rsi
+    jae .push
+    mov r8d, [rdx+FE_MAN]
+    mov [rax+rcx*4], r8d
+    add rdx, FE_BYTES
+    inc rcx
+    jmp .l
+.push:
+    invoke us_push, &rbx+FM_UST, r12, &rsp+64
+.d:
+    EPILOG 96
+
+; fm_undo(hwnd, fm, redo 0 / 1)
+fm_undo:
+    PROLOG 128
+    mov rsi, rcx
+    mov rbx, rdx
+    mov r12d, r8d
+    cmp qword [rbx+FM_RUNNING], 0
+    jne .d
+    invoke us_pop, &rbx+FM_UST, r12, &rsp+96
+    test eax, eax
+    jz .none
+    mov rax, [rsp+96]
+    cmp rax, -1                      ; a run ("실행"): the files it wrote
+    jne .acts
+    invoke fj_step, rsi, &rbx+FM_UST, &rsp+96, r12
+    test eax, eax
+    jz .d
+    jmp .said
+.acts:
+    cmp rax, [rbx+FM_ENT+8]          ; not the list it was taken from
+    jne .stale
+    mov edi, r12d
+    xor edi, 1
+    invoke fm_us_snap, rbx, rdi
+    mov rax, [rsp+104]
+    mov rdx, [rbx+FM_ENT]
+    xor ecx, ecx
+.l:
+    cmp rcx, [rsp+96]
+    jae .put
+    mov r8d, [rax+rcx*4]
+    mov [rdx+FE_MAN], r8d
+    add rdx, FE_BYTES
+    inc rcx
+    jmp .l
+.put:
+    invoke free, [rsp+104]
+    invoke fm_refresh, rsi, rbx
+.said:
+    lea rcx, [s_un_done]
+    test r12d, r12d
+    jz .say
+    lea rcx, [s_un_redone]
+.say:
+    call set_status
+.d:
+    EPILOG 128
+.stale:
+    invoke free, [rsp+104]
+.none:
+    lea rcx, [s_un_none]
+    test r12d, r12d
+    jz .say
+    lea rcx, [s_un_noredo]
+    jmp .say
 
 ; fm_path(fm, e, side, out): full path of an entry on one side
 fm_path:
@@ -1231,6 +1329,9 @@ fm_run:
     xor r14d, r14d                    ; excluded
     xor r15d, r15d                    ; unresolved
     mov dword [rsp+4512], 0           ; copy failures
+    call fj_begin                     ; what is written from here on can be taken back (Ctrl+Z)
+    mov [rsp+4592], rax
+    invoke fj_dirs, [rsp+4592], &rbx+FM_OUT, 0
     invoke SHCreateDirectoryExW, 0, &rbx+FM_OUT, 0
     xor edi, edi
 .e:
@@ -1267,6 +1368,7 @@ fm_run:
     shl eax, cl
     test [rbp+FE_FLAGS], eax
     jz .file
+    invoke fj_dirs, [rsp+4592], &rsp+2300, 0
     invoke SHCreateDirectoryExW, 0, &rsp+2300, 0
     jmp .e
 .file:
@@ -1274,9 +1376,11 @@ fm_run:
     test rax, rax
     jz .cp
     mov word [rax], 0
+    invoke fj_dirs, [rsp+4592], &rsp+2300, 0
     invoke SHCreateDirectoryExW, 0, &rsp+2300, 0
     invoke _snwprintf, &rsp+2300, 1090, &f_full, &rbx+FM_OUT, [rbp+FE_NAME]
 .cp:
+    invoke fj_file, [rsp+4592], &rsp+2300
     invoke CopyFileW, &rsp+96, &rsp+2300, 0
     test eax, eax
     jnz .copied
@@ -1290,9 +1394,11 @@ fm_run:
     test rax, rax
     jz .am_go
     mov word [rax], 0
+    invoke fj_dirs, [rsp+4592], &rsp+2300, 0
     invoke SHCreateDirectoryExW, 0, &rsp+2300, 0
     invoke _snwprintf, &rsp+2300, 1090, &f_full, &rbx+FM_OUT, [rbp+FE_NAME]
 .am_go:
+    invoke fj_file, [rsp+4592], &rsp+2300
     invoke fm_exec_auto, rbx, rbp, &rsp+2300
     test eax, eax
     jz .am_fail
@@ -1340,6 +1446,7 @@ fm_run:
     inc r15d
     jmp .e
 .summary:
+    invoke fj_commit, &rbx+FM_UST, [rsp+4592]
     mov eax, [rsp+4512]
     mov [rsp+4572], eax
     invoke SetCursor, [rsp+4576]
@@ -1445,6 +1552,8 @@ fm_layout:
     PLACE ID_BTN_TB, 56
     PLACE ID_BTN_TC, 40
     PLACE ID_BTN_TD, 40
+    PLACE ID_BTN_UNDO, 40
+    PLACE ID_BTN_REDO, 40
     PLACE ID_BTN_OPENM, 40
     PLACE ID_BTN_RUNM, 40
     PLACE ID_BTN_DOC, 90
@@ -1572,6 +1681,10 @@ fm_proc:
     je .done
     cmp edi, BC_COLLECT
     je .collect
+    cmp edi, BC_UNDO
+    je .undo
+    cmp edi, BC_REDO
+    je .undo
     cmp edi, BC_THEME
     je .theme
     cmp edi, WM_CTLCOLOREDIT
@@ -1616,6 +1729,10 @@ fm_proc:
     invoke icon_set, rsi, ID_BTN_TB, &g_user, &s_b_tb
     invoke icon_set, rsi, ID_BTN_TC, &g_base, &s_b_tc
     invoke icon_set, rsi, ID_BTN_TD, &g_del, &s_b_td
+    invoke mk_btn, rsi, &s_b_undo, ID_BTN_UNDO
+    invoke mk_btn, rsi, &s_b_redo, ID_BTN_REDO
+    invoke icon_set, rsi, ID_BTN_UNDO, &g_undo, &s_b_undo
+    invoke icon_set, rsi, ID_BTN_REDO, &g_redo, &s_b_redo
     invoke icon_set, rsi, ID_BTN_OPENM, &g_edit, &s_b_openm
     invoke icon_set, rsi, ID_BTN_RUNM, &g_run, &s_b_runm
     xor r9d, r9d
@@ -1794,6 +1911,10 @@ fm_proc:
     je .tc
     cmp ebx, ID_BTN_TD
     je .td
+    cmp ebx, ID_BTN_UNDO
+    je .btn_undo
+    cmp ebx, ID_BTN_REDO
+    je .btn_redo
     cmp ebx, ID_BTN_OPENM
     je .openm
     cmp ebx, ID_BTN_RUNM
@@ -1974,6 +2095,22 @@ fm_proc:
 .focus:
     invoke SetFocus, [r15+FM_HLIST]
     jmp .zero
+.btn_undo:                           ; the toolbar buttons do what Ctrl+Z / Ctrl+Y do
+    invoke SendMessageW, rsi, BC_UNDO, 0, 0
+    jmp .zero
+.btn_redo:
+    invoke SendMessageW, rsi, BC_REDO, 0, 0
+    jmp .zero
+.undo:                               ; not in a path or filter box: those edit boxes undo by themselves
+    call us_focus_edit
+    test eax, eax
+    jnz .zero
+    xor r8d, r8d
+    cmp edi, BC_REDO
+    sete r8b
+    invoke fm_undo, rsi, r15, r8
+    mov eax, 1
+    EPILOG 320
 .stopping:
     mov qword [r15+FM_CLOSING], 1
     mov byte [r15+FM_CANCEL], 1
@@ -1994,6 +2131,7 @@ fm_proc:
     invoke CloseHandle, [r15+FM_THREAD]
 .nothr:
     invoke fm_clear, r15
+    invoke us_free, &r15+FM_UST
     invoke free, r15
     mov qword [r14+SS_DATA], 0
 .zero:

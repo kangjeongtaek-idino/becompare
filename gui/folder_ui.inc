@@ -1459,6 +1459,41 @@ shfop:
     invoke SHFileOperationW, &rsp+96
     EPILOG 160
 
+; fold_undo(hwnd, fold, redo 0 / 1): take back / do again the newest file operation of this view (copy, move,
+;   delete, rename, sync - see fjournal.asm), then compare again
+fold_undo:
+    PROLOG 128
+    mov rsi, rcx
+    mov rbx, rdx
+    mov r12d, r8d
+    cmp qword [rbx+F_RUNNING], 0
+    jne .d
+    cmp qword [rbx+F_SYNCRUN], 0
+    jne .d
+    invoke us_pop, &rbx+F_UST, r12, &rsp+96
+    test eax, eax
+    jz .none
+    invoke fj_step, rsi, &rbx+F_UST, &rsp+96, r12
+    test eax, eax
+    jz .d
+    lea rcx, [s_un_done]
+    test r12d, r12d
+    jz .say
+    lea rcx, [s_un_redone]
+.say:
+    call set_status
+    invoke fold_start, rsi, rbx
+.d:
+    EPILOG 128
+.none:
+    lea rcx, [s_un_none]
+    test r12d, r12d
+    jz .say2
+    lea rcx, [s_un_noredo]
+.say2:
+    call set_status
+    EPILOG 128
+
 ; fold_copy(hwnd, fold, dir 0=A->B 1=B->A)
 fold_copy:
     PROLOG 160
@@ -1473,8 +1508,12 @@ fold_copy:
     invoke build_lists, rbx, rdi, &rsp+96, &rsp+104
     test eax, eax
     jz .none
+    call fj_begin                    ; Ctrl+Z takes it back
+    mov [rsp+112], rax
+    invoke fj_lists, [rsp+112], [rsp+96], [rsp+104], 1
     invoke ensure_parents, [rsp+104]
     invoke shfop, rsi, FO_COPY, [rsp+96], [rsp+104]
+    invoke fj_commit, &rbx+F_UST, [rsp+112]
     invoke free, [rsp+96]
     invoke free, [rsp+104]
     invoke fold_start, rsi, rbx
@@ -1502,8 +1541,12 @@ fold_move:
     invoke build_lists, rbx, rdi, &rsp+96, &rsp+104
     test eax, eax
     jz .none
+    call fj_begin
+    mov [rsp+112], rax
+    invoke fj_lists, [rsp+112], [rsp+96], [rsp+104], 2
     invoke ensure_parents, [rsp+104]
     invoke shfop, rsi, FO_MOVE, [rsp+96], [rsp+104]
+    invoke fj_commit, &rbx+F_UST, [rsp+112]
     invoke free, [rsp+96]
     invoke free, [rsp+104]
     invoke fold_start, rsi, rbx
@@ -1588,6 +1631,8 @@ fold_rename:
     mov word [rsp+1760], 0
 .cat:
     invoke wcscat, &rsp+1760, &rsp+1200
+    call fj_begin
+    mov r14, rax
     xor edi, edi
 .side:
     cmp edi, 2
@@ -1605,10 +1650,14 @@ fold_rename:
     invoke _snwprintf, &rsp+2840, 1030, &f_path, rbp, &rsp+96
     invoke _snwprintf, &rsp+3920, 1030, &f_path, rbp, &rsp+1760
     invoke MoveFileW, &rsp+2840, &rsp+3920
+    test eax, eax
+    jz .nx
+    invoke fj_moved, r14, &rsp+2840, &rsp+3920
 .nx:
     inc edi
     jmp .side
 .done:
+    invoke fj_commit, &rbx+F_UST, r14
     invoke fold_start, rsi, rbx
 .d:
     EPILOG 5008
@@ -1659,7 +1708,11 @@ fold_delete:
     invoke build_lists, rbx, rdi, &rsp+96, &rsp+104
     test eax, eax
     jz .none
+    call fj_begin
+    mov [rsp+112], rax
+    invoke fj_lists, [rsp+112], [rsp+96], 0, 3
     invoke shfop, rsi, FO_DELETE, [rsp+96], 0
+    invoke fj_commit, &rbx+F_UST, [rsp+112]
     invoke free, [rsp+96]
     invoke free, [rsp+104]
     invoke fold_start, rsi, rbx
@@ -1825,6 +1878,7 @@ copy_file:
     mov r12, rcx
     mov rsi, rdx
     mov rdi, r8
+    invoke fj_dirs, [r12+F_JRN], rdi, 1
     invoke ensure_parent, rdi
     test dword [r12+F_OPT], 0x10
     jz .copy
@@ -1832,8 +1886,10 @@ copy_file:
     cmp eax, -1
     je .copy
     invoke _snwprintf, &rsp+96, 1100, &f_bak, rdi
+    invoke fj_file, [r12+F_JRN], &rsp+96
     invoke CopyFileW, rdi, &rsp+96, 0
 .copy:
+    invoke fj_file, [r12+F_JRN], rdi
     invoke CopyFileW, rsi, rdi, 0
     mov ebx, eax
     test eax, eax
@@ -1866,6 +1922,7 @@ op_exec:
     je .mkl
     cmp r13d, OP_DELR
     je .delr
+    invoke fj_rmdir, [r12+F_JRN], &rsp+2296
     invoke RemoveDirectoryW, &rsp+2296
     jmp .ret
 .clr:
@@ -1875,9 +1932,11 @@ op_exec:
     invoke copy_file, r12, &rsp+2296, &rsp+96
     jmp .ret
 .mkr:
+    invoke fj_dirs, [r12+F_JRN], &rsp+2296, 0
     invoke SHCreateDirectoryExW, 0, &rsp+2296, 0
     jmp .dirres
 .mkl:
+    invoke fj_dirs, [r12+F_JRN], &rsp+96, 0
     invoke SHCreateDirectoryExW, 0, &rsp+96, 0
 .dirres:
     mov ecx, 1
@@ -1890,6 +1949,7 @@ op_exec:
     mov eax, ecx
     jmp .ret
 .delr:
+    invoke fj_file, [r12+F_JRN], &rsp+2296
     invoke wcscpy, &rsp+4496, &rsp+2296
     invoke wcslen, &rsp+4496
     mov word [rsp+4496+rax*2+2], 0
@@ -2020,6 +2080,8 @@ fold_sync:
     invoke sync_preview, rsi, rbx
     test eax, eax
     jz .d
+    call fj_begin                    ; what the sync changes can be taken back (Ctrl+Z)
+    mov [rbx+F_JRN], rax
     mov byte [rbx+F_CANCEL], 0
     mov qword [rbx+F_SYNCRUN], 1
     mov qword [rbx+F_PAUSED], 0
@@ -2454,6 +2516,9 @@ fold_layout:
     PLACE ID_BTN_SYNC, 40
     PLACE ID_BTN_PAUSE, 40
     SEP
+    PLACE ID_BTN_UNDO, 40
+    PLACE ID_BTN_REDO, 40
+    SEP
     PLACE ID_BTN_REPORT, 96
     PLACE ID_BTN_SNAP, 40
     SEP
@@ -2666,6 +2731,10 @@ fold_proc:
     je .syncprog
     cmp edi, BC_SYNCDONE
     je .syncdone
+    cmp edi, BC_UNDO
+    je .undo
+    cmp edi, BC_REDO
+    je .undo
     cmp edi, BC_THEME
     je .theme
     cmp edi, WM_CTLCOLOREDIT
@@ -2759,6 +2828,10 @@ fold_proc:
     invoke icon_set, rsi, ID_BTN_DEL, &g_del, &s_b_del
     invoke icon_set, rsi, ID_BTN_SYNC, &g_sync, &s_b_sync
     invoke icon_set, rsi, ID_BTN_PAUSE, &g_pause, &s_b_pause
+    invoke mk_btn, rsi, &s_b_undo, ID_BTN_UNDO
+    invoke mk_btn, rsi, &s_b_redo, ID_BTN_REDO
+    invoke icon_set, rsi, ID_BTN_UNDO, &g_undo, &s_b_undo
+    invoke icon_set, rsi, ID_BTN_REDO, &g_redo, &s_b_redo
     invoke icon_set, rsi, ID_BTN_SNAP, &g_snap, &s_b_snap
     invoke icon_set, rsi, ID_BTN_EXPAND, &g_expand, &s_b_expand
     invoke icon_set, rsi, ID_BTN_COLLAP, &g_collapse, &s_b_collap
@@ -2907,6 +2980,10 @@ fold_proc:
     je .b_del
     cmp ebx, ID_BTN_SYNC
     je .b_sync
+    cmp ebx, ID_BTN_UNDO
+    je .btn_undo
+    cmp ebx, ID_BTN_REDO
+    je .btn_redo
     cmp ebx, ID_BTN_REPORT
     je .b_rep
     cmp ebx, ID_BTN_SNAP
@@ -3034,6 +3111,8 @@ fold_proc:
     jne .zero
     invoke CloseHandle, [r15+F_SYNCTHR]
     mov qword [r15+F_SYNCTHR], 0
+    invoke fj_commit, &r15+F_UST, [r15+F_JRN]
+    mov qword [r15+F_JRN], 0
     invoke _snwprintf, &rsp+96, 100, &s_sync_done, r12
     invoke set_status, &rsp+96
     test r12, r12
@@ -3091,6 +3170,31 @@ fold_proc:
     jmp .zero
 .isdirty:
     invoke fold_pv_dirty, r15
+    EPILOG 320
+.btn_undo:                           ; the toolbar buttons do what Ctrl+Z / Ctrl+Y do
+    invoke SendMessageW, rsi, BC_UNDO, 0, 0
+    jmp .zero
+.btn_redo:
+    invoke SendMessageW, rsi, BC_REDO, 0, 0
+    jmp .zero
+.undo:                               ; not in a path or filter box: those edit boxes undo by themselves
+    call us_focus_edit
+    test eax, eax
+    jnz .zero
+    cmp qword [r15+F_PVVIEW], 0      ; the caret is in the preview: its text is meant
+    je .undo2
+    call GetFocus
+    invoke IsChild, [r15+F_PVVIEW], rax
+    test eax, eax
+    jz .undo2
+    invoke SendMessageW, [r15+F_PVVIEW], rdi, 0, 0
+    EPILOG 320
+.undo2:
+    xor r8d, r8d
+    cmp edi, BC_REDO
+    sete r8b
+    invoke fold_undo, rsi, r15, r8
+    mov eax, 1
     EPILOG 320
 .savepv:
     invoke SendMessageW, [r15+F_PVVIEW], BC_SAVE, 0, 0
@@ -3454,6 +3558,8 @@ fold_proc:
     invoke free, [r15+F_PLAN]
     invoke free, [r15+F_BUFA]
     invoke free, [r15+F_BUFB]
+    invoke fj_discard, [r15+F_JRN]
+    invoke us_free, &r15+F_UST
     invoke free, r15
     mov qword [r14+SS_DATA], 0
 .zero:

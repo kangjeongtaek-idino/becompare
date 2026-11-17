@@ -42,6 +42,8 @@
 %define BC_NEXTMARK (WM_APP+33)
 %define BC_PREVMARK (WM_APP+34)
 %define BC_GOTOLINE (WM_APP+35)      ; Text Compare view: ask for a line number and go there (Ctrl+G)
+%define BC_UNDO     (WM_APP+36)      ; undo (Ctrl+Z); a view returns 0 when the key is not for it
+%define BC_REDO     (WM_APP+37)      ; redo (Ctrl+Y, Ctrl+Shift+Z)
 %define BC_TVQ      (WM_APP+60)       ; Text Compare view: wParam 0 number of differences, 1 pane with the caret, 2 current difference
 %define BC_PROGRESS (WM_APP+1)
 %define BC_DONE     (WM_APP+2)

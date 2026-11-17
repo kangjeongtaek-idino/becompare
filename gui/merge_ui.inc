@@ -220,6 +220,8 @@ mg_apply:
     mov rbx, rdx
     mov r12d, r8d
     mov r14, r9
+    invoke us_clear, &rbx+MG_UST, 1  ; the output before this choice becomes an undo step
+    invoke mg_us_snap, rbx, 0
     invoke sb_init, &rsp+96
     xor edi, edi                     ; line
     xor r15d, r15d                   ; next conflict index to meet
@@ -292,8 +294,81 @@ mg_apply:
     invoke rich_theme, [rbx+MG_HM]
     invoke sb_free, &rsp+96
     invoke mg_colorout, rbx
+    invoke SendMessageW, [rbx+MG_HM], EM_EMPTYUNDOBUFFER, 0, 0   ; the colouring is nothing for Ctrl+Z to take back
     invoke mg_info, rsi, rbx
     EPILOG 192
+
+; ---------------------------------------------------------------- undo / redo (Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z)
+; Choosing a side writes the whole output pane again, which empties the editor's own undo buffer. So the
+; output text is kept as a step (undo.asm) before every choice. Ctrl+Z first lets the editor take back what
+; was typed since; when it has nothing, the newest step is put back.
+
+; mg_us_snap(mg, which 0 undo / 1 redo): the text of the output pane as a step
+mg_us_snap:
+    PROLOG 96
+    mov rbx, rcx
+    mov r12d, edx
+    invoke rich_get_text, [rbx+MG_HM], &rsp+88
+    test rax, rax
+    jz .d
+    mov qword [rsp+64], 0
+    mov [rsp+72], rax
+    mov rax, [rsp+88]
+    lea rax, [rax*2+2]
+    mov [rsp+80], rax
+    invoke us_push, &rbx+MG_UST, r12, &rsp+64
+.d:
+    EPILOG 96
+
+; mg_undo(hwnd, mg, redo 0 / 1)
+mg_undo:
+    PROLOG 128
+    mov rsi, rcx
+    mov rbx, rdx
+    mov r12d, r8d
+    mov r14d, EM_CANUNDO
+    mov r15d, EM_UNDO
+    test r12d, r12d
+    jz .ask
+    mov r14d, EM_CANREDO
+    mov r15d, EM_REDO
+.ask:
+    invoke SendMessageW, [rbx+MG_HM], r14, 0, 0
+    test eax, eax
+    jz .own
+    invoke SendMessageW, [rbx+MG_HM], r15, 0, 0
+    EPILOG 128
+.own:
+    invoke us_pop, &rbx+MG_UST, r12, &rsp+96
+    test eax, eax
+    jz .none
+    mov edi, r12d
+    xor edi, 1
+    invoke mg_us_snap, rbx, rdi
+    invoke SendMessageW, [rbx+MG_HM], EM_GETFIRSTVISIBLELINE, 0, 0
+    movsxd r13, eax
+    invoke SendMessageW, [rbx+MG_HM], WM_SETREDRAW, 0, 0
+    invoke rich_set_text, [rbx+MG_HM], [rsp+104]
+    invoke SendMessageW, [rbx+MG_HM], EM_SETMODIFY, 1, 0
+    invoke rich_theme, [rbx+MG_HM]
+    invoke free, [rsp+104]
+    invoke mg_colorout, rbx          ; turns drawing of the output pane back on
+    invoke SendMessageW, [rbx+MG_HM], EM_EMPTYUNDOBUFFER, 0, 0   ; the colouring is nothing for Ctrl+Z to take back
+    invoke SendMessageW, [rbx+MG_HM], EM_LINESCROLL, 0, r13
+    invoke mg_info, rsi, rbx
+    lea rcx, [s_un_done]
+    test r12d, r12d
+    jz .say
+    lea rcx, [s_un_redone]
+.say:
+    call set_status
+    EPILOG 128
+.none:
+    lea rcx, [s_un_none]
+    test r12d, r12d
+    jz .say
+    lea rcx, [s_un_noredo]
+    jmp .say
 
 ; mg_resolve_all(hwnd, mg, choice): accept one side for every remaining conflict in a single pass (TM-05)
 mg_resolve_all:
@@ -444,6 +519,8 @@ mg_layout:
     PLACE ID_BTN_USEL, 56
     PLACE ID_BTN_USER, 56
     PLACE ID_BTN_BOTH, 40
+    PLACE ID_BTN_UNDO, 40
+    PLACE ID_BTN_REDO, 40
     PLACE ID_BTN_ALN, 80
     PLACE ID_BTN_ALC, 80
     PLACE ID_BTN_ALLL, 110
@@ -559,6 +636,10 @@ mg_proc:
     je .isdirty
     cmp edi, BC_SAVE
     je .save
+    cmp edi, BC_UNDO
+    je .undo
+    cmp edi, BC_REDO
+    je .undo
     cmp edi, BC_THEME
     je .theme
     cmp edi, WM_CTLCOLOREDIT
@@ -611,6 +692,10 @@ mg_proc:
     invoke icon_set, rsi, ID_BTN_USEL, &g_usel, &s_b_usel
     invoke icon_set, rsi, ID_BTN_USER, &g_user, &s_b_user
     invoke icon_set, rsi, ID_BTN_BOTH, &g_both, &s_b_both
+    invoke mk_btn, rsi, &s_b_undo, ID_BTN_UNDO
+    invoke mk_btn, rsi, &s_b_redo, ID_BTN_REDO
+    invoke icon_set, rsi, ID_BTN_UNDO, &g_undo, &s_b_undo
+    invoke icon_set, rsi, ID_BTN_REDO, &g_redo, &s_b_redo
     invoke icon_set, rsi, ID_BTN_SAVE, &g_save, &s_b_save
     invoke mk_chk, rsi, &s_mg_case, ID_MG_CASE, 0
     invoke mk_chk, rsi, &s_mg_spc, ID_MG_SPC, 0
@@ -726,6 +811,10 @@ mg_proc:
     je .b_r
     cmp ebx, ID_BTN_BOTH
     je .b_b
+    cmp ebx, ID_BTN_UNDO
+    je .btn_undo
+    cmp ebx, ID_BTN_REDO
+    je .btn_redo
     cmp ebx, ID_BTN_ALLL
     je .b_al
     cmp ebx, ID_BTN_ALLR
@@ -862,11 +951,28 @@ mg_proc:
 .isdirty:
     invoke SendMessageW, [r15+MG_HM], EM_GETMODIFY, 0, 0
     EPILOG 320
+.btn_undo:                           ; the toolbar buttons do what Ctrl+Z / Ctrl+Y do
+    invoke SendMessageW, rsi, BC_UNDO, 0, 0
+    jmp .zero
+.btn_redo:
+    invoke SendMessageW, rsi, BC_REDO, 0, 0
+    jmp .zero
+.undo:                               ; not in a path box: those edit boxes undo by themselves
+    call us_focus_edit
+    test eax, eax
+    jnz .zero
+    xor r8d, r8d
+    cmp edi, BC_REDO
+    sete r8b
+    invoke mg_undo, rsi, r15, r8
+    mov eax, 1
+    EPILOG 320
 .destroy:
     invoke mg_unscan, r15
     invoke mg_free_texts, r15
     invoke free, [r15+MG_ANCB]
     invoke free, [r15+MG_PRIS]
+    invoke us_free, &r15+MG_UST
     invoke free, r15
     mov qword [r14+SS_DATA], 0
 .zero:

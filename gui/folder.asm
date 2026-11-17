@@ -33,6 +33,9 @@ extern vec_push, fmt_size, fmt_time, excl_match, sb_init, sb_append, sb_append_e
 extern NormalizeString, GetNamedSecurityInfoW, SetNamedSecurityInfoW, LocalFree, SetFileAttributesW, SetFileTime, icon_set, g_copyr, g_copyl, g_mover, g_movel, g_del, g_sync, g_pause, g_report, g_snap, g_expand, g_collapse, GetLastError, GetCurrentProcessId, MoveFileW, input_box, wcsncpy, wcstoul, GetSystemTimeAsFileTime, set_status_part, str_dup, add_session, set_tab_title, type_for_path, ext_launch, g_policy
 
 global folder_register, folder_create
+extern s_b_undo, s_b_redo, g_undo, g_redo
+extern us_pop, us_free, us_focus_edit, s_un_done, s_un_redone, s_un_none, s_un_noredo, GetFocus, IsChild
+extern fj_begin, fj_file, fj_dirs, fj_rmdir, fj_moved, fj_lists, fj_commit, fj_step, fj_discard
 extern g_batch, g_rep_path, g_exitcode, g_hframe, g_snap_path
 
 ; ---- statuses / entry layout
@@ -117,7 +120,9 @@ extern g_batch, g_rep_path, g_exitcode, g_hframe, g_snap_path
 %define F_PVPB    6608
 %define F_CHGA    7648              ; directory change notification handle A
 %define F_CHGB    7656              ; directory change notification handle B
-%define F_SIZE    7664
+%define F_UST     7664              ; undo / redo steps (undo.asm): journals of file operations (fjournal.asm)
+%define F_JRN     7672              ; the journal of the sync that is running
+%define F_SIZE    7680
 %define ID_LBL_ATTRX 168
 %define ID_BTN_OPTS  178             ; opens / closes the row of less used options
 %define ID_LBL_CRIT  179
@@ -207,6 +212,8 @@ extern g_batch, g_rep_path, g_exitcode, g_hframe, g_snap_path
 %define ID_BTN_EXPAND 146
 %define ID_BTN_COLLAP 147
 %define ID_BTN_PAUSE  148
+%define ID_BTN_UNDO   186
+%define ID_BTN_REDO   187
 %define ID_LIST       150
 %define LVCFMT_RIGHT  1
 

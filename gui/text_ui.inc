@@ -432,7 +432,24 @@ text_side:
     mov r13, rax
     invoke strip_fillers, r13, [rsp+1140]
     mov r14, rax                     ; new length (free() would clobber rax)
+    cmp qword [r15], 0
+    je .same
+    invoke us_same_text, r13, r14, [r15], [r15+8]
+    test eax, eax
+    jnz .same
+.changed:                            ; edited since the last compare: the stored text becomes an undo step
+    mov [rsp+1152], r12
+    mov rax, [r15]
+    mov [rsp+1160], rax
+    mov rax, [r15+8]
+    lea rax, [rax*2+2]
+    mov [rsp+1168], rax
+    invoke us_clear, &rbx+TV_UST, 1
+    invoke us_push, &rbx+TV_UST, 0, &rsp+1152
+    jmp .store
+.same:
     invoke free, [r15]
+.store:
     mov [r15], r13
     mov [r15+8], r14
     mov eax, 1
@@ -448,6 +465,8 @@ text_side:
     invoke free, [r15]
     mov qword [r15], 0
 .fresh:
+    invoke us_clear, &rbx+TV_UST, 2  ; another file: the steps do not belong to it
+    mov qword [rbx+TV_USLD], 1
     mov dword [rbp], 0
     invoke text_load, &rsp+96, r15
     test eax, eax
@@ -1106,6 +1125,8 @@ tv_layout:
     PLACE ID_BTN_NEXT, 40
     PLACE ID_BTN_CLR, 56
     PLACE ID_BTN_CRL, 56
+    PLACE ID_BTN_UNDO, 40
+    PLACE ID_BTN_REDO, 40
     PLACE ID_BTN_SVL, 90
     PLACE ID_BTN_SVR, 100
     PLACE ID_BTN_ALN, 100
@@ -1316,6 +1337,10 @@ tv_proc:
     je .b_prev
     cmp edi, BC_GOTOLINE
     je .m_goto
+    cmp edi, BC_UNDO
+    je .m_undo
+    cmp edi, BC_REDO
+    je .m_undo
     cmp edi, BC_COLLECT
     je .collect
     cmp edi, BC_ISDIRTY
@@ -1371,6 +1396,10 @@ tv_proc:
     invoke icon_set, rsi, ID_BTN_NEXT, &g_next, &s_b_next
     invoke icon_set, rsi, ID_BTN_CLR, &g_copyr, &s_b_clr
     invoke icon_set, rsi, ID_BTN_CRL, &g_copyl, &s_b_crl
+    invoke mk_btn, rsi, &s_b_undo, ID_BTN_UNDO
+    invoke mk_btn, rsi, &s_b_redo, ID_BTN_REDO
+    invoke icon_set, rsi, ID_BTN_UNDO, &g_undo, &s_b_undo
+    invoke icon_set, rsi, ID_BTN_REDO, &g_redo, &s_b_redo
     invoke mk_chk, rsi, &s_c_case, ID_CHK_CASE, 0
     invoke mk_chk, rsi, &s_c_spc, ID_CHK_SPC, 0
     invoke mk_chk, rsi, &s_c_trim, ID_CHK_TRIM, 0
@@ -1513,6 +1542,10 @@ tv_proc:
     je .b_patch
     cmp ebx, ID_BTN_PCLIP
     je .b_pclip
+    cmp ebx, ID_BTN_UNDO
+    je .btn_undo
+    cmp ebx, ID_BTN_REDO
+    je .btn_redo
     cmp ebx, ID_CHK_SYN
     je .b_syn
     cmp ebx, ID_ED_NEXT
@@ -1560,6 +1593,16 @@ tv_proc:
     jmp .zero
 .m_goto:
     invoke tv_gotoline, rsi, r15
+    mov eax, 1
+    EPILOG 320
+.m_undo:                             ; not in a path or the find box: those edit boxes undo by themselves
+    call us_focus_edit
+    test eax, eax
+    jnz .zero
+    xor r9d, r9d
+    cmp edi, BC_REDO
+    sete r9b
+    invoke tv_undo, rsi, r15, r14, r9
     mov eax, 1
     EPILOG 320
 .m_bm:
@@ -1618,6 +1661,12 @@ tv_proc:
     jmp .zero
 .b_pclip:
     invoke text_patch_clip, rsi, r15
+    jmp .zero
+.btn_undo:                           ; the toolbar buttons do what Ctrl+Z / Ctrl+Y do
+    invoke SendMessageW, rsi, BC_UNDO, 0, 0
+    jmp .zero
+.btn_redo:
+    invoke SendMessageW, rsi, BC_REDO, 0, 0
     jmp .zero
 .rich:
     cmp ebp, 0x0100                  ; EN_SETFOCUS / EN_KILLFOCUS: the caret row mark moves to the other gutter
@@ -1709,6 +1758,7 @@ tv_proc:
     invoke free, [r15+TV_BUFB]
     invoke free, [r15+TV_TXA]
     invoke free, [r15+TV_TXB]
+    invoke us_free, &r15+TV_UST
     invoke free, r15
     mov qword [r14+SS_DATA], 0
 .zero:

@@ -91,6 +91,10 @@
 %define EM_SETTEXTEX    0x0461
 %define EM_SETUNDOLIMIT 0x0452
 %define EM_EMPTYUNDOBUFFER 0x00CD
+%define EM_CANUNDO      0x00C6
+%define EM_UNDO         0x00C7
+%define EM_CANREDO      0x0455
+%define EM_REDO         0x0454
 %define EM_GETMODIFY    0x00B8
 %define EM_SETMODIFY    0x00B9
 %define EM_SETTARGETDEVICE 0x0448

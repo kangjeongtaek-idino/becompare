@@ -7,7 +7,7 @@ extern OpenClipboard, CloseClipboard, GetClipboardData, GlobalLock, GlobalUnlock
 extern GetTempPathW, CreateDirectoryW, GetTickCount, CreateFileW, WriteFile, CloseHandle
 extern GetCurrentProcessId, OpenProcess, WaitForSingleObject, GetLastError, memset
 extern FindFirstFileW, FindNextFileW, FindClose, SHFileOperationW
-global temp_cleanup
+global temp_cleanup, tc_tmp
 extern malloc, free, wcslen, wcscat, _snwprintf, memcpy
 extern read_file_bytes, write_utf8, add_session, browse_open, msgbox, set_status
 

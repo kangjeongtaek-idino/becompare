@@ -22,6 +22,7 @@ extern text_load, text_load_raw, text_save, lines_split, compare_lines, hunk_fre
 extern sb_init, sb_append, sb_free, vec_push
 extern set_tab_title
 extern browse_open, browse_save
+extern us_push, us_pop, us_clear, us_free, s_un_done, s_un_redone, s_un_none, s_un_noredo, us_focus_edit, s_b_undo, s_b_redo, g_undo, g_redo
 
 global merge_register, merge_create, diff3_try_file
 
@@ -46,6 +47,7 @@ global merge_register, merge_create, diff3_try_file
 %define MG_PRIS   224           ; pristine generated output, to detect hand edits before regenerating
 %define MG_GUARD  232           ; scroll sync guard
 %define MG_OPTS   240           ; compare options (1 case, 2 space, 4 trim)
+%define MG_UST    248           ; undo / redo steps (undo.asm): earlier texts of the output pane
 %define MG_SIZE   256
 %define MG_ANCSZ  2960          ; must exceed text.asm TV_NANC (2880) + 4
 
@@ -67,6 +69,8 @@ global merge_register, merge_create, diff3_try_file
 %define ID_BTN_ALN  653
 %define ID_BTN_ALC  654
 %define ID_BTN_DOC  655
+%define ID_BTN_UNDO 656
+%define ID_BTN_REDO 657
 %define ID_MG_CASE  661
 %define ID_MG_SPC   662
 %define ID_MG_TRIM  663
@@ -872,6 +876,7 @@ mg_merge:
     invoke SendMessageW, [rbx+MG_HL], WM_SETREDRAW, 0, 0
     invoke SendMessageW, [rbx+MG_HO], WM_SETREDRAW, 0, 0
     invoke SendMessageW, [rbx+MG_HR], WM_SETREDRAW, 0, 0
+    invoke us_clear, &rbx+MG_UST, 2  ; a new merge: the earlier outputs do not belong to it
     invoke rich_set_text, [rbx+MG_HM], r13
     invoke SendMessageW, [rbx+MG_HM], EM_SETMODIFY, 1, 0
     invoke rich_theme, [rbx+MG_HM]
@@ -912,6 +917,7 @@ mg_merge:
     invoke InvalidateRect, [rbx+MG_HO], 0, 1
     invoke InvalidateRect, [rbx+MG_HR], 0, 1
     invoke mg_colorout, rbx          ; turns drawing of the output pane back on
+    invoke SendMessageW, [rbx+MG_HM], EM_EMPTYUNDOBUFFER, 0, 0   ; the colouring is nothing for Ctrl+Z to take back
     invoke mg_info, rsi, rbx
     ; tab title
     invoke wcsrchr, &r12+SS_PATHA, 0x5C
