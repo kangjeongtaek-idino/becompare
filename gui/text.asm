@@ -294,6 +294,7 @@ sum_len:
 %include "text_undo.inc"
 %include "text_blank.inc"
 %include "text_enc.inc"
+%include "text_prefs.inc"
 %include "text_word.inc"
 %include "text_fold.inc"
 %include "text_uni.inc"
