@@ -68,7 +68,7 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define TV_EXPN   3616          ; expanded fold fragments: count
 %define TV_EXPK   3624          ; dword[64]: first hidden row of each expanded fragment
 %define TV_UNI    3888          ; unified view: option read at the last compare
-%define TV_WORDS  3896          ; word level highlight option read at the last compare
+%define TV_WORDS  3896          ; inline highlight read at the last compare: 0 off, 1 words, 2 characters
 %define TV_WS     3904          ; whitespace marks shown: option read at the last compare
 %define TV_CTX    3912          ; folding: rows kept next to a change (read at the last compare)
 %define TV_NONUM  3920          ; gutters without line numbers (option "line numbers" off)
@@ -98,6 +98,7 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define ID_CHK_NUM   223
 %define ID_CHK_BLANK 224
 %define ID_CMB_ENC   225
+%define ID_CHK_CHAR  226
 %define ID_EDIT_RULES 232
 %define ID_LBL_RULES 233
 %define TV_RULES  3168
