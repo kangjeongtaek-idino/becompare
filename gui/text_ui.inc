@@ -432,6 +432,14 @@ text_side:
     mov r13, rax
     invoke strip_fillers, r13, [rsp+1140]
     mov r14, rax                     ; new length (free() would clobber rax)
+    test r14, r14
+    jz .nobrk
+    cmp dword [r15+24], 0            ; the file ended with a line break: so does the text, as when it was
+    je .nobrk                        ; read and as tv_save writes it - else an empty last line would be lost
+    mov word [r13+r14*2], 13
+    inc r14
+    mov word [r13+r14*2], 0
+.nobrk:
     cmp qword [r15], 0
     je .same
     invoke us_same_text, r13, r14, [r15], [r15+8]
@@ -636,6 +644,12 @@ text_compare:
     invoke wcscpy, &rbx+TV_CMT, &rsp+C_CP
     invoke tv_cmp_anch, rbx, &rsp+C_LA, &rsp+C_LB, r13, &rsp+C_CP, &rsp+C_HV
     invoke tv_build, rbx, &rsp+C_LA, &rsp+C_LB, &rsp+C_HV
+    mov qword [rbx+TV_NIGN], 0
+    invoke get_chk, rsi, ID_CHK_BLANK
+    test eax, eax
+    jz .noblank
+    invoke tv_blank_ignore, rbx, &rsp+C_LA, &rsp+C_LB   ; differences of blank lines only are none
+.noblank:
     invoke get_chk, rsi, ID_CHK_UNI
     movzx eax, al
     mov [rbx+TV_UNI], rax
@@ -1140,6 +1154,7 @@ tv_layout:
     PLACE ID_CHK_CASE, 110
     PLACE ID_CHK_SPC, 90
     PLACE ID_CHK_TRIM, 120
+    PLACE ID_CHK_BLANK, 100
     PLACE ID_CHK_CMT, 90
     PLACE ID_EDIT_CMT, 56
     PLACE ID_CHK_SYN, 100
@@ -1403,6 +1418,7 @@ tv_proc:
     invoke mk_chk, rsi, &s_c_case, ID_CHK_CASE, 0
     invoke mk_chk, rsi, &s_c_spc, ID_CHK_SPC, 0
     invoke mk_chk, rsi, &s_c_trim, ID_CHK_TRIM, 0
+    invoke mk_chk, rsi, &s_c_blank, ID_CHK_BLANK, 0
     invoke mk_chk, rsi, &s_c_cmt, ID_CHK_CMT, 0
     invoke mk_edit, rsi, ID_EDIT_CMT
     invoke GetDlgItem, rsi, ID_EDIT_CMT
@@ -1567,6 +1583,8 @@ tv_proc:
     cmp ebx, ID_CHK_SCRL
     je .scrl
     cmp ebx, ID_CHK_WS
+    je .doreq
+    cmp ebx, ID_CHK_BLANK
     je .doreq
     cmp ebx, ID_CHK_NUM
     je .numtog
@@ -1814,6 +1832,7 @@ WSTR tt_text_13, "찾을 문자열"
 WSTR tt_text_ctx, "접을 때 변경된 줄 위아래에 남겨 둘 줄 수"
 WSTR tt_text_fold, "변경이 없는 긴 구간을 한 줄로 접어 차이만 모아 봅니다"
 WSTR tt_text_num, "거터의 줄 번호를 보이거나 숨깁니다 (변경 표시는 그대로)"
+WSTR tt_text_blank, "빈 줄(공백·탭만 있는 줄 포함)만 추가·삭제된 곳은 차이로 보지 않습니다"
 WSTR tt_text_ws, "공백을 · 로, 탭을 → 로 표시합니다 (읽기 전용 표시)"
 WSTR tt_text_scrl, "끄면 두 창을 따로 스크롤합니다. 다시 켜면 오른쪽 창이 왼쪽 창 위치로 맞춰집니다"
 WSTR tt_text_word, "줄 안의 바뀐 단어를 따로 강조합니다. 끄면 바뀐 줄 전체만 칠합니다"
@@ -1854,6 +1873,7 @@ tt_text:
     dq ID_CHK_WORD, tt_text_word
     dq ID_CHK_SCRL, tt_text_scrl
     dq ID_CHK_WS, tt_text_ws
+    dq ID_CHK_BLANK, tt_text_blank
     dq ID_CHK_NUM, tt_text_num
     dq 0, 0
 section .text

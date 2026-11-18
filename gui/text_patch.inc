@@ -53,8 +53,12 @@ pt_noeol:
 
 ; pt_last(rcx = TXT*, rdx = number of lines) -> eax index of the last line when the text does not end with a
 ;   line break, else -2 (no row has that line index) (leaf: rax, rcx, r8)
+;   The stored text ends with its line break only as long as it is the text that was read from the file: once
+;   a compare has taken it from the pane the break is gone, and TXT+24 still says that the file had one.
 pt_last:
     mov eax, -2
+    cmp dword [rcx+24], 0
+    jne .e
     mov r8, [rcx+8]                  ; length
     test r8, r8
     jz .e
@@ -98,6 +102,20 @@ pt_str:
 ; text_patch_build(tv, &length) -> rax malloc'd UTF-16 text of the patch (0: out of memory), *length = characters
 ;   (the view must not be folded / unified)
 text_patch_build:
+    PROLOG 64
+    mov rbx, rcx
+    mov rsi, rdx
+    mov edx, 1                       ; the blank lines that the view ignores are changes all the same
+    call tv_blank_kinds
+    invoke text_patch_rows, rbx, rsi
+    mov rsi, rax
+    mov rcx, rbx
+    xor edx, edx
+    call tv_blank_kinds
+    mov rax, rsi
+    EPILOG 64
+
+text_patch_rows:
     PROLOG 352
     mov rbx, rcx
     mov [rsp+PT_PATH], rdx           ; where the length goes
@@ -157,6 +175,7 @@ text_patch_build:
     add rcx, [rbx+TV_LENB]
     lea rcx, [rcx+r13*4]
     mov rax, [rbx+TV_NBLK]
+    add rax, [rbx+TV_NIGN]
     shl rax, 6
     add rcx, rax
     add rcx, 1500
@@ -427,8 +446,9 @@ text_patch_clip:
     invoke tv_unfold, rsi, rbx
     cmp qword [rbx+TV_NROWS], 0
     je .norun
-    cmp qword [rbx+TV_NBLK], 0
-    je .same
+    mov rax, [rbx+TV_NBLK]
+    add rax, [rbx+TV_NIGN]           ; ignored blank lines are in the patch
+    jz .same
     invoke text_patch_build, rbx, &rsp+96
     mov r12, rax
     test rax, rax
@@ -475,8 +495,9 @@ text_patch:
     invoke tv_unfold, rsi, rbx            ; the patch is made from the full comparison
     cmp qword [rbx+TV_NROWS], 0
     je .norun
-    cmp qword [rbx+TV_NBLK], 0
-    je .same
+    mov rax, [rbx+TV_NBLK]
+    add rax, [rbx+TV_NIGN]           ; ignored blank lines are in the patch
+    jz .same
     mov word [rsp+128], 0
     invoke browse_save_as, rsi, &rsp+128, &pt_flt, &s_pt_ext
     test eax, eax

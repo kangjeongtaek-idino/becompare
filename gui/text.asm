@@ -74,7 +74,8 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define TV_NONUM  3920          ; gutters without line numbers (option "line numbers" off)
 %define TV_UST    3928          ; undo / redo steps (undo.asm), the tag of a step is the side
 %define TV_USLD   3936          ; set by text_side when it read a file
-%define TV_SIZE   3944
+%define TV_NIGN   3944          ; blocks of blank lines that "ignore blank lines" took out of the differences
+%define TV_SIZE   3952
 %define E_HR      40
 %define ID_ED_FIND   303
 %define ID_ED_NEXT   304
@@ -92,6 +93,7 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define ID_CHK_WS    221
 %define ID_CMB_CTX   222
 %define ID_CHK_NUM   223
+%define ID_CHK_BLANK 224
 %define ID_EDIT_RULES 232
 %define ID_LBL_RULES 233
 %define TV_RULES  3168
@@ -277,6 +279,7 @@ sum_len:
 %include "text_patch.inc"
 %include "text_goline.inc"
 %include "text_undo.inc"
+%include "text_blank.inc"
 %include "text_word.inc"
 %include "text_fold.inc"
 %include "text_uni.inc"
