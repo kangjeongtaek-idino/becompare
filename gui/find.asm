@@ -1279,9 +1279,12 @@ fi_mftraw:
 .fu:
     cmp r10d, ecx
     jae .fuok
-    mov r11, [rsp+8+FR_BPS]
-    imul r11, r10
-    sub r11, 2
+    mov rax, [rsp+8+FR_RSZ]                ; the saved values belong to blocks of record size / (count - 1)
+    xor edx, edx                     ; bytes - 512 on NTFS whatever the sector size of the volume is:
+    lea r11d, [rcx-1]                ; with 4096 byte sectors only one of the eight places was put back
+    div r11
+    imul rax, r10
+    lea r11, [rax-2]
     cmp r11, [rsp+8+FR_RSZ]
     jae .fuok
     cmp [r12+r11], r9w
@@ -1472,9 +1475,12 @@ fi_mftraw:
 .f2:
     cmp r10d, ecx
     jae .f2ok
-    mov r11, [rsp+8+PF+FR_BPS]
-    imul r11, r10
-    sub r11, 2
+    mov rax, [rsp+8+PF+FR_RSZ]                ; the saved values belong to blocks of record size / (count - 1)
+    xor edx, edx                     ; bytes - 512 on NTFS whatever the sector size of the volume is:
+    lea r11d, [rcx-1]                ; with 4096 byte sectors only one of the eight places was put back
+    div r11
+    imul rax, r10
+    lea r11, [rax-2]
     cmp r11, [rsp+8+PF+FR_RSZ]
     jae .f2ok
     cmp [r12+r11], r9w

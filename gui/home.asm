@@ -173,6 +173,7 @@ WSTR s_sm_clip,     "📋 메신저 대화창 붙여넣기 복사 (Ctrl+V)"
 WSTR s_sm_nearby,   "🌐 Windows 주변 기기 공유"
 WSTR s_status_copied, "%u개 항목을 클립보드에 복사했습니다."
 WSTR s_status_deleted, "%u개 항목을 휴지통으로 이동했습니다."
+WSTR s_status_delfail, "삭제를 취소했거나 일부 항목을 지우지 못했습니다."
 WSTR s_status_email, "이메일 프로그램을 열었습니다. 본문에 Ctrl+V로 파일을 첨부하세요."
 WSTR s_status_props, "파일 속성 창을 열었습니다."
 WSTR s_status_kakao, "파일을 복사했습니다. 카카오톡 대화창에서 Ctrl+V로 전송하세요."
@@ -1166,7 +1167,16 @@ home_proc:
     je .find
     cmp r12, FIND_TIMER               ; while the drives are being listed the results are refreshed
     jne .def
+    ; ... but not while rows are checked or selected: the refresh puts other files on those rows (a menu or
+    ; a Delete that follows would act on them) and wipes the check marks. It runs again once they are gone.
+    cmp qword [hf_chk_cnt], 0
+    jne .tskip
+    invoke GetDlgItem, rsi, ID_FIND_LIST
+    invoke SendMessageW, rax, 0x1032, 0, 0            ; LVM_GETSELECTEDCOUNT
+    test eax, eax
+    jnz .tskip
     invoke home_find, rsi
+.tskip:
     xor eax, eax
     EPILOG 192
 .notify:
@@ -1749,7 +1759,7 @@ home_find_resort:
 ; home_find_col(hwnd, column): a click on a column header - sort by it; a second click turns the order.
 ;   Dates and sizes start with the largest, names, types and folders with A.
 home_find_col:
-    PROLOG 64
+    PROLOG 192
     mov rsi, rcx
     mov ebx, edx
     cmp ebx, 4
@@ -1768,9 +1778,22 @@ home_find_col:
 .dn:
     mov qword [hf_desc], 1
 .go:
+    ; the check marks and the selection belong to row numbers: after the sort they would sit on other files
+    ; (and Delete would take those), so both are cleared
+    mov qword [hf_chk_cnt], 0
+    cmp qword [hf_chk], 0
+    je .nochk
+    invoke memset, [hf_chk], 0, [hf_n]
+.nochk:
+    invoke GetDlgItem, rsi, ID_FIND_LIST
+    mov rdi, rax
+    invoke memset, &rsp+96, 0, 88    ; LVITEMW: state 0 ...
+    mov dword [rsp+96+16], 2         ; ... for LVIS_SELECTED
+    invoke SendMessageW, rdi, 0x102B, -1, &rsp+96     ; LVM_SETITEMSTATE, every item
     invoke home_find_resort, rsi
+    invoke home_find_update_chk_lbl, rsi
 .d:
-    EPILOG 64
+    EPILOG 192
 
 ; home_find_disp(NMLVDISPINFOW*): text of one cell of the result list
 home_find_disp:
@@ -2255,6 +2278,7 @@ home_find_do_copy:
 
     mov rdi, r15
     xor ebx, ebx
+    mov dword [rsp+400], 0           ; paths that could be resolved
 .cp_fill:
     cmp ebx, r13d
     jae .cp_fill_done
@@ -2263,10 +2287,12 @@ home_find_do_copy:
     test eax, eax
     jz .cp_fill_skip
     lea rdi, [rdi+rax*2+2]
+    inc dword [rsp+400]
 .cp_fill_skip:
     inc ebx
     jmp .cp_fill
 .cp_fill_done:
+    mov r13d, [rsp+400]              ; the list holds this many strings: the loops below must not look for more
     mov word [rdi], 0
     add rdi, 2
     sub rdi, r15                     ; rdi = total bytes
@@ -2449,8 +2475,9 @@ home_find_do_props:
 
     mov edx, [r12]
     invoke find_path, rdx, &rsp+96, 790
+    mov r14d, eax                    ; free() does not keep eax
     invoke free, r12
-    test eax, eax
+    test r14d, r14d
     jz .d
 
     invoke SHObjectProperties, [g_hframe], 2, &rsp+96, 0
@@ -2524,12 +2551,19 @@ home_find_do_del:
     mov qword [rsp+120], 0
     mov word [rsp+128], 0x0040       ; FOF_ALLOWUNDO
     invoke SHFileOperationW, &rsp+96
+    mov r14d, eax                    ; not 0: failed
+    or r14d, [rsp+96+36]             ; fAnyOperationsAborted: cancelled, or not everything was deleted
 
     invoke free, r15
     invoke free, r12
 
     invoke home_find, rsi
     invoke home_find_update_chk_lbl, rsi
+    test r14d, r14d
+    jz .del_ok
+    invoke set_status, &s_status_delfail
+    jmp .d
+.del_ok:
     movsxd r13, r13d
     invoke _snwprintf, &rsp+96, 80, &s_status_deleted, r13
     invoke set_status, &rsp+96
@@ -3083,7 +3117,8 @@ home_draw_listitem:
     invoke GetPrivateProfileStringW, &sec_session, &hk_b, &s_empty, &rsp+3300, 519, &rsp+96
 
     ; type label
-    lea r8, [s_nolabel]
+    lea rax, [s_nolabel]
+    mov [rsp+4350], rax              ; label (a call does not keep r8)
     xor esi, esi
 .t:
     cmp esi, 12
@@ -3097,8 +3132,8 @@ home_draw_listitem:
 .thit:
     lea rax, [tab_titles]
     mov r8, [rax+rsi*8]
+    mov [rsp+4350], r8
 .tdone:
-    mov [rsp+4350], r8                ; label
 
     ; file name tails
     lea rdi, [rsp+2200]
