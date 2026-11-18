@@ -168,6 +168,8 @@ tv_texts_uni:
     cmp ecx, 6
     je .fromb
     mov ecx, [rax+4]                 ; left line
+    cmp ecx, -1                      ; an ignored blank line that only the right side has
+    je .fromb
     mov rdx, [r13]
     mov rdx, [rdx+rcx*8]
     jmp .copy
@@ -242,6 +244,8 @@ tv_color_uni:
     cmp ecx, 6
     je .p1b
     mov ecx, [rax+4]
+    cmp ecx, -1                      ; an ignored blank line that only the right side has
+    je .p1b
     mov rdx, [r13]
     mov rdx, [rdx+rcx*8]
     jmp .p1len
