@@ -37,6 +37,7 @@ powershell -File build.ps1          # src/bc.asm -> bc.exe (이전 단계의 콘
 
 ```powershell
 python tools/hazard.py              # invoke 인자 덮어쓰기 / 스택 프레임 16바이트 정렬 정적 검사 -> "hazards: 0" 이어야 함
+python tools/bufcheck.py            # 길이 제한 호출에 넘긴 스택 버퍼가 함수 프레임을 넘는지 정적 검사 -> "overflows: 0" 이어야 함
 python tools/test_regressions.py    # 격리된 경로에서 재빌드 + 저장 오류·상태·화면 동작·명령줄 회귀 검사 536개
 powershell -File tools/manual/t_smoke.ps1  # 세션 유형 14가지가 3초 이상 살아 있는지 확인 (실제 창을 띄움, 수동 확인용)
 ```
@@ -286,7 +287,7 @@ gui/
   script.asm / shell.asm       스크립트 언어, 탐색기 통합
   inc/          매크로(invoke), Win32 상수, 앱 정의
 src/bc.asm      이전 단계의 콘솔 도구 (bc.exe)
-tools/          회귀 검사(test_regressions.py, test_*.c), 정적 검사기(hazard.py), 구문 강조 표 생성기(gen_syn.py), 크래시 로거(crash_debug.asm.txt)
+tools/          회귀 검사(test_regressions.py, test_*.c), 정적 검사기(hazard.py, bufcheck.py), 구문 강조 표 생성기(gen_syn.py), 크래시 로거(crash_debug.asm.txt)
 tools/manual/   수동 확인용 화면 시나리오(t_*.ps1, ui.ps1)와 시험 자료 생성기·시험용 FTP 서버
 ```
 

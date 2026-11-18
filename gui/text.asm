@@ -75,7 +75,8 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define TV_UST    3928          ; undo / redo steps (undo.asm), the tag of a step is the side
 %define TV_USLD   3936          ; set by text_side when it read a file
 %define TV_NIGN   3944          ; blocks of blank lines that "ignore blank lines" took out of the differences
-%define TV_SIZE   3952
+%define TV_ZW     3952          ; dword[2]: the file of that side holds U+200B itself (the filler character)
+%define TV_SIZE   3960
 %define E_HR      40
 %define ID_ED_FIND   303
 %define ID_ED_NEXT   304
@@ -185,11 +186,14 @@ text_create:
     EPILOG 128
 
 ; ---------------------------------------------------------------- filler handling
-; strip_fillers(text, len) -> new length: drops rows that are exactly one FILLER char
+; strip_fillers(text, len, keep) -> new length: drops rows that are exactly one FILLER char.
+;   With keep = 0 every other FILLER goes as well: text typed on a filler row sits next to the filler, and
+;   that invisible character used to be written to the file. keep = 1 is for a file that holds U+200B itself.
 strip_fillers:
     PROLOG 64
     mov rsi, rcx                     ; text
     mov rdi, rdx                     ; len
+    mov r12d, r8d
     xor r8d, r8d                     ; read index
     xor r9d, r9d                     ; write index
 .l:
@@ -227,9 +231,14 @@ strip_fillers:
     cmp r11, r8
     jae .brk
     movzx eax, word [rsi+r11*2]
+    inc r11
+    cmp eax, FILLER
+    jne .put
+    test r12d, r12d
+    jz .cp                           ; a filler inside a row that was typed on
+.put:
     mov [rsi+r9*2], ax
     inc r9
-    inc r11
     jmp .cp
 .brk:
     cmp r8, rdi

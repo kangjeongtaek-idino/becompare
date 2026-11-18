@@ -7,6 +7,7 @@
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetWindowTextW, SetWindowTextW
 extern InvalidateRect, SetWindowTheme
+extern wcsncpy
 extern malloc, calloc, realloc, free, memset, wcslen, wcscpy, wcscmp, _wcsicmp, wcsrchr, _snwprintf, qsort, wcstod
 extern g_hinst, g_dark, th_bg, th_fg, th_panel, th_diff, th_lonly, th_ronly, th_hl, th_panelbrush
 extern mk, reg_class, scl, set_status, msgbox
@@ -1048,7 +1049,7 @@ tb_rebuild:
 
 ; tb_columns(hwnd, tb): rebuild the list view columns from both files
 tb_columns:
-    PROLOG 224
+    PROLOG 736                       ; the header text at rsp+160: wchar[280]
     mov rsi, rcx
     mov rbx, rdx
     mov r12, [rbx+TB_HLIST]
@@ -1116,7 +1117,8 @@ tb_columns:
     invoke side_cell, &rbx+TB_SA, 0, rsi
     cmp word [rax], 0
     je .fallback
-    invoke wcscpy, &rsp+160, rax
+    invoke wcsncpy, &rsp+160, rax, 259   ; a header cell can be of any length (it overran 36 characters of room)
+    mov word [rsp+160+518], 0
     jmp .ins
 .fallback:
     lea eax, [rsi+1]
@@ -1137,7 +1139,7 @@ tb_columns:
     inc r15
     jmp .col
 .d:
-    EPILOG 224
+    EPILOG 736
 
 ; tb_cell(tb, resrow, sub, buf) -> eax 1 if this cell is a changed cell
 tb_cell:
@@ -1227,7 +1229,7 @@ tb_info:
     PROLOG 320
     mov rsi, rcx
     mov rbx, rdx
-    invoke _snwprintf, &rsp+96, 140, &f_info, [rbx+TB_SA+SD_NROWS], [rbx+TB_SB+SD_NROWS], [rbx+TB_CNT], [rbx+TB_CNT+8], [rbx+TB_CNT+16], [rbx+TB_CNT+24]
+    invoke _snwprintf, &rsp+96, 112, &f_info, [rbx+TB_SA+SD_NROWS], [rbx+TB_SB+SD_NROWS], [rbx+TB_CNT], [rbx+TB_CNT+8], [rbx+TB_CNT+16], [rbx+TB_CNT+24]
     invoke GetDlgItem, rsi, ID_LBL_INFO
     invoke SetWindowTextW, rax, &rsp+96
     EPILOG 320

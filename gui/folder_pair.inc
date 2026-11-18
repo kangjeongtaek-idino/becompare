@@ -436,10 +436,10 @@ pair_names:
     mov r10, [rcx]
     cmp word [r13], 0
     je .norel1
-    invoke _snwprintf, &rsp+200, 1030, &f_path, r13, r10
+    invoke _snwprintf, &rsp+200, 529, &f_path, r13, r10
     jmp .k1
 .norel1:
-    invoke _snwprintf, &rsp+200, 1030, &f_str, r10
+    invoke _snwprintf, &rsp+200, 529, &f_str, r10
 .k1:
     mov rcx, [rsp+152]
     mov r10, [rcx]

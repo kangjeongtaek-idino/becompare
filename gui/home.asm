@@ -2108,7 +2108,7 @@ home_find_update_chk_lbl:
     jz .chk_none_maybe_sel
     mov r12, rdx
     mov r13, [fi_vis]
-    invoke _snwprintf, &rsp+96, 99, &f_find_ready_chk, [hf_n], r12, r13
+    invoke _snwprintf, &rsp+96, 80, &f_find_ready_chk, [hf_n], r12, r13
     invoke GetDlgItem, rsi, ID_RLABEL
     invoke SetWindowTextW, rax, &rsp+96
     jmp .d
@@ -2119,13 +2119,13 @@ home_find_update_chk_lbl:
     jle .chk_none
     movsxd r12, eax
     mov r13, [fi_vis]
-    invoke _snwprintf, &rsp+96, 99, &f_find_ready_chk, [hf_n], r12, r13
+    invoke _snwprintf, &rsp+96, 80, &f_find_ready_chk, [hf_n], r12, r13
     invoke GetDlgItem, rsi, ID_RLABEL
     invoke SetWindowTextW, rax, &rsp+96
     jmp .d
 .chk_none:
     mov r13, [fi_vis]
-    invoke _snwprintf, &rsp+96, 99, &f_find_ready, [hf_n], r13
+    invoke _snwprintf, &rsp+96, 80, &f_find_ready, [hf_n], r13
     invoke GetDlgItem, rsi, ID_RLABEL
     invoke SetWindowTextW, rax, &rsp+96
 .d:
@@ -2531,7 +2531,7 @@ home_find_do_del:
     invoke home_find, rsi
     invoke home_find_update_chk_lbl, rsi
     movsxd r13, r13d
-    invoke _snwprintf, &rsp+96, 99, &s_status_deleted, r13
+    invoke _snwprintf, &rsp+96, 80, &s_status_deleted, r13
     invoke set_status, &rsp+96
     jmp .d
 

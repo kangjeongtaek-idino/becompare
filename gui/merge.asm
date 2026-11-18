@@ -615,7 +615,7 @@ mg_info:
     je .m
     lea rdi, [s_mode3]
 .m:
-    invoke _snwprintf, &rsp+96, 120, &f_info, rdi, [rbx+MG_NCONF], [rbx+MG_NAUTO]
+    invoke _snwprintf, &rsp+96, 112, &f_info, rdi, [rbx+MG_NCONF], [rbx+MG_NAUTO]
     invoke GetDlgItem, rsi, ID_LBL_INFO
     invoke SetWindowTextW, rax, &rsp+96
     EPILOG 320

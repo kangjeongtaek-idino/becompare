@@ -430,7 +430,7 @@ text_side:
     test rax, rax
     jz .fail
     mov r13, rax
-    invoke strip_fillers, r13, [rsp+1140]
+    invoke strip_fillers, r13, [rsp+1140], #[rbx+r12*4+TV_ZW]
     mov r14, rax                     ; new length (free() would clobber rax)
     test r14, r14
     jz .nobrk
@@ -479,6 +479,20 @@ text_side:
     invoke text_load, &rsp+96, r15
     test eax, eax
     jz .fail
+    mov dword [rbx+r12*4+TV_ZW], 0   ; does the file hold the filler character itself?
+    mov rcx, [r15]
+    mov rdx, [r15+8]
+.zw:
+    test rdx, rdx
+    jz .zwd
+    cmp word [rcx], FILLER
+    je .zwy
+    add rcx, 2
+    dec rdx
+    jmp .zw
+.zwy:
+    mov dword [rbx+r12*4+TV_ZW], 1
+.zwd:
     invoke wcscpy, rdi, &rsp+96
     mov dword [rbp], 1
     mov eax, 1
@@ -1061,7 +1075,7 @@ tv_save:
     test rax, rax
     jz .fail
     mov rbp, rax
-    invoke strip_fillers, rbp, [rsp+1140]
+    invoke strip_fillers, rbp, [rsp+1140], #[rbx+r12*4+TV_ZW]
     mov r13, rax
     cmp dword [r15+24], 0            ; the original ended with a line break
     je .nofinal
