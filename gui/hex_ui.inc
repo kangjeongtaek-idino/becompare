@@ -472,6 +472,8 @@ hx_compare:
     mov edx, 1
     invoke calloc, rcx, rdx
     mov [rbx+HX_RDIFF], rax
+    test rax, rax
+    jz .err                          ; no memory for the row table: as if the files could not be read
     xor r13d, r13d
     xor r14d, r14d                   ; differing bytes
 .rows:

@@ -10,6 +10,14 @@
 default rel
 bits 64
 
+; Every module allocates through mem.asm: a small request that fails ends the program with a message, a large
+; one returns 0 as before (those callers check). mem.asm itself defines BC_MEM_IMPL to reach the C runtime.
+%ifndef BC_MEM_IMPL
+%define malloc bc_malloc
+%define calloc bc_calloc
+%define realloc bc_realloc
+%endif
+
 %macro PROLOG 1
     push rbx
     push rbp

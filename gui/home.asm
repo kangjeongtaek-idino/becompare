@@ -299,6 +299,7 @@ alignb 8
 hf_ids:  resq 1                     ; ids of the search results, in the order shown
 hf_chk:  resq 1                     ; checked state (1 byte per item in hf_ids)
 hf_chk_cnt: resq 1                  ; count of checked items
+hf_only: resq 1                     ; row + 1 the next action is for alone (0: the checked / selected rows)
 hf_n:    resq 1
 hf_state_il: resq 1                  ; state image list for checkboxes
 hf_key:  resq 1                     ; sort column: 0 name, 1 date, 2 type, 3 size, 4 folder
@@ -2058,6 +2059,19 @@ home_find_menu:
     invoke DestroyMenu, r15
     test r13d, r13d
     jz .d
+    ; Copy / Share / Email / Delete / Properties used to take the checked rows even when the menu was opened on
+    ; another row (Open and Show took the clicked one): on an unchecked row they are for that row
+    mov qword [hf_only], 0
+    cmp qword [hf_chk_cnt], 0
+    je .pick
+    mov rax, [hf_chk]
+    test rax, rax
+    jz .pick
+    cmp byte [rax+r14], 0
+    jne .pick
+    lea rax, [r14+1]
+    mov [hf_only], rax
+.pick:
     cmp r13d, FA_COPY
     je .act_copy
     cmp r13d, FA_SHARE
@@ -2068,6 +2082,7 @@ home_find_menu:
     je .act_del
     cmp r13d, FA_PROPS
     je .act_props
+    mov qword [hf_only], 0           ; the others do not go through the target list
     cmp r13d, FA_SELALL
     je .act_selall
     invoke home_find_act, r14, r13
@@ -2205,6 +2220,21 @@ home_find_get_targets:
     mov rdi, rdx
     mov rbp, r8
     xor ebx, ebx                     ; count = 0
+    mov rax, [hf_only]               ; the menu was opened on a row that is not checked: that row alone
+    mov qword [hf_only], 0
+    test rax, rax
+    jz .usual
+    dec rax
+    cmp rax, [hf_n]
+    jae .usual
+    test rbp, rbp
+    jz .usual
+    mov rcx, [hf_ids]
+    mov edx, [rcx+rax*4]
+    mov [rdi], edx
+    mov ebx, 1
+    jmp .ret_count
+.usual:
     cmp qword [hf_chk_cnt], 0
     jz .check_sel
     mov r8, [hf_n]
