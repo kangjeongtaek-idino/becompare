@@ -3,6 +3,8 @@
 ;   or one other character); an LCS over the tokens finds what is shared and only the other tokens are
 ;   painted with th_tc_modin, so two separate edits in one line give two separate spans.
 ;   Lines with more than WH_MAXT tokens are left to the caller's prefix / suffix highlighting.
+;   "Highlight characters" (TV_WORDS = 2, IntelliJ's character level): every character is a token of its own,
+;   so only the characters that changed inside a word are painted (lines of up to WH_MAXT characters).
 
 %define WH_MAXT 256
 %define WH_TAS  0                    ; dword[256] token starts, line A
@@ -16,6 +18,7 @@
 section .bss
 alignb 8
 wh_buf: resb 140000
+wh_char: resd 1                     ; 1: every character is a token (character level highlight)
 wh_fl:  resd 1                       ; compare options in effect: 1 ignore case, 2 ignore blanks, 4 trim, 8 comments, 16 identifiers
 
 section .text
@@ -148,6 +151,8 @@ wh_tok:
     inc rbp
     test r14d, r14d
     jz .emit                         ; punctuation: one character per token
+    cmp dword [wh_char], 0
+    jne .emit                        ; character level: so is everything else
 .ext:
     cmp rbp, rdi
     jae .emit
@@ -261,6 +266,13 @@ tv_wordhl:
     lea rbx, [wh_buf]
     mov r14, [rsp+WW_TV]
     mov ecx, [r14+TV_OPTS]
+    xor eax, eax
+    cmp qword [r14+TV_WORDS], 2
+    sete al
+    mov [wh_char], eax
+    jne .fl
+    and ecx, ~16                     ; single characters are no identifiers
+.fl:
     mov [wh_fl], ecx
     mov rax, [rsp+WW_Q]
     invoke wh_window, [rax], [rax+8], &r14+TV_CMT

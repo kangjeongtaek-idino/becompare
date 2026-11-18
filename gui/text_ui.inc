@@ -593,6 +593,13 @@ text_compare:
     invoke get_chk, rsi, ID_CHK_WORD
     movzx eax, al
     mov [rbx+TV_WORDS], rax
+    test eax, eax
+    jz .nochar
+    invoke get_chk, rsi, ID_CHK_CHAR ; character level instead of word level
+    test eax, eax
+    jz .nochar
+    mov qword [rbx+TV_WORDS], 2
+.nochar:
     invoke tv_enc_get, rsi
     mov [rbx+TV_CP], rax
     invoke tv_ctx_get, rsi
@@ -1214,6 +1221,7 @@ tv_layout:
     PLACE ID_CMB_ENC, 190
     PLACE ID_CHK_UNI, 110
     PLACE ID_CHK_WORD, 110
+    PLACE ID_CHK_CHAR, 110
     PLACE ID_CHK_SCRL, 130
     PLACE ID_CHK_WS, 100
     PLACE ID_CHK_NUM, 90
@@ -1490,6 +1498,7 @@ tv_proc:
     invoke tv_enc_create, rsi
     invoke mk_chk, rsi, &s_c_uni, ID_CHK_UNI, 0
     invoke mk_chk, rsi, &s_c_word, ID_CHK_WORD, 1
+    invoke mk_chk, rsi, &s_c_char, ID_CHK_CHAR, 0
     invoke mk_chk, rsi, &s_c_scrl, ID_CHK_SCRL, 1
     invoke mk_chk, rsi, &s_c_ws, ID_CHK_WS, 0
     invoke mk_chk, rsi, &s_c_num, ID_CHK_NUM, 1
@@ -1631,6 +1640,8 @@ tv_proc:
     cmp ebx, ID_CHK_UNI
     je .doreq
     cmp ebx, ID_CHK_WORD
+    je .doreq
+    cmp ebx, ID_CHK_CHAR
     je .doreq
     cmp ebx, ID_CHK_SCRL
     je .scrl
@@ -1897,6 +1908,7 @@ WSTR tt_text_num, "거터의 줄 번호를 보이거나 숨깁니다 (변경 표
 WSTR tt_text_blank, "빈 줄(공백·탭만 있는 줄 포함)만 추가·삭제된 곳은 차이로 보지 않습니다"
 WSTR tt_text_ws, "공백을 · 로, 탭을 → 로 표시합니다 (읽기 전용 표시)"
 WSTR tt_text_scrl, "끄면 두 창을 따로 스크롤합니다. 다시 켜면 오른쪽 창이 왼쪽 창 위치로 맞춰집니다"
+WSTR tt_text_char, "단어 강조를 글자 단위로 합니다: 단어 안에서 바뀐 글자만 칠합니다 (256자 이하인 줄)"
 WSTR tt_text_word, "줄 안의 바뀐 단어를 따로 강조합니다. 끄면 바뀐 줄 전체만 칠합니다"
 WSTR tt_text_uni, "좌우 두 창 대신 삭제·추가 줄을 한 창에 이어서 보여 줍니다"
 WSTR tt_text_14, "다음 일치 항목으로 이동합니다"
@@ -1934,6 +1946,7 @@ tt_text:
     dq ID_CMB_ENC, tt_text_enc
     dq ID_CHK_UNI, tt_text_uni
     dq ID_CHK_WORD, tt_text_word
+    dq ID_CHK_CHAR, tt_text_char
     dq ID_CHK_SCRL, tt_text_scrl
     dq ID_CHK_WS, tt_text_ws
     dq ID_CHK_BLANK, tt_text_blank
