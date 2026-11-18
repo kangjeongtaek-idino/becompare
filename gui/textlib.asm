@@ -7,7 +7,7 @@ extern MultiByteToWideChar, WideCharToMultiByte, CreateFileW, WriteFile, CloseHa
 extern safe_write2, tl_convert, tl_isconv, DeleteFileW
 extern read_file_bytes, write_utf8, vec_push, lower_w
 
-global g_tc_rules, text_load, text_save, text_load_raw, lines_split, compare_lines, hunk_free, keys_build, eol_keep, eol_restore
+global g_tc_rules, text_load, text_save, text_load_raw, lines_split, compare_lines, hunk_free, keys_build, eol_keep, eol_restore, g_tl_cp, text_opts
 ; TXT { wchar* text; qword len; dd enc; dd crlf; dd eol }
 ; LINES { wchar** ptrs; qword count }
 ; hunk: { dd type(0 equal,1 change); dd aStart; dd aLen; dd bStart; dd bLen; dd pad } = 24 bytes
@@ -44,7 +44,8 @@ text_load_raw:
     jz .fail
     mov rbx, rax                     ; bytes
     mov rsi, [rsp+96]                ; size
-    mov dword [rsp+128], 0           ; TXT flags (+28): 1 read as Latin-1, 2 line ends of more than one kind
+    mov dword [rsp+128], 0           ; TXT+28: 2 line ends of more than one kind, 4 UTF-16 without a byte order
+                                     ; mark, bits 8..: the code page the text was read with (0: the ANSI one)
     mov eax, 0x7FFFFFF0              ; the conversion takes an int length: a larger file would be read in
     cmp rsi, rax                     ; part (size mod 4 GB) and a save would write that part back
     jbe .sizeok
@@ -94,7 +95,21 @@ text_load_raw:
     mov r15d, CP_UTF8
     test r14d, r14d
     jnz .cp
-    xor r15d, r15d                   ; the ANSI code page ...
+    xor r15d, r15d
+    mov eax, [g_tl_cp]               ; the view names the code page ...
+    test eax, eax
+    jz .guess
+    cmp eax, 1200
+    je .force16
+    mov r15d, eax
+    shl eax, 8
+    or [rsp+128], eax
+    jmp .cp
+.force16:                            ; ... or UTF-16 LE without a mark
+    mov r14d, 3
+    or dword [rsp+128], 4
+    jmp .utf16
+.guess:                              ; ... else the ANSI code page ...
     cmp qword [rsp+112], 0
     je .cp
     invoke MultiByteToWideChar, 0, MB_ERR_INVALID_CHARS, [rsp+104], [rsp+112], 0, 0
@@ -104,7 +119,7 @@ text_load_raw:
     ; would replace them and a save would write the replacements. Latin-1 maps every byte to one character
     ; and back, so the file is shown oddly but saved byte for byte.
     mov r15d, 28591
-    or dword [rsp+128], 1
+    or dword [rsp+128], 28591 << 8
 .cp:
     invoke MultiByteToWideChar, r15, 0, [rsp+104], [rsp+112], 0, 0
     mov [rsp+120], rax               ; wide length
@@ -219,7 +234,10 @@ text_load_raw:
 wr2:
     jmp safe_write2
 
-; text_save(path, text, len, enc | crlf<<8) -> eax 1 ok
+; text_save(path, text, len, options) -> eax 1 ok
+;   options: bits 0-1 encoding (0 code page, 1 UTF-8, 2 UTF-8 with mark, 3 UTF-16), bit 7 UTF-16 without a mark,
+;   bits 8-15 line ends (0 LF, 1 CR LF, 2 as they are in the text), bits 16-31 the code page (0: the ANSI one).
+;   text_opts builds them from a TXT.
 ;   text uses \r, \n or \r\n as line breaks; output uses the chosen EOL
 ; text_save(path, text, len, enc | crlf<<8) -> eax 1 ok; refuses files that are only readable through a converter
 text_save:
@@ -289,19 +307,18 @@ text_save_raw:
     jmp .l
 .ld:
     mov word [rsi+rdi*2], 0
-    movzx eax, r15b                  ; encoding
+    mov eax, r15d                    ; encoding (bit 7: UTF-16 without a byte order mark)
+    and eax, 3
     cmp eax, 3
     je .u16
     cmp eax, 1
     je .u8
     cmp eax, 2
     je .u8bom
-    ; ANSI code page - or Latin-1 for a file that was read that way (flag 1 in bits 16..)
-    mov dword [rsp+112], 0
-    test r15d, 0x10000
-    jz .acp
-    mov dword [rsp+112], 28591
-.acp:
+    ; the code page the file was read with (bits 16..; 0: the ANSI one)
+    mov eax, r15d
+    shr eax, 16
+    mov [rsp+112], eax
     invoke WideCharToMultiByte, #[rsp+112], 0, rsi, rdi, 0, 0, 0, 0
     mov rbp, rax
     lea rcx, [rbp+4]
@@ -337,8 +354,13 @@ text_save_raw:
     jmp .done
 .u16:
     mov word [rsp+96], 0xFEFF
+    mov r13d, 2                      ; the mark, unless the file was read without one
+    test r15d, 0x80
+    jz .u16w
+    xor r13d, r13d
+.u16w:
     lea rax, [rdi*2]
-    invoke wr2, r12, &rsp+96, 2, rsi, rax
+    invoke wr2, r12, &rsp+96, r13, rsi, rax
     mov ebx, eax
 .done:
     invoke free, rsi
@@ -347,6 +369,22 @@ text_save_raw:
 .fail:
     xor eax, eax
     EPILOG 192
+
+; text_opts(TXT*, crlf) -> eax options for text_save: the encoding the text was read with (leaf)
+text_opts:
+    mov eax, [rcx+16]
+    and eax, 3
+    shl edx, 8
+    or eax, edx
+    mov edx, [rcx+28]
+    test edx, 4
+    jz .bom
+    or eax, 0x80
+.bom:
+    shr edx, 8
+    shl edx, 16
+    or eax, edx
+    ret
 
 ; ---------------------------------------------------------------- line ends of a file that mixes them
 ; A view shows and edits lines; the kind of line end is a property of the file (TXT+20). A file that holds
@@ -1546,4 +1584,6 @@ hunk_free:
 section .bss
 alignb 8
 g_tc_rules: resq 1
+g_tl_cp: resq 1                      ; code page for the next load of a file that is not Unicode (0: guess; 1200:
+                                     ; UTF-16 LE without a mark). Set by a view around its text_load call.
 section .text

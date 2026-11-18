@@ -476,7 +476,10 @@ text_side:
     invoke us_clear, &rbx+TV_UST, 2  ; another file: the steps do not belong to it
     mov qword [rbx+TV_USLD], 1
     mov dword [rbp], 0
+    mov eax, [rbx+TV_CP]             ; the code page of the encoding box, for a file that is not Unicode
+    mov [g_tl_cp], rax
     invoke text_load, &rsp+96, r15
+    mov qword [g_tl_cp], 0
     test eax, eax
     jz .fail
     mov rax, r12                     ; mixed line ends: keep the text as read for the save (eol_restore)
@@ -516,6 +519,15 @@ tv_info:
     and eax, 3
     lea rcx, [enc_names]
     mov r14, [rcx+rax*8]
+    test eax, eax                    ; a code page other than the ANSI one: by its number
+    jnz .encn
+    mov r9d, [rbx+TV_TXA+28]
+    shr r9d, 8
+    jz .encn
+    invoke _snwprintf, &rsp+384, 12, &f_enc_cp, r9
+    mov word [rsp+384+24], 0
+    lea r14, [rsp+384]
+.encn:
     mov eax, [rbx+TV_TXA+20]
     and eax, 1
     lea rcx, [eol_names]
@@ -581,6 +593,8 @@ text_compare:
     invoke get_chk, rsi, ID_CHK_WORD
     movzx eax, al
     mov [rbx+TV_WORDS], rax
+    invoke tv_enc_get, rsi
+    mov [rbx+TV_CP], rax
     invoke tv_ctx_get, rsi
     cmp rax, [rbx+TV_CTX]
     je .samectx
@@ -1104,15 +1118,10 @@ tv_save:
     mov r13, [rsp+1168]
     mov dword [rsp+1160], 2          ; the text holds its line ends as they are to be written
 .opts:
-    mov r9d, [rsp+1160]
-    shl r9d, 8
-    mov eax, [r15+16]                ; enc
-    and eax, 3
-    or r9d, eax
-    mov eax, [r15+28]                ; read as Latin-1: written as Latin-1
-    and eax, 1
-    shl eax, 16
-    or r9d, eax
+    mov rcx, r15                     ; the encoding it was read with
+    mov edx, [rsp+1160]
+    call text_opts
+    mov r9d, eax
     invoke text_save, &rsp+96, rbp, r13, r9
     mov r14d, eax
     invoke free, rbp
@@ -1202,6 +1211,7 @@ tv_layout:
     PLACE ID_CHK_IDS, 140
     PLACE ID_CHK_FOLD, 170
     PLACE ID_CMB_CTX, 90
+    PLACE ID_CMB_ENC, 190
     PLACE ID_CHK_UNI, 110
     PLACE ID_CHK_WORD, 110
     PLACE ID_CHK_SCRL, 130
@@ -1477,6 +1487,7 @@ tv_proc:
     invoke mk_chk, rsi, &s_c_ids, ID_CHK_IDS, 0
     invoke mk_chk, rsi, &s_c_fold, ID_CHK_FOLD, 0
     invoke tv_ctx_create, rsi
+    invoke tv_enc_create, rsi
     invoke mk_chk, rsi, &s_c_uni, ID_CHK_UNI, 0
     invoke mk_chk, rsi, &s_c_word, ID_CHK_WORD, 1
     invoke mk_chk, rsi, &s_c_scrl, ID_CHK_SCRL, 1
@@ -1635,6 +1646,13 @@ tv_proc:
     je .doreq
     jmp .def
 .noctx:
+    cmp ebx, ID_CMB_ENC
+    jne .noenc
+    cmp ebp, 1                       ; CBN_SELCHANGE
+    jne .def
+    invoke tv_enc_changed, rsi, r15, r14
+    jmp .zero
+.noenc:
     cmp ebx, ID_CHK_CASE
     jb .def
     cmp ebx, ID_CHK_CMT
@@ -1872,6 +1890,7 @@ WSTR tt_text_10, "파일 형식에 맞춰 구문에 색을 입힙니다"
 WSTR tt_text_11, "식별자(변수·함수 이름) 차이를 무시합니다"
 WSTR tt_text_12, "비교할 때 같은 것으로 볼 문자열 규칙 (old=new;old2=new2)"
 WSTR tt_text_13, "찾을 문자열"
+WSTR tt_text_enc, "유니코드가 아닌 파일을 읽을 코드 페이지. 바꾸면 두 파일을 다시 읽고, 저장도 같은 인코딩으로 합니다"
 WSTR tt_text_ctx, "접을 때 변경된 줄 위아래에 남겨 둘 줄 수"
 WSTR tt_text_fold, "변경이 없는 긴 구간을 한 줄로 접어 차이만 모아 봅니다"
 WSTR tt_text_num, "거터의 줄 번호를 보이거나 숨깁니다 (변경 표시는 그대로)"
@@ -1912,6 +1931,7 @@ tt_text:
     dq ID_ED_CASE, tt_text_19
     dq ID_CHK_FOLD, tt_text_fold
     dq ID_CMB_CTX, tt_text_ctx
+    dq ID_CMB_ENC, tt_text_enc
     dq ID_CHK_UNI, tt_text_uni
     dq ID_CHK_WORD, tt_text_word
     dq ID_CHK_SCRL, tt_text_scrl

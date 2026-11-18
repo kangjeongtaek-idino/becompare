@@ -22,7 +22,7 @@ extern mk, reg_class, scl, set_status, msgbox
 extern mk_btn, mk_chk, mk_lbl, mk_edit, get_chk, ctl_color, theme_checks
 extern pb_create, pb_layout, pb_load, pb_collect, pb_command
 extern rich_monoface, rich_create, rich_set_text, rich_get_text, rich_bk, rich_theme, rich_len, rich_unsel, rich_quiet, rich_batch
-extern sb_init, sb_free, text_load, text_save, lines_split, compare_lines, hunk_free, eol_keep, eol_restore
+extern sb_init, sb_free, text_load, text_save, lines_split, compare_lines, hunk_free, eol_keep, eol_restore, text_opts, g_tl_cp
 extern g_tc_rules, icon_set, g_prev, g_next, g_copyr, g_copyl, set_tab_title, vec_push, rich_theme
 extern _wcsicmp, rich_get_text, g_dark, set_status_part
 
@@ -77,7 +77,8 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define TV_NIGN   3944          ; blocks of blank lines that "ignore blank lines" took out of the differences
 %define TV_ZW     3952          ; dword[2]: the file of that side holds U+200B itself (the filler character)
 %define TV_ORG    3960          ; {text, length} x 2: the file as it was read, kept when its line ends are mixed
-%define TV_SIZE   3992
+%define TV_CP     3992          ; code page chosen for files that are not Unicode (0: automatic), read at a compare
+%define TV_SIZE   4000
 %define E_HR      40
 %define ID_ED_FIND   303
 %define ID_ED_NEXT   304
@@ -96,6 +97,7 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define ID_CMB_CTX   222
 %define ID_CHK_NUM   223
 %define ID_CHK_BLANK 224
+%define ID_CMB_ENC   225
 %define ID_EDIT_RULES 232
 %define ID_LBL_RULES 233
 %define TV_RULES  3168
@@ -290,6 +292,7 @@ sum_len:
 %include "text_goline.inc"
 %include "text_undo.inc"
 %include "text_blank.inc"
+%include "text_enc.inc"
 %include "text_word.inc"
 %include "text_fold.inc"
 %include "text_uni.inc"

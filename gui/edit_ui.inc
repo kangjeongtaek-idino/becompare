@@ -279,15 +279,10 @@ ed_save:
     mov r13, [rsp+1168]
     mov dword [rsp+1160], 2
 .opts:
-    mov r9d, [rsp+1160]
-    shl r9d, 8
-    mov eax, [rbx+E_TXT+16]
-    and eax, 3
-    or r9d, eax
-    mov eax, [rbx+E_TXT+28]          ; read as Latin-1: written as Latin-1
-    and eax, 1
-    shl eax, 16
-    or r9d, eax
+    lea rcx, [rbx+E_TXT]             ; the encoding it was read with
+    mov edx, [rsp+1160]
+    call text_opts
+    mov r9d, eax
     invoke text_save, &rsp+96, rbp, r13, r9
     mov r14d, eax
     invoke free, rbp
