@@ -918,7 +918,17 @@ xl_read:
     jns .term
     xor eax, eax
 .term:
-    mov word [r15+rax*2], 0
+    mov qword [r15+rax*2], 0         ; four terminators (the buffer has 8 spare bytes): a tag cut off at the
+    xor ecx, ecx                     ; end makes the parser step behind the first one
+.nul:                                ; a NUL inside the text would end wcslen - which sizes the output - but
+    cmp rcx, rax                     ; not the parser, which went on behind it: it becomes a space
+    jae .free
+    cmp word [r15+rcx*2], 0
+    jne .nn
+    mov word [r15+rcx*2], ' '
+.nn:
+    inc rcx
+    jmp .nul
 .free:
     invoke free, r13
     mov rax, r15

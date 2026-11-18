@@ -11,7 +11,7 @@ WSTR s_hx_h4, "오른쪽 (ASCII)"
 WSTR s_hx_h5, "다른 바이트 수"
 WSTR s_hx_h6, "다른 위치(행 안의 바이트 번호)"
 WSTR s_hx_norun, "먼저 비교를 실행하세요."
-WSTR s_hx_cap, "행이 많아 처음 100,000행만 내보냈습니다."
+WSTR s_hx_cap, "행이 많아 처음 100,000행(Word는 50,000행)까지만 내보냈습니다. 그 뒤의 차이는 파일에 없습니다."
 WSTR s_b_xls, "내보내기…"
 WSTR s_hx_title, "16진(Hex) 비교 결과"
 WSTR s_hx_defname, "헥스비교결과"
@@ -480,7 +480,7 @@ hx_html_path:
 
 ; hx_export(hwnd, hx)
 hx_export:
-    PROLOG 1200
+    PROLOG 1440
     mov rsi, rcx
     mov rbx, rdx
     cmp qword [rbx+HX_LOADED], 0
@@ -500,9 +500,16 @@ hx_export:
 .docx:
     invoke hx_docx_path, rbx, &rsp+400
 .res:
-    invoke ex_done_open, rsi, rax, &rsp+400
+    mov r12, rax
+    cmp qword [rbx+HX_NV], 50000     ; the exports stop at 100,000 rows (Word: 50,000)
+    jbe .full
+    test r12, r12
+    jz .full
+    invoke msgbox, rsi, &s_hx_cap, MB_OK|MB_ICONINFO
+.full:
+    invoke ex_done_open, rsi, r12, &rsp+400
 .d:
-    EPILOG 1200
+    EPILOG 1440
 .norun:
     invoke msgbox, rsi, &s_hx_norun, MB_OK|MB_ICONINFO
-    EPILOG 1200
+    EPILOG 1440

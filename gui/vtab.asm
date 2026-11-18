@@ -218,6 +218,11 @@ zip_open:
     lea rcx, [r11+rax]
     lea rcx, [rcx+r10+46]
     mov [rsp+128], rcx               ; total record size
+    mov rax, rbp                     ; the whole record (its name) must lie inside the file
+    sub rax, rsi
+    add rax, rcx
+    cmp rax, rdi
+    ja .built
     ; name -> wide
     mov ecx, CP_UTF8
     test r8d, 0x800
@@ -329,6 +334,7 @@ zip_extract:
     invoke inflate_buf, r15, r14, rax, rbp
     test eax, eax
     jz .fail2
+    mov rbp, rdx                     ; what was produced, not the size the directory claims
     mov r15, [rsp+96]
     jmp .write
 .stored:

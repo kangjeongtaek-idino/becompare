@@ -377,7 +377,7 @@ text_html_path:
 
 ; text_export(hwnd, tv)
 text_export:
-    PROLOG 1200
+    PROLOG 1440
     mov rsi, rcx
     mov rbx, rdx
     invoke tv_unfold, rsi, rbx            ; the export is always the full comparison
@@ -400,7 +400,7 @@ text_export:
 .res:
     invoke ex_done_open, rsi, rax, &rsp+400
 .d:
-    EPILOG 1200
+    EPILOG 1440
 .norun:
     invoke msgbox, rsi, &s_tx_norun, MB_OK|MB_ICONINFO
-    EPILOG 1200
+    EPILOG 1440

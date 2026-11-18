@@ -605,7 +605,7 @@ script_main:
     mov eax, r12d
     EPILOG 2400
 .fail:
-    mov r12d, 2
+    mov dword [rbx+SC_ERR], 2        ; .done takes the exit code from here
     invoke sc_log, rbx, &s_unreadable
     jmp .done
 

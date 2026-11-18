@@ -206,7 +206,8 @@ hx_replace:
     jmp .ac
 .acd:
     inc r14d
-    add esi, r13d
+    mov eax, r13d
+    add rsi, rax                     ; the position is 64 bit: files of 4 GB and more
     jmp .al
 .anext:
     inc rsi

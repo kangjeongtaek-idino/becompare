@@ -403,23 +403,8 @@ pp_cursor:
     and eax, 0x00FFFFFF
     mov [rsp+104], rax
 .fmt:
-    ; BGR -> RGB for display
-    mov rax, [rsp+96]
-    cmp rax, -1
-    je .noa
-    mov ecx, eax
-    bswap ecx
-    shr ecx, 8
-    mov [rsp+96], rcx
-.noa:
-    mov rax, [rsp+104]
-    cmp rax, -1
-    je .nob
-    mov ecx, eax
-    bswap ecx
-    shr ecx, 8
-    mov [rsp+104], rcx
-.nob:
+    ; the pixels are 32bpp ARGB dwords (0xAARRGGBB): the low 24 bits read RRGGBB as they are
+    ; (they used to be byte-swapped here, which showed red as #0000FF)
     cmp qword [rsp+96], -1
     je .onlyb
     cmp qword [rsp+104], -1

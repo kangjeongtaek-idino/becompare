@@ -22,6 +22,7 @@ API = {
     'browse_folder': (1, None, 2, 520), 'browse_open': (1, None, 2, 520), 'browse_save': (1, None, 2, 520),
     'browse_save_as': (1, None, 2, 520), 'browse_open_as': (1, None, 2, 520), 'tc_tmp': (0, None, 2, 520),
     'input_box': (2, None, 2, 260),
+    'ex_menu_choose': (3, None, 2, 520),   # hands the buffer to browse_save_as
 }
 
 

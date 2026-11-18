@@ -1199,7 +1199,7 @@ ini_prepare:
     mov rsi, rax
     mov word [rsp+96], 0xFEFF
     lea rdx, [rsp+96]
-    lea r9, [rsp+104]
+    lea r9, [rsp+88]                 ; (rsp+104 was the caller's saved r15)
     invoke WriteFile, rsi, rdx, 2, r9, 0
     invoke CloseHandle, rsi
 .ok:

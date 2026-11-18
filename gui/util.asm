@@ -233,13 +233,13 @@ fonts_init:
     neg rax
     mov r13, rax
     xor ecx, ecx
-    lea rdx, [rsp+96]
-    call settings_font
+    lea rdx, [rsp+160]               ; not rsp+96 / 104: the 13th and 14th argument of CreateFontW go there, and
+    call settings_font               ; the face name was overwritten ("1") before the font was created
     invoke CreateFontW, rbx, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, 5, 0, &s_segoe
     mov [g_font], rax
     invoke CreateFontW, rbx, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, 5, 0, &s_segoe
     mov [g_fontb], rax
-    invoke CreateFontW, r13, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, 5, 49, &rsp+96
+    invoke CreateFontW, r13, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, 5, 49, &rsp+160
     mov [g_mono], rax
     invoke CreateFontW, rbx, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, 5, 0, &s_mdl2
     mov [g_iconfont], rax
