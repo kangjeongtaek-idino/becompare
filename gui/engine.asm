@@ -11,7 +11,7 @@ extern FileTimeToLocalFileTime, FileTimeToSystemTime
 extern WideCharToMultiByte, MultiByteToWideChar, CreateFileW, WriteFile, CloseHandle, ReadFile, GetFileSizeEx
 
 global vec_push, fmt_size, fmt_time, wild_w, excl_match, excl_match2
-extern GetFullPathNameW, GetTempFileNameW, GetFileAttributesW, GetLastError
+extern GetFullPathNameW, GetTempFileNameW, GetFileAttributesW, GetLastError, GetCurrentProcessId, GetTickCount, _snwprintf
 extern FlushFileBuffers, ReplaceFileW, MoveFileExW, DeleteFileW
 global safe_write2
 global safe_writev
@@ -19,6 +19,7 @@ global sb_init, sb_append, sb_append_esc, sb_free, write_utf8, read_file_bytes, 
 
 section .rdata
 WSTR s_tmp_prefix, "BCA"
+WSTR f_tmp_own, "%sBCA%X_%X.tmp"
 WSTR f_time, "%04d-%02d-%02d %02d:%02d:%02d"
 WSTR e_amp, "&amp;"
 WSTR e_lt, "&lt;"
@@ -506,6 +507,24 @@ safe_writev:
     mov [rsp+112], eax
     mov word [rbp], 0
     invoke GetTempFileNameW, rbx, &s_tmp_prefix, 0, rsi
+    test eax, eax
+    jnz .named
+    ; it refuses a folder path of more than 246 characters (every save there used to fail): a name of our own,
+    ; made the same way - created new, so that nothing that exists is taken
+    call GetCurrentProcessId
+    mov r15d, eax
+    call GetTickCount
+    invoke _snwprintf, rsi, 32000, &f_tmp_own, rbx, r15, rax
+    mov word [rsi+64000], 0
+    invoke CreateFileW, rsi, GENERIC_WRITE, 0, 0, 1, FILE_ATTRIBUTE_NORMAL, 0    ; CREATE_NEW
+    cmp rax, -1
+    je .noname
+    invoke CloseHandle, rax
+    mov eax, 1
+    jmp .named
+.noname:
+    xor eax, eax
+.named:
     mov edx, [rsp+112]
     mov [rbp], dx
     test eax, eax

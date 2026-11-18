@@ -7,7 +7,7 @@ extern MultiByteToWideChar, WideCharToMultiByte, CreateFileW, WriteFile, CloseHa
 extern safe_write2, tl_convert, tl_isconv, DeleteFileW
 extern read_file_bytes, write_utf8, vec_push, lower_w
 
-global g_tc_rules, text_load, text_save, text_load_raw, lines_split, compare_lines, hunk_free, keys_build
+global g_tc_rules, text_load, text_save, text_load_raw, lines_split, compare_lines, hunk_free, keys_build, eol_keep, eol_restore
 ; TXT { wchar* text; qword len; dd enc; dd crlf; dd eol }
 ; LINES { wchar** ptrs; qword count }
 ; hunk: { dd type(0 equal,1 change); dd aStart; dd aLen; dd bStart; dd bLen; dd pad } = 24 bytes
@@ -44,6 +44,7 @@ text_load_raw:
     jz .fail
     mov rbx, rax                     ; bytes
     mov rsi, [rsp+96]                ; size
+    mov dword [rsp+128], 0           ; TXT flags (+28): 1 read as Latin-1, 2 line ends of more than one kind
     mov eax, 0x7FFFFFF0              ; the conversion takes an int length: a larger file would be read in
     cmp rsi, rax                     ; part (size mod 4 GB) and a save would write that part back
     jbe .sizeok
@@ -85,17 +86,26 @@ text_load_raw:
     cmp r14d, 3
     je .utf16
     ; multibyte -> wide
-    mov ecx, CP_UTF8
-    test r14d, r14d
-    jnz .cp
-    xor ecx, ecx
-.cp:
-    mov r15d, ecx
     lea rdx, [rbx+rdi]
     mov r8, rsi
     sub r8, rdi
     mov [rsp+104], rdx
     mov [rsp+112], r8
+    mov r15d, CP_UTF8
+    test r14d, r14d
+    jnz .cp
+    xor r15d, r15d                   ; the ANSI code page ...
+    cmp qword [rsp+112], 0
+    je .cp
+    invoke MultiByteToWideChar, 0, MB_ERR_INVALID_CHARS, [rsp+104], [rsp+112], 0, 0
+    test eax, eax
+    jnz .cp
+    ; ... unless the bytes are not valid there either (another code page, binary data): the conversion
+    ; would replace them and a save would write the replacements. Latin-1 maps every byte to one character
+    ; and back, so the file is shown oddly but saved byte for byte.
+    mov r15d, 28591
+    or dword [rsp+128], 1
+.cp:
     invoke MultiByteToWideChar, r15, 0, [rsp+104], [rsp+112], 0, 0
     mov [rsp+120], rax               ; wide length
     lea rcx, [rax*2+4]
@@ -128,25 +138,53 @@ text_load_raw:
     mov rax, [rsp+120]
     mov word [rbp+rax*2], 0
 .scan:
-    ; CRLF style: look at the first line break
-    mov r8d, 1                       ; default CRLF
+    ; line ends: CR LF (r9), LF (r10), bare CR (r11)
     xor ecx, ecx
+    xor r9d, r9d
+    xor r10d, r10d
+    xor r11d, r11d
     mov rdx, [rsp+120]
 .sl:
     cmp rcx, rdx
-    jae .sdone
+    jae .counted
     movzx eax, word [rbp+rcx*2]
+    inc rcx
     cmp eax, 10
     je .lf
     cmp eax, 13
-    je .cr
+    jne .sl
+    cmp rcx, rdx
+    jae .cr
+    cmp word [rbp+rcx*2], 10
+    jne .cr
     inc rcx
+    inc r9
+    jmp .sl
+.cr:
+    inc r11
     jmp .sl
 .lf:
-    xor r8d, r8d                     ; bare LF
-    jmp .sdone
-.cr:
-    mov r8d, 1
+    inc r10
+    jmp .sl
+.counted:
+    mov r8d, 1                       ; the style for new lines: CR LF, unless LF is the more frequent one
+    cmp r10, r9
+    jbe .style
+    xor r8d, r8d
+.style:
+    xor eax, eax                     ; kinds present
+    test r9, r9
+    setnz al
+    xor ecx, ecx
+    test r10, r10
+    setnz cl
+    add eax, ecx
+    cmp eax, 2
+    jae .mixed
+    test r11, r11
+    jz .sdone
+.mixed:                              ; more than one kind (or bare CR): the view keeps the original to give
+    or dword [rsp+128], 2            ; every line its own line end back when it saves (eol_restore)
 .sdone:
     xor r9d, r9d                     ; ends with a line break?
     test rdx, rdx
@@ -165,6 +203,8 @@ text_load_raw:
     mov [r13+16], r14d
     mov [r13+20], r8d
     mov [r13+24], r9d
+    mov eax, [rsp+128]
+    mov [r13+28], eax
     invoke free, rbx
     mov eax, 1
     EPILOG 160
@@ -213,16 +253,20 @@ text_save_raw:
     xor ebx, ebx                     ; input index
     xor edi, edi                     ; output length
     mov r10d, r15d
-    shr r10d, 8                      ; crlf flag
+    shr r10d, 8                      ; crlf flag: 0 LF, 1 CR LF, 2 the text holds its line ends as they are to be
+    and r10d, 0xFF
 .l:
     cmp rbx, r14
     jae .ld
     movzx eax, word [r13+rbx*2]
     inc rbx
+    cmp r10d, 2
+    je .put
     cmp eax, 13
     je .brk
     cmp eax, 10
     je .brk
+.put:
     mov [rsi+rdi*2], ax
     inc rdi
     jmp .l
@@ -252,8 +296,13 @@ text_save_raw:
     je .u8
     cmp eax, 2
     je .u8bom
-    ; ANSI code page
-    invoke WideCharToMultiByte, CP_ACP, 0, rsi, rdi, 0, 0, 0, 0
+    ; ANSI code page - or Latin-1 for a file that was read that way (flag 1 in bits 16..)
+    mov dword [rsp+112], 0
+    test r15d, 0x10000
+    jz .acp
+    mov dword [rsp+112], 28591
+.acp:
+    invoke WideCharToMultiByte, #[rsp+112], 0, rsi, rdi, 0, 0, 0, 0
     mov rbp, rax
     lea rcx, [rbp+4]
     call malloc
@@ -263,7 +312,7 @@ text_save_raw:
     test rdi, rdi
     jz .ansiwrite
     mov dword [rsp+104], 0
-    invoke WideCharToMultiByte, CP_ACP, 0x400, rsi, rdi, r13, rbp, 0, &rsp+104   ; WC_NO_BEST_FIT_CHARS
+    invoke WideCharToMultiByte, #[rsp+112], 0x400, rsi, rdi, r13, rbp, 0, &rsp+104   ; WC_NO_BEST_FIT_CHARS
     test eax, eax
     jz .ansifail
     cmp dword [rsp+104], 0           ; a character the code page does not have would be written as '?':
@@ -298,6 +347,281 @@ text_save_raw:
 .fail:
     xor eax, eax
     EPILOG 192
+
+; ---------------------------------------------------------------- line ends of a file that mixes them
+; A view shows and edits lines; the kind of line end is a property of the file (TXT+20). A file that holds
+; more than one kind (TXT+28 bit 2) would be rewritten with one kind on save, so the view keeps the text as
+; it was read (eol_keep) and, when it saves, eol_restore gives every line the line end it had: the lines
+; of the new text are matched against the original ones with the compare engine; a new or changed line
+; takes the line end of the line before it.
+
+; eol_keep(TXT*, slot* {text, length}): keep a copy of the text when its line ends are mixed, else free the slot
+eol_keep:
+    PROLOG 64
+    mov rbx, rcx
+    mov rsi, rdx
+    invoke free, [rsi]
+    mov qword [rsi], 0
+    mov qword [rsi+8], 0
+    test dword [rbx+28], 2
+    jz .d
+    mov rdi, [rbx+8]
+    lea rcx, [rdi*2+8]
+    call malloc
+    test rax, rax
+    jz .d
+    mov [rsi], rax
+    mov [rsi+8], rdi
+    lea r8, [rdi*2+2]
+    invoke memcpy, rax, [rbx], r8
+.d:
+    EPILOG 64
+
+section .rdata
+WSTR s_er_empty, ""
+section .text
+%define ER_LA    96                  ; LINES of the original -> 112
+%define ER_LB    112                 ; LINES of the new text -> 128
+%define ER_HV    128                 ; hunks -> 152
+%define ER_CA    152                 ; copies that lines_split cuts up
+%define ER_CB    160
+%define ER_KA    168                 ; line end of every original line: 0 none, 1 LF, 2 CR LF, 3 CR
+%define ER_KB    176                 ; and of every new line (0xFF: not known yet)
+%define ER_OUT   184
+%define ER_DEF   192
+%define ER_TRAIL 200
+
+; eol_restore(original, length, new text, length, crlf 0 / 1) -> rax malloc'd text with the line ends as they
+;   are to be written (text_save with crlf = 2), rdx its length; rax 0 when it cannot be made
+eol_restore:
+    PROLOG 256
+    mov r12, rcx
+    mov r13, rdx
+    mov r14, r8
+    mov r15, r9
+    mov eax, [rsp+256+8+64+40]       ; 5th argument
+    add eax, 1
+    mov [rsp+ER_DEF], rax            ; 1 LF, 2 CR LF
+    xor eax, eax
+    mov [rsp+ER_LA], rax
+    mov [rsp+ER_LB], rax
+    mov [rsp+ER_HV], rax
+    mov [rsp+ER_HV+8], rax
+    mov [rsp+ER_HV+16], rax
+    mov [rsp+ER_CA], rax
+    mov [rsp+ER_CB], rax
+    mov [rsp+ER_KA], rax
+    mov [rsp+ER_KB], rax
+    mov [rsp+ER_OUT], rax
+    lea rcx, [r13*2+8]
+    call malloc
+    mov [rsp+ER_CA], rax
+    test rax, rax
+    jz .fail
+    lea r8, [r13*2]
+    invoke memcpy, rax, r12, r8
+    mov rax, [rsp+ER_CA]
+    mov word [rax+r13*2], 0
+    lea rcx, [r15*2+8]
+    call malloc
+    mov [rsp+ER_CB], rax
+    test rax, rax
+    jz .fail
+    lea r8, [r15*2]
+    invoke memcpy, rax, r14, r8
+    mov rax, [rsp+ER_CB]
+    mov word [rax+r15*2], 0
+    invoke lines_split, [rsp+ER_CA], r13, &rsp+ER_LA
+    invoke lines_split, [rsp+ER_CB], r15, &rsp+ER_LB
+    mov rdx, [rsp+ER_LA+8]
+    add rdx, 16
+    invoke calloc, 1, rdx
+    mov [rsp+ER_KA], rax
+    test rax, rax
+    jz .fail
+    mov rcx, [rsp+ER_LB+8]
+    add rcx, 16
+    call malloc
+    mov [rsp+ER_KB], rax
+    test rax, rax
+    jz .fail
+    mov r8, [rsp+ER_LB+8]
+    add r8, 16
+    invoke memset, rax, 0xFF, r8
+    ; the line end of every original line
+    mov rdi, [rsp+ER_KA]
+    xor ecx, ecx                     ; index
+    xor edx, edx                     ; line
+.ka:
+    cmp rcx, r13
+    jae .kad
+    movzx eax, word [r12+rcx*2]
+    inc rcx
+    cmp eax, 10
+    je .kalf
+    cmp eax, 13
+    jne .ka
+    cmp rcx, r13
+    jae .kacr
+    cmp word [r12+rcx*2], 10
+    jne .kacr
+    inc rcx
+    mov byte [rdi+rdx], 2
+    inc rdx
+    jmp .ka
+.kacr:
+    mov byte [rdi+rdx], 3
+    inc rdx
+    jmp .ka
+.kalf:
+    mov byte [rdi+rdx], 1
+    inc rdx
+    jmp .ka
+.kad:
+    ; match the lines
+    lea rax, [rsp+ER_HV]
+    mov [rsp+32], rax
+    lea rcx, [rsp+ER_LA]
+    lea rdx, [rsp+ER_LB]
+    xor r8d, r8d
+    lea r9, [s_er_empty]
+    call compare_lines
+    mov rsi, [rsp+ER_HV]             ; hunks {type, a start, a length, b start, b length} (24 bytes)
+    mov rbx, [rsp+ER_HV+8]
+    mov rdi, [rsp+ER_KA]
+    mov rbp, [rsp+ER_KB]
+.h:
+    test rbx, rbx
+    jz .hd
+    mov r8d, [rsi+4]
+    mov r9d, [rsi+8]
+    mov r10d, [rsi+12]
+    mov r11d, [rsi+16]
+    cmp r9d, r11d
+    jbe .hm
+    mov r9d, r11d                    ; pairs: the shorter side
+.hm:
+    test r9d, r9d
+    jz .hn
+    movzx eax, byte [rdi+r8]
+    mov [rbp+r10], al
+    inc r8d
+    inc r10d
+    dec r9d
+    jmp .hm
+.hn:
+    add rsi, 24
+    dec rbx
+    jmp .h
+.hd:
+    ; lines without an original (or whose original was the last line and had none): as the line before
+    mov rcx, [rsp+ER_LB+8]
+    xor edx, edx
+    mov r8, [rsp+ER_DEF]
+.fl:
+    cmp rdx, rcx
+    jae .fld
+    movzx eax, byte [rbp+rdx]
+    cmp eax, 0xFF
+    je .fset
+    test eax, eax
+    jnz .fkeep
+.fset:
+    mov [rbp+rdx], r8b
+    jmp .fnext
+.fkeep:
+    mov r8d, eax
+.fnext:
+    inc rdx
+    jmp .fl
+.fld:
+    mov qword [rsp+ER_TRAIL], 0      ; does the new text end with a line break?
+    test r15, r15
+    jz .out
+    movzx eax, word [r14+r15*2-2]
+    cmp eax, 10
+    je .tr
+    cmp eax, 13
+    jne .out
+.tr:
+    mov qword [rsp+ER_TRAIL], 1
+.out:
+    mov rcx, [rsp+ER_LB+8]
+    lea rcx, [r15+rcx*2+8]
+    shl rcx, 1
+    call malloc
+    mov [rsp+ER_OUT], rax
+    test rax, rax
+    jz .fail
+    mov rdi, rax
+    mov rsi, [rsp+ER_LB]             ; line pointers
+    mov rbx, [rsp+ER_LB+8]
+    mov rbp, [rsp+ER_KB]
+    xor edx, edx
+.ol:
+    cmp rdx, rbx
+    jae .od
+    mov rcx, [rsi+rdx*8]
+.oc:
+    movzx eax, word [rcx]
+    test eax, eax
+    jz .oe
+    mov [rdi], ax
+    add rdi, 2
+    add rcx, 2
+    jmp .oc
+.oe:
+    lea rax, [rdx+1]
+    cmp rax, rbx
+    jb .oeol
+    cmp qword [rsp+ER_TRAIL], 0
+    je .on
+.oeol:
+    movzx eax, byte [rbp+rdx]
+    cmp eax, 1
+    je .olf
+    mov word [rdi], 13
+    add rdi, 2
+    cmp eax, 3
+    je .on
+.olf:
+    mov word [rdi], 10
+    add rdi, 2
+.on:
+    inc rdx
+    jmp .ol
+.od:
+    mov word [rdi], 0
+    sub rdi, [rsp+ER_OUT]
+    shr rdi, 1
+    mov r12, rdi                     ; length
+    call .free
+    mov rax, [rsp+ER_OUT]
+    mov rdx, r12
+    EPILOG 256
+.fail:
+    call .free
+    invoke free, [rsp+ER_OUT]
+    xor eax, eax
+    EPILOG 256
+.free:                               ; (the return address is on the stack: the locals are 8 higher)
+    sub rsp, 40
+    mov rcx, [rsp+48+ER_CA]
+    call free
+    mov rcx, [rsp+48+ER_CB]
+    call free
+    mov rcx, [rsp+48+ER_KA]
+    call free
+    mov rcx, [rsp+48+ER_KB]
+    call free
+    mov rcx, [rsp+48+ER_LA]
+    call free
+    mov rcx, [rsp+48+ER_LB]
+    call free
+    mov rcx, [rsp+48+ER_HV]
+    call free
+    add rsp, 40
+    ret
 
 ; ---------------------------------------------------------------- lines
 ; lines_split(text (modified in place), len, LINES*) : \r\n, \r or \n separate lines

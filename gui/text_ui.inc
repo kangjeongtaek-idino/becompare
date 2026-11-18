@@ -479,6 +479,10 @@ text_side:
     invoke text_load, &rsp+96, r15
     test eax, eax
     jz .fail
+    mov rax, r12                     ; mixed line ends: keep the text as read for the save (eol_restore)
+    shl rax, 4
+    lea rdx, [rbx+rax+TV_ORG]
+    invoke eol_keep, r15, rdx
     mov dword [rbx+r12*4+TV_ZW], 0   ; does the file hold the filler character itself?
     mov rcx, [r15]
     mov rdx, [r15+8]
@@ -1083,9 +1087,32 @@ tv_save:
     inc r13
     mov word [rbp+r13*2], 0
 .nofinal:
-    mov r9d, [r15+20]                ; crlf
+    mov eax, [r15+20]                ; crlf
+    mov [rsp+1160], eax
+    mov rax, r12                     ; a file with mixed line ends: every line gets its own back
+    shl rax, 4
+    lea r14, [rbx+rax+TV_ORG]
+    cmp qword [r14], 0
+    je .opts
+    invoke eol_restore, [r14], [r14+8], rbp, r13, #[r15+20]
+    test rax, rax
+    jz .opts
+    mov [rsp+1168], rdx
+    mov r14, rax
+    invoke free, rbp
+    mov rbp, r14
+    mov r13, [rsp+1168]
+    mov dword [rsp+1160], 2          ; the text holds its line ends as they are to be written
+.opts:
+    mov r9d, [rsp+1160]
     shl r9d, 8
-    or r9d, [r15+16]                 ; enc
+    mov eax, [r15+16]                ; enc
+    and eax, 3
+    or r9d, eax
+    mov eax, [r15+28]                ; read as Latin-1: written as Latin-1
+    and eax, 1
+    shl eax, 16
+    or r9d, eax
     invoke text_save, &rsp+96, rbp, r13, r9
     mov r14d, eax
     invoke free, rbp
@@ -1790,6 +1817,8 @@ tv_proc:
     invoke free, [r15+TV_BUFB]
     invoke free, [r15+TV_TXA]
     invoke free, [r15+TV_TXB]
+    invoke free, [r15+TV_ORG]
+    invoke free, [r15+TV_ORG+16]
     invoke us_free, &r15+TV_UST
     invoke free, r15
     mov qword [r14+SS_DATA], 0

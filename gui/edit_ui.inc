@@ -209,6 +209,7 @@ ed_load:
     mov dword [rbx+E_TXT+16], 1
     mov dword [rbx+E_TXT+20], 1
     mov dword [rbx+E_TXT+24], 0
+    mov dword [rbx+E_TXT+28], 0
 .show:
     invoke rich_set_text, [rbx+E_HR], [rbx+E_TXT]
     mov qword [rbx+E_LOADED], 1
@@ -257,15 +258,36 @@ ed_save:
     mov dword [rbx+E_TXT+16], 1
     mov dword [rbx+E_TXT+20], 1
     mov dword [rbx+E_TXT+24], 0
+    mov dword [rbx+E_TXT+28], 0
 .go:
     invoke rich_get_text, [rbx+E_HR], &rsp+1144
     test rax, rax
     jz .d
     mov rbp, rax
     mov r13, [rsp+1144]
-    mov r9d, [rbx+E_TXT+20]
+    mov eax, [rbx+E_TXT+20]
+    mov [rsp+1160], eax
+    test dword [rbx+E_TXT+28], 2     ; mixed line ends: every line gets its own back (E_TXT is the text as read)
+    jz .opts
+    invoke eol_restore, [rbx+E_TXT], [rbx+E_TXT+8], rbp, r13, #[rbx+E_TXT+20]
+    test rax, rax
+    jz .opts
+    mov [rsp+1168], rdx
+    mov r14, rax
+    invoke free, rbp
+    mov rbp, r14
+    mov r13, [rsp+1168]
+    mov dword [rsp+1160], 2
+.opts:
+    mov r9d, [rsp+1160]
     shl r9d, 8
-    or r9d, [rbx+E_TXT+16]
+    mov eax, [rbx+E_TXT+16]
+    and eax, 3
+    or r9d, eax
+    mov eax, [rbx+E_TXT+28]          ; read as Latin-1: written as Latin-1
+    and eax, 1
+    shl eax, 16
+    or r9d, eax
     invoke text_save, &rsp+96, rbp, r13, r9
     mov r14d, eax
     invoke free, rbp

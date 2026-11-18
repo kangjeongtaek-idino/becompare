@@ -31,7 +31,7 @@ run(["windres","res/app.rc","-O","coff","-o",OUT/"app.res.o"],ROOT/"gui")
 run(["gcc","-mwindows",*[OUT/(m+".obj") for m in MODS],OUT/"app.res.o","-o",OUT/"bcgui.exe",*LIBS])
 r=run(["python","tools/hazard.py"])
 assert "hazards: 0" in r.stdout
-run(["gcc",ROOT/"tools/test_safe_save.c",OUT/"engine.obj",OUT/"textlib.obj",*["-Wl,--wrap="+x for x in ["WriteFile","FlushFileBuffers","ReplaceFileW","ReadFile"]],"-o",OUT/"test_safe_save.exe"])
+run(["gcc",ROOT/"tools/test_safe_save.c",OUT/"engine.obj",OUT/"textlib.obj",OUT/"mem.obj",*["-Wl,--wrap="+x for x in ["WriteFile","FlushFileBuffers","ReplaceFileW","ReadFile"]],"-o",OUT/"test_safe_save.exe"])
 defs={}
 for name in ["inc/app.inc","text.asm","edit_ui.inc","hex.asm","merge.asm","folder.asm","fmerge.asm"]:
     for line in (ROOT/"gui"/name).read_text(encoding="utf-8").splitlines():

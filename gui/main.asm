@@ -19,6 +19,7 @@ extern WritePrivateProfileStringW, GetPrivateProfileStringW, GetPrivateProfileIn
 extern CreateFileW, WriteFile, CloseHandle, DeleteFileW
 extern g_hinst, g_hframe, g_htab, g_hstatus, g_font, g_dpi, g_dark
 extern th_panelbrush
+extern g_mem_batch
 extern mk, reg_class, scl, set_status, msgbox, browse_open_as, browse_save_as
 extern theme_set, fonts_init, s_appname
 
@@ -229,6 +230,8 @@ section .text
 WinMain:
     PROLOG 256
     mov [g_hinst], rcx
+    lea rax, [g_batch]
+    mov [g_mem_batch], rax           ; mem.asm: no message box when the run is unattended
     call script_check
     test eax, eax
     jz .noscript

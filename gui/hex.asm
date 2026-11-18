@@ -167,6 +167,11 @@ hx_rebuild:
     mov rax, [rbx+HX_ROWS]
     lea rdx, [rax*4+8]
     invoke realloc, [rbx+HX_VROWS], rdx
+    test rax, rax
+    jnz .got
+    mov qword [rbx+HX_NV], 0         ; no memory for the row table: no rows (the old block is still ours)
+    EPILOG 64
+.got:
     mov [rbx+HX_VROWS], rax
     xor ecx, ecx
     xor edx, edx
