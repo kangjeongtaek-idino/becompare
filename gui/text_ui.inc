@@ -1524,6 +1524,7 @@ tv_proc:
     invoke CreateWindowExW, 0, &cn_mini, 0, WS_CHILD|WS_VISIBLE|WS_CLIPSIBLINGS, 0, 0, 10, 10, rsi, ID_MINI, [g_hinst], r15
     mov [r15+TV_HMM], rax
     invoke pb_load, rsi, r14
+    invoke tv_prefs_load, rsi, r15   ; the view options as they were used last
     invoke tv_opts_apply, rsi, r14
     invoke tv_theme, rsi, r15
     xor eax, eax
@@ -1585,6 +1586,10 @@ tv_proc:
     mov eax, r12d
     shr eax, 16
     mov ebp, eax
+    cmp ebp, 1                       ; a click (0) or a new choice in a combo box (1): a view option is remembered
+    ja .nopref
+    invoke tv_prefs_save, rsi, rbx
+.nopref:
     cmp ebx, ID_RA
     je .rich
     cmp ebx, ID_RB
