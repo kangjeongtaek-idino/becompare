@@ -248,7 +248,7 @@ px_html_path:
 
 ; px_export(hwnd, px)
 px_export:
-    PROLOG 1200
+    PROLOG 1440
     mov rsi, rcx
     mov rbx, rdx
     cmp qword [rbx+PX_LOADED], 0
@@ -270,7 +270,7 @@ px_export:
 .res:
     invoke ex_done_open, rsi, rax, &rsp+400
 .d:
-    EPILOG 1200
+    EPILOG 1440
 .norun:
     invoke msgbox, rsi, &pd_norun, MB_OK|MB_ICONINFO
-    EPILOG 1200
+    EPILOG 1440

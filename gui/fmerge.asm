@@ -815,7 +815,7 @@ fm_refresh:
     mov r12, [rbx+FM_ENT+8]
     mov r13, [rbx+FM_NCONF]
     mov r14, [rbx+FM_NAUTO]
-    invoke _snwprintf, &rsp+96, 100, &f_info, r12, r13, r14
+    invoke _snwprintf, &rsp+96, 80, &f_info, r12, r13, r14
     invoke GetDlgItem, rsi, ID_LBLI
     invoke SetWindowTextW, rax, &rsp+96
     EPILOG 256

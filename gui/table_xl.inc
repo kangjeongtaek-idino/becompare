@@ -287,7 +287,9 @@ tb_docx_path:
     lea rbp, [dwc_orange]
     mov ecx, 1
 .sdone:
+    mov [rsp+256], ecx               ; a call does not keep rcx
     invoke dw_row_begin, &rsp+BX_XL, 0
+    mov ecx, [rsp+256]
     lea rdx, [tb_stat]
     mov rdx, [rdx+rcx*8]
     invoke dw_cell, &rsp+BX_XL, rdx, rbp, 0
@@ -436,10 +438,12 @@ tb_html_path:
     je .sdone
     mov ecx, 1
 .sdone:
+    mov [rsp+256], ecx               ; a call does not keep rcx
     lea rdx, [tb_htm_tr]
     mov rdx, [rdx+rcx*8]
     invoke sb_append, &rsp+BX_XL, rdx
     invoke sb_append, &rsp+BX_XL, &s_td_start
+    mov ecx, [rsp+256]
     lea rdx, [tb_stat]
     mov rdx, [rdx+rcx*8]
     invoke sb_append, &rsp+BX_XL, rdx
@@ -526,7 +530,7 @@ tb_html_path:
 
 ; tb_export(hwnd, tb)
 tb_export:
-    PROLOG 1200
+    PROLOG 1440
     mov rsi, rcx
     mov rbx, rdx
     cmp qword [rbx+TB_COLMAP], 0
@@ -548,7 +552,7 @@ tb_export:
 .res:
     invoke ex_done_open, rsi, rax, &rsp+400
 .d:
-    EPILOG 1200
+    EPILOG 1440
 .norun:
     invoke msgbox, rsi, &s_tb_norun, MB_OK|MB_ICONINFO
-    EPILOG 1200
+    EPILOG 1440

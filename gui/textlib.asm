@@ -44,6 +44,12 @@ text_load_raw:
     jz .fail
     mov rbx, rax                     ; bytes
     mov rsi, [rsp+96]                ; size
+    mov eax, 0x7FFFFFF0              ; the conversion takes an int length: a larger file would be read in
+    cmp rsi, rax                     ; part (size mod 4 GB) and a save would write that part back
+    jbe .sizeok
+    invoke free, rbx
+    jmp .fail
+.sizeok:
     xor edi, edi                     ; start offset
     xor r14d, r14d                   ; enc
     cmp rsi, 3
@@ -256,9 +262,12 @@ text_save_raw:
     jz .convfail
     test rdi, rdi
     jz .ansiwrite
-    invoke WideCharToMultiByte, CP_ACP, 0, rsi, rdi, r13, rbp, 0, 0
+    mov dword [rsp+104], 0
+    invoke WideCharToMultiByte, CP_ACP, 0x400, rsi, rdi, r13, rbp, 0, &rsp+104   ; WC_NO_BEST_FIT_CHARS
     test eax, eax
     jz .ansifail
+    cmp dword [rsp+104], 0           ; a character the code page does not have would be written as '?':
+    jne .ansifail                    ; the save fails instead of destroying it
 .ansiwrite:
     invoke wr2, r12, 0, 0, r13, rbp
     mov ebx, eax
@@ -726,21 +735,26 @@ keys_build:
     ; total chars
     xor edi, edi
     xor ebp, ebp
+    mov qword [rsp+120], 0           ; the longest line
 .tot:
     cmp rbp, rbx
     jae .alloc
     mov rax, [rsi]
     invoke wcslen, [rax+rbp*8]
     lea rdi, [rdi+rax+1]
+    cmp rax, [rsp+120]
+    jbe .totn
+    mov [rsp+120], rax
+.totn:
     inc rbp
     jmp .tot
 .alloc:
     lea rcx, [rdi*2+8]
     test r12d, 32
     jz .blob
-    mov rcx, rdi                     ; substitution rules may lengthen lines
-    shl rcx, 4
-    add rcx, 16
+    mov rcx, rdi                     ; substitution rules may lengthen lines: up to 8 * length + 8 characters
+    shl rcx, 4                       ; and a terminator each
+    lea rcx, [rcx+rbx*2+16]
 .blob:
     call malloc
     mov [r15+rbx*8], rax
@@ -748,7 +762,9 @@ keys_build:
     mov qword [rsp+112], 0
     test r12d, 32
     jz .nodata
-    mov ecx, 4096*2
+    mov rcx, [rsp+120]               ; room for the longest line after substitution (it was 4096 characters,
+    shl rcx, 4                       ; and longer lines were compared by their first 4000 only)
+    add rcx, 64
     call malloc
     mov [rsp+112], rax               ; scratch line for the substituted text
 .nodata:
@@ -770,10 +786,6 @@ keys_build:
     jz .nosub
     invoke wcslen, rdi
     lea r8, [rax*8+8]
-    cmp r8, 4000
-    jbe .capok
-    mov r8d, 4000
-.capok:
     mov [rsp+120], r8
     invoke rules_apply, rdi, [rsp+112], [rsp+120]
     mov rdi, [rsp+112]

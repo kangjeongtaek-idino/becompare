@@ -181,7 +181,7 @@ fold_pv_label:
     jl .set
     invoke SendMessageW, [rbx+F_PVVIEW], BC_TVQ, 0, 0
     mov r10d, eax
-    invoke _snwprintf, &rsp+96, 40, &f_pv_count, r10
+    invoke _snwprintf, &rsp+96, 32, &f_pv_count, r10
 .set:
     invoke GetDlgItem, rsi, ID_PV_LBL
     invoke SetWindowTextW, rax, &rsp+96

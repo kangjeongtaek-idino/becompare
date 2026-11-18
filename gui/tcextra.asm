@@ -202,7 +202,7 @@ tc_put:
     mov rdi, r8
     test rdi, rdi
     jz .d
-    invoke WriteFile, rbx, rsi, rdi, &rsp+80, 0
+    invoke WriteFile, rbx, rsi, rdi, &rsp+48, 0      ; (rsp+80 was the caller's saved r14)
 .d:
     EPILOG 64
 

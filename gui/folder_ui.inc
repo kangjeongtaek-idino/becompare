@@ -896,10 +896,15 @@ fold_start:
     cmp qword [rbx+F_RUNNING], 0
     je .idle
     mov byte [rbx+F_CANCEL], 1
-    invoke WaitForSingleObject, [rbx+F_THREAD], 0xFFFFFFFF
-    invoke CloseHandle, [rbx+F_THREAD]
-    mov qword [rbx+F_RUNNING], 0
 .idle:
+    mov rcx, [rbx+F_THREAD]          ; also a scan that has just ended and whose "done" message is still on its
+    test rcx, rcx                    ; way: its handle used to be overwritten by the new thread's (a leak)
+    jz .reaped
+    invoke WaitForSingleObject, rcx, 0xFFFFFFFF
+    invoke CloseHandle, [rbx+F_THREAD]
+    mov qword [rbx+F_THREAD], 0
+    mov qword [rbx+F_RUNNING], 0
+.reaped:
     invoke GetDlgItem, rsi, ID_EDIT_A
     invoke GetWindowTextW, rax, &rbx+F_ROOTA, 519
     invoke GetDlgItem, rsi, ID_EDIT_B
@@ -979,7 +984,7 @@ fold_done:
     invoke fold_refresh, rbx
     test r12, r12
     jnz .cancel
-    invoke _snwprintf, &rsp+96, 250, &s_scan_done, [rbx+F_CNT], [rbx+F_CNT+8], [rbx+F_CNT+16], [rbx+F_CNT+24], [rbx+F_CNT+32]
+    invoke _snwprintf, &rsp+96, 200, &s_scan_done, [rbx+F_CNT], [rbx+F_CNT+8], [rbx+F_CNT+16], [rbx+F_CNT+24], [rbx+F_CNT+32]
     invoke set_status_part, 1, &rsp+96
     invoke set_status, &s_done_short
     cmp dword [rbx+F_SCANERR], 0
@@ -1564,7 +1569,7 @@ fold_move:
 
 ; fold_rename(hwnd, fold, visible index): rename the entry (both sides when it exists on both)
 fold_rename:
-    PROLOG 5008
+    PROLOG 6992
     mov rsi, rcx
     mov rbx, rdx
     mov r12, r8
@@ -1648,11 +1653,11 @@ fold_rename:
     lea rbp, [rbx+F_ROOTB]
 .rt:
     invoke _snwprintf, &rsp+2840, 1030, &f_path, rbp, &rsp+96
-    invoke _snwprintf, &rsp+3920, 1030, &f_path, rbp, &rsp+1760
-    invoke MoveFileW, &rsp+2840, &rsp+3920
+    invoke _snwprintf, &rsp+4912, 1030, &f_path, rbp, &rsp+1760
+    invoke MoveFileW, &rsp+2840, &rsp+4912
     test eax, eax
     jz .nx
-    invoke fj_moved, r14, &rsp+2840, &rsp+3920
+    invoke fj_moved, r14, &rsp+2840, &rsp+4912
 .nx:
     inc edi
     jmp .side
@@ -1660,16 +1665,16 @@ fold_rename:
     invoke fj_commit, &rbx+F_UST, r14
     invoke fold_start, rsi, rbx
 .d:
-    EPILOG 5008
+    EPILOG 6992
 .bad:
     invoke msgbox, rsi, &s_ren_bad, MB_OK|MB_ICONWARNING
-    EPILOG 5008
+    EPILOG 6992
 .ro:
     invoke msgbox, rsi, &s_ro, MB_OK|MB_ICONINFO
-    EPILOG 5008
+    EPILOG 6992
 .pol:
     invoke msgbox, rsi, &s_pol_blocked, MB_OK|MB_ICONWARNING
-    EPILOG 5008
+    EPILOG 6992
 
 ; popup_at(hwnd, anchor id, menu) -> chosen command
 popup_at:
@@ -2206,7 +2211,7 @@ fold_batch:
 
 ; fold_report_path(fold, path): build the HTML report and write it (UTF-8 with BOM)
 fold_report_path:
-    PROLOG 6000
+    PROLOG 7088
     mov rbx, rcx
     mov rdi, rdx
     ; folder for the per-file reports: <report without extension>_files
@@ -2273,9 +2278,9 @@ fold_report_path:
     jne .plainname
     cmp qword [rbx+F_KIND+8], 0
     jne .plainname
-    invoke _snwprintf, &rsp+1700, 1099, &f_path, &rbx+F_ROOTA, [r13+E_NAME]
+    invoke _snwprintf, &rsp+1700, 529, &f_path, &rbx+F_ROOTA, [r13+E_NAME]
     invoke alt_bpath, rbx, [r13+E_NAME]
-    invoke _snwprintf, &rsp+2760, 1099, &f_path, &rbx+F_ROOTB, rax
+    invoke _snwprintf, &rsp+2760, 529, &f_path, &rbx+F_ROOTB, rax
     test r15d, r15d
     jnz .dirok
     invoke CreateDirectoryW, &rsp+3820, 0
@@ -2293,7 +2298,7 @@ fold_report_path:
     jz .plain2
     invoke sb_append, &rsp+96, &s_a1
     invoke sb_append, &rsp+96, &rsp+400
-    invoke _snwprintf, &rsp+136, 16, &f_one, r12
+    invoke _snwprintf, &rsp+136, 12, &f_one, r12
     invoke sb_append, &rsp+96, &rsp+136
     invoke sb_append, &rsp+96, &s_a2
     invoke sb_append_esc, &rsp+96, [r13+E_NAME]
@@ -2356,11 +2361,11 @@ fold_report_path:
     jz .reportfail
     invoke set_status, &s_report_ok
     mov eax, 1
-    EPILOG 6000
+    EPILOG 7088
 .reportfail:
     invoke set_status, &s_report_fail
     xor eax, eax
-    EPILOG 6000
+    EPILOG 7088
 
 ; ---------------------------------------------------------------- layout
 %macro PLACE 2
@@ -2949,7 +2954,9 @@ fold_proc:
     cmp ebx, ID_CHK_ATTR
     ja .nocrit
     invoke fold_crit_sync, rsi
-    cmp qword [r15+F_NENT], 0                ; a changed criterion re-runs the comparison
+    cmp qword [r15+F_RUNNING], 0             ; a changed criterion re-runs the comparison - also one that has
+    jne .run                                 ; just started and has no entries yet: it still uses the old one
+    cmp qword [r15+F_NENT], 0
     je .zero
     jmp .run
 .nocrit:
@@ -3061,6 +3068,8 @@ fold_proc:
     jae .zero                                ; "custom" is only ever shown, never chosen
     mov edx, eax
     invoke fold_crit_apply, rsi, rdx
+    cmp qword [r15+F_RUNNING], 0
+    jne .run
     cmp qword [r15+F_NENT], 0
     je .zero
     jmp .run
@@ -3606,8 +3615,8 @@ fold_stamp:
     and eax, EF_EXA|EF_EXB|EF_DIRA|EF_DIRB
     cmp eax, EF_EXA|EF_EXB
     jne .n
-    invoke _snwprintf, &rsp+96, 1099, &f_path, &rbx+F_ROOTA, [r13+E_NAME]
-    invoke _snwprintf, &rsp+2300, 1099, &f_path, &rbx+F_ROOTB, [r13+E_NAME]
+    invoke _snwprintf, &rsp+96, 1030, &f_path, &rbx+F_ROOTA, [r13+E_NAME]   ; 2060 bytes each: below rsp+4380
+    invoke _snwprintf, &rsp+2300, 1030, &f_path, &rbx+F_ROOTB, [r13+E_NAME]
     lea r14, [rsp+96]                 ; source
     lea r15, [rsp+2300]               ; target
     mov rbp, [r13+E_MTA]

@@ -444,7 +444,7 @@ ext_launch:
     je .no
     ; expand %1 / %2 into the command line
     lea r12, [rsp+96]                 ; template
-    lea r13, [rsp+2200]               ; output (250 wchar max here)
+    lea r13, [rsp+2200]               ; output: 252 wchar up to the end of the frame
     xor r14d, r14d                    ; out index
 .e:
     movzx eax, word [r12]
@@ -463,6 +463,8 @@ ext_launch:
     mov r15, rsi
 .sub:
     add r12, 4
+    cmp r14d, 245
+    jae .no
     mov word [r13+r14*2], '"'
     inc r14d
 .sc:
@@ -470,7 +472,7 @@ ext_launch:
     test eax, eax
     jz .sq
     cmp r14d, 245
-    jae .sq
+    jae .no                          ; too long: a path cut short would start the tool on another file
     mov [r13+r14*2], ax
     inc r14d
     add r15, 2
@@ -481,7 +483,7 @@ ext_launch:
     jmp .e
 .lit:
     cmp r14d, 245
-    jae .run
+    jae .no
     mov [r13+r14*2], ax
     inc r14d
     add r12, 2

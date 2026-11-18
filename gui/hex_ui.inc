@@ -524,6 +524,21 @@ hx_compare:
 .okb:
     EPILOG 256
 .err:
+    ; nothing is loaded any more: the sizes and rows of the last compare must not outlive its buffers
+    ; (a paint or a click read through the freed pointers)
+    invoke hx_free, rbx
+    xor eax, eax
+    mov [rbx+HX_SZA], rax
+    mov [rbx+HX_SZB], rax
+    mov [rbx+HX_ROWS], rax
+    mov [rbx+HX_NDIFF], rax
+    mov [rbx+HX_NV], rax
+    mov [rbx+HX_TOP], rax
+    mov [rbx+HX_CURO], rax
+    mov [rbx+HX_MODA], rax
+    mov [rbx+HX_MODB], rax
+    mov [rbx+HX_LOADED], rax
+    invoke InvalidateRect, [rbx+HX_HPANE], 0, 1
     invoke msgbox, rsi, &s_cantread, MB_OK|MB_ICONWARNING
     EPILOG 256
 

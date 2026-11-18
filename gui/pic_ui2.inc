@@ -147,6 +147,9 @@ pv_zoom:
 .out:
     xor edx, edx
     mov r9d, 10
+    cmp rax, r9                      ; already below the smallest step (a large picture fitted): stay there
+    jae .o
+    mov r9, rax
 .o:
     mov r8d, [rcx+rdx*4]
     test r8d, r8d

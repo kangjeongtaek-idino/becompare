@@ -252,7 +252,7 @@ pp_html_path:
 
 ; pp_export(hwnd, P, sess)
 pp_export:
-    PROLOG 1200
+    PROLOG 1440
     mov rsi, rcx
     mov rbx, rdx
     mov r12, r8
@@ -286,7 +286,7 @@ pp_export:
 .res:
     invoke ex_done_open, rsi, rax, &rsp+400
 .d:
-    EPILOG 1200
+    EPILOG 1440
 .norun:
     invoke msgbox, rsi, &pe_norun, MB_OK|MB_ICONINFO
-    EPILOG 1200
+    EPILOG 1440

@@ -7,6 +7,7 @@
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetWindowTextW, SetWindowTextW
 extern InvalidateRect, SetWindowTheme
+extern wcsncpy
 extern malloc, calloc, realloc, free, memset, wcslen, wcscpy, wcscmp, _wcsicmp, wcsrchr, _snwprintf, qsort, wcstod
 extern g_hinst, g_dark, th_bg, th_fg, th_panel, th_diff, th_lonly, th_ronly, th_hl, th_panelbrush
 extern mk, reg_class, scl, set_status, msgbox
@@ -269,11 +270,35 @@ csv_parse:
 side_free:
     PROLOG 64
     mov rbx, rcx
+    invoke keys_free, rbx
     invoke free, [rbx+SD_CELLS]
     invoke free, [rbx+SD_ROWOFF]
     invoke free, [rbx+SD_TEXT]
-    invoke free, [rbx+SD_KEYS]
     invoke memset, rbx, 0, SD_SIZE
+    EPILOG 64
+
+; keys_free(SIDE*): the key table; the slot behind the last row says whether the keys are strings of their own
+;   (1) or point into the cells (0)
+keys_free:
+    PROLOG 64
+    mov rbx, rcx
+    mov rsi, [rbx+SD_KEYS]
+    test rsi, rsi
+    jz .d
+    mov rdi, [rbx+SD_NROWS]
+    cmp qword [rsi+rdi*8], 1
+    jne .arr
+    xor r12d, r12d
+.l:
+    cmp r12, rdi
+    jae .arr
+    invoke free, [rsi+r12*8]
+    inc r12
+    jmp .l
+.arr:
+    invoke free, rsi
+    mov qword [rbx+SD_KEYS], 0
+.d:
     EPILOG 64
 
 ; side_ncols(SIDE*, row) -> eax
@@ -497,12 +522,20 @@ build_keys:
     PROLOG 192
     mov rbx, rcx
     mov rsi, rdx
-    invoke free, [rsi+SD_KEYS]
+    invoke keys_free, rsi
     mov rax, [rsi+SD_NROWS]
-    lea rcx, [rax*8+16]
-    call malloc
+    lea rdx, [rax*8+16]
+    invoke calloc, 1, rdx            ; zeroed: a table that is freed half built holds no stray pointers
     mov [rsi+SD_KEYS], rax
     mov rdi, rax
+    test rax, rax
+    jz .d
+    mov rax, [rbx+TB_KEYM]           ; -1 / -2: every row gets a string of its own (see keys_free)
+    cmp rax, -2
+    jb .own0
+    mov rax, [rsi+SD_NROWS]
+    mov qword [rdi+rax*8], 1
+.own0:
     xor r12d, r12d
 .r:
     cmp r12, [rsi+SD_NROWS]
@@ -1048,7 +1081,7 @@ tb_rebuild:
 
 ; tb_columns(hwnd, tb): rebuild the list view columns from both files
 tb_columns:
-    PROLOG 224
+    PROLOG 736                       ; the header text at rsp+160: wchar[280]
     mov rsi, rcx
     mov rbx, rdx
     mov r12, [rbx+TB_HLIST]
@@ -1116,7 +1149,8 @@ tb_columns:
     invoke side_cell, &rbx+TB_SA, 0, rsi
     cmp word [rax], 0
     je .fallback
-    invoke wcscpy, &rsp+160, rax
+    invoke wcsncpy, &rsp+160, rax, 259   ; a header cell can be of any length (it overran 36 characters of room)
+    mov word [rsp+160+518], 0
     jmp .ins
 .fallback:
     lea eax, [rsi+1]
@@ -1137,7 +1171,7 @@ tb_columns:
     inc r15
     jmp .col
 .d:
-    EPILOG 224
+    EPILOG 736
 
 ; tb_cell(tb, resrow, sub, buf) -> eax 1 if this cell is a changed cell
 tb_cell:
@@ -1204,19 +1238,22 @@ tb_cell:
     mov eax, 1
     EPILOG 192
 .same:
-    invoke wcscpy, rsi, r13
+    invoke wcsncpy, rsi, r13, 250   ; the caller's buffer holds 260 (a long cell overran it)
+    mov word [rsi+500], 0
     xor eax, eax
     EPILOG 192
 .onlya:
     mov edx, [rdi+R_A]
     invoke side_cell, &rbx+TB_SA, rdx, r12
-    invoke wcscpy, rsi, rax
+    invoke wcsncpy, rsi, rax, 250   ; the caller's buffer holds 260 (a long cell overran it)
+    mov word [rsi+500], 0
     xor eax, eax
     EPILOG 192
 .onlyb:
     mov edx, [rdi+R_B]
     invoke side_cell, &rbx+TB_SB, rdx, r12
-    invoke wcscpy, rsi, rax
+    invoke wcsncpy, rsi, rax, 250   ; the caller's buffer holds 260 (a long cell overran it)
+    mov word [rsi+500], 0
 .none:
     xor eax, eax
     EPILOG 192
@@ -1227,7 +1264,7 @@ tb_info:
     PROLOG 320
     mov rsi, rcx
     mov rbx, rdx
-    invoke _snwprintf, &rsp+96, 140, &f_info, [rbx+TB_SA+SD_NROWS], [rbx+TB_SB+SD_NROWS], [rbx+TB_CNT], [rbx+TB_CNT+8], [rbx+TB_CNT+16], [rbx+TB_CNT+24]
+    invoke _snwprintf, &rsp+96, 112, &f_info, [rbx+TB_SA+SD_NROWS], [rbx+TB_SB+SD_NROWS], [rbx+TB_CNT], [rbx+TB_CNT+8], [rbx+TB_CNT+16], [rbx+TB_CNT+24]
     invoke GetDlgItem, rsi, ID_LBL_INFO
     invoke SetWindowTextW, rax, &rsp+96
     EPILOG 320
@@ -1355,6 +1392,13 @@ tb_compare:
 .okb:
     EPILOG 256
 .err:
+    ; the result rows of the last compare point into sides that are gone or have other rows now
+    invoke side_free, &rbx+TB_SA
+    invoke side_free, &rbx+TB_SB
+    mov qword [rbx+TB_RES+8], 0
+    mov qword [rbx+TB_NVIS], 0
+    invoke SendMessageW, [rbx+TB_HLIST], LVM_SETITEMCOUNT, 0, 0
+    invoke InvalidateRect, [rbx+TB_HLIST], 0, 1
     invoke msgbox, rsi, &s_cantread, MB_OK|MB_ICONWARNING
     EPILOG 256
 

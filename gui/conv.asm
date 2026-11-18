@@ -963,7 +963,15 @@ cv_pdf:
     test eax, eax
     jz .skip
     mov rcx, [rsp+128]
-    ; rdx = bytes produced
+    ; rdx = bytes produced; at most one wide character comes out per byte: no more than fits (with room
+    ; to spare) in what is left of the output - a stream can inflate to 16 MB
+    mov rax, [rsp+120]
+    sub rax, rdi
+    shr rax, 2
+    cmp rdx, rax
+    jbe .fits
+    mov rdx, rax
+.fits:
     mov r8, rdi
     call cv_pdf_content
     mov rdi, rax

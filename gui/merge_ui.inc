@@ -370,6 +370,27 @@ mg_undo:
     lea rcx, [s_un_noredo]
     jmp .say
 
+; mg_browse(hwnd, edit id, save 0 / 1): the browse button next to the base / output path
+mg_browse:
+    PROLOG 1200
+    mov rsi, rcx
+    mov r12d, r8d
+    invoke GetDlgItem, rsi, rdx
+    mov rbx, rax
+    invoke GetWindowTextW, rbx, &rsp+96, 519
+    test r12d, r12d
+    jnz .save
+    invoke browse_open, rsi, &rsp+96
+    jmp .got
+.save:
+    invoke browse_save, rsi, &rsp+96
+.got:
+    test eax, eax
+    jz .d
+    invoke SetWindowTextW, rbx, &rsp+96
+.d:
+    EPILOG 1200
+
 ; mg_resolve_all(hwnd, mg, choice): accept one side for every remaining conflict in a single pass (TM-05)
 mg_resolve_all:
     PROLOG 64
@@ -397,7 +418,7 @@ mg_save:
     mov rax, [rbx+MG_CONF+8]
     test rax, rax
     jz .write
-    invoke _snwprintf, &rsp+96, 100, &f_leftconf, rax
+    invoke _snwprintf, &rsp+96, 80, &f_leftconf, rax
     invoke msgbox, rsi, &rsp+96, MB_YESNO|MB_ICONQUESTION
     cmp eax, IDYES
     jne .no
@@ -894,22 +915,10 @@ mg_proc:
     invoke pb_command, rsi, rbx, 0
     jmp .zero
 .bc:
-    invoke GetDlgItem, rsi, ID_EDIT_C
-    mov rbx, rax
-    invoke GetWindowTextW, rbx, &rsp+96, 519
-    invoke browse_open, rsi, &rsp+96
-    test eax, eax
-    jz .zero
-    invoke SetWindowTextW, rbx, &rsp+96
+    invoke mg_browse, rsi, ID_EDIT_C, 0
     jmp .zero
 .bo:
-    invoke GetDlgItem, rsi, ID_EDIT_O
-    mov rbx, rax
-    invoke GetWindowTextW, rbx, &rsp+96, 519
-    invoke browse_save, rsi, &rsp+96
-    test eax, eax
-    jz .zero
-    invoke SetWindowTextW, rbx, &rsp+96
+    invoke mg_browse, rsi, ID_EDIT_O, 1
     jmp .zero
 .b_prev:
     invoke mg_nav, r15, 0

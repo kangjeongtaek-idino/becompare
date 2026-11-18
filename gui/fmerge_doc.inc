@@ -224,7 +224,7 @@ fm_html_path:
 
 ; fm_export(hwnd, fm)
 fm_export:
-    PROLOG 1200
+    PROLOG 1440
     mov rsi, rcx
     mov rbx, rdx
     cmp qword [rbx+FM_ENT+8], 0
@@ -246,7 +246,7 @@ fm_export:
 .res:
     invoke ex_done_open, rsi, rax, &rsp+400
 .d:
-    EPILOG 1200
+    EPILOG 1440
 .norun:
     invoke msgbox, rsi, &fd_norun, MB_OK|MB_ICONINFO
-    EPILOG 1200
+    EPILOG 1440
