@@ -431,6 +431,8 @@ hp_proc:
 hx_free:
     PROLOG 64
     mov rbx, rcx
+    invoke fs_forget, &rbx+HX_BUFA
+    invoke fs_forget, &rbx+HX_BUFB
     invoke free, [rbx+HX_BUFA]
     invoke free, [rbx+HX_BUFB]
     invoke free, [rbx+HX_RDIFF]
@@ -450,10 +452,12 @@ hx_compare:
     invoke GetDlgItem, rsi, ID_EDIT_B
     invoke GetWindowTextW, rax, &rbx+HX_PATHB, 519
     invoke hx_free, rbx
+    invoke fs_watch, &rbx+HX_BUFA, &rbx+HX_PATHA
     invoke read_file_bytes, &rbx+HX_PATHA, &rbx+HX_SZA
     mov [rbx+HX_BUFA], rax
     test rax, rax
     jz .err
+    invoke fs_watch, &rbx+HX_BUFB, &rbx+HX_PATHB
     invoke read_file_bytes, &rbx+HX_PATHB, &rbx+HX_SZB
     mov [rbx+HX_BUFB], rax
     test rax, rax
@@ -627,7 +631,12 @@ hx_save:
     invoke GetWindowTextW, rax, &rsp+96, 519
     cmp word [rsp+96], 0
     je .nopath
-    invoke safe_write2, &rsp+96, rdi, r14, 0, 0
+    lea r13, [rbx+HX_BUFA]
+    test r12d, r12d
+    jz .save_guard
+    lea r13, [rbx+HX_BUFB]
+.save_guard:
+    invoke guarded_binary_save, r13, &rsp+96, rdi, r14
     test eax, eax
     jnz .saved
     invoke save_error, rsi

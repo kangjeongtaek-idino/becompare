@@ -27,36 +27,47 @@ def run(args, cwd=ROOT, timeout=30, expected=0, env=None):
     return r
 for m in MODS:
     run(["nasm","-f","win64","-I","./",m+".asm","-o",OUT/(m+".obj")],ROOT/"gui")
+run(["gcc","-std=c11","-O2","-Wall","-Wextra","-c",ROOT/"gui/concurrency.c","-o",OUT/"concurrency.obj"])
+MODS.append("concurrency")
 run(["windres","res/app.rc","-O","coff","-o",OUT/"app.res.o"],ROOT/"gui")
 run(["gcc","-mwindows",*[OUT/(m+".obj") for m in MODS],OUT/"app.res.o","-o",OUT/"bcgui.exe",*LIBS])
 r=run(["python","tools/hazard.py"])
 assert "hazards: 0" in r.stdout
-run(["gcc",ROOT/"tools/test_safe_save.c",OUT/"engine.obj",OUT/"textlib.obj",OUT/"mem.obj",*["-Wl,--wrap="+x for x in ["WriteFile","FlushFileBuffers","ReplaceFileW","ReadFile"]],"-o",OUT/"test_safe_save.exe"])
+run(["gcc",ROOT/"tools/test_safe_save.c",OUT/"engine.obj",OUT/"textlib.obj",OUT/"mem.obj",OUT/"concurrency.obj",*["-Wl,--wrap="+x for x in ["WriteFile","FlushFileBuffers","ReplaceFileW","ReadFile"]],"-luser32","-lshell32","-o",OUT/"test_safe_save.exe"])
 defs={}
 for name in ["inc/app.inc","text.asm","edit_ui.inc","hex.asm","merge.asm","folder.asm","fmerge.asm"]:
     for line in (ROOT/"gui"/name).read_text(encoding="utf-8").splitlines():
         m=re.match(r"^%define\s+((?:SS_|TV_|HX_|MG_|F_|FM_|BC_)[A-Z0-9_]+|E_HR|E_SIZE)\s+([^;]+)",line)
         if m: defs[m[1]]=m[2].strip()
 (OUT/"test_layout.h").write_text("\n".join("#define "+k+" "+v for k,v in defs.items()),encoding="utf-8")
-exports={"main":["view_can_close","frame_proc","g_nsess","g_sess"],"text":["text_compare","tv_proc","ed_proc"],"hex":["hx_proc"],"merge":["mg_proc"],"folder":["fold_proc","sync_thread"],"fmerge":["fm_proc"]}
+exports={"main":["view_can_close","frame_proc","g_nsess","g_sess"],"text":["text_compare","tv_proc","ed_proc"],"hex":["hx_proc"],"merge":["mg_proc"],"folder":["fold_proc","sync_thread"],"fmerge":["fm_proc"],"fjournal":["fj_apply"]}
 for mod,names in exports.items():
     run(["objcopy",*["--globalize-symbol="+n for n in names],OUT/(mod+".obj"),OUT/(mod+".test.obj")])
 run(["gcc","-I",OUT,ROOT/"tools/test_view_state.c",*[OUT/(m+(".test" if m in exports else "")+".obj") for m in MODS],*["-Wl,--wrap="+x for x in ["SendMessageW","GetWindowLongPtrW","GetDlgItem","GetWindowTextW","SetWindowTextW","InvalidateRect","msgbox","DestroyWindow","EnableWindow","SetTimer","KillTimer"]],*LIBS,"-o",OUT/"test_view_state.exe"])
 # UI behaviour: the whole application in one process with a hidden window (tools/test_ui.c)
 run(["objcopy","--redefine-sym","WinMain=bc_winmain",OUT/"main.obj",OUT/"main.ui.obj"])
-run(["gcc",ROOT/"tools/test_ui.c",*[OUT/(m+(".ui" if m=="main" else "")+".obj") for m in MODS],*["-Wl,--wrap="+x for x in ["GetCommandLineW","ShowWindow","GetKeyState","MessageBoxW","update_start","ShellExecuteW","TrackPopupMenu","EmptyClipboard","SetClipboardData","browse_folder"]],OUT/"app.res.o",*LIBS,"-o",OUT/"test_ui.exe"])   # with the manifest: the same common controls as the application
+run(["gcc",ROOT/"tools/test_ui.c",*[OUT/(m+(".ui" if m=="main" else "")+".obj") for m in MODS],*["-Wl,--wrap="+x for x in ["GetCommandLineW","ShowWindow","GetKeyState","MessageBoxW","co_SHFileOperationW","update_start","ShellExecuteW","TrackPopupMenu","EmptyClipboard","SetClipboardData","browse_folder"]],OUT/"app.res.o",*LIBS,"-o",OUT/"test_ui.exe"])   # with the manifest: the same common controls as the application
+run(["gcc",ROOT/"tools/test_concurrency.c",*[OUT/(m+(".ui" if m=="main" else ".test" if m=="fjournal" else "")+".obj") for m in MODS],"-Wl,--wrap=WriteFile","-Wl,--wrap=ReplaceFileW","-Wl,--wrap=GetTickCount","-Wl,--wrap=msgbox","-Wl,--wrap=settings_read",*LIBS,"-o",OUT/"test_concurrency.exe"])
 # Keep the fixture directory and logs for inspection. Each run has independent paths.
 fixtures=Path(tempfile.mkdtemp(prefix="fixtures-",dir=OUT))
 print("Fixtures:",fixtures)
+unit_checks={}
 for name in ["test_safe_save","test_view_state"]:
     r=run([OUT/(name+".exe")],fixtures)
     (fixtures/(name+".log")).write_text(r.stdout,encoding="utf-8")
+    unit_checks[name]=int(re.search(r"(\d+) checks, 0 failures",r.stdout).group(1))
 for d in ["left","right","emptyA","emptyB","dirLeft/only-left","dirRight","local-app-data","detail_files/0.html","syncLeft","syncRight"]:
     (fixtures/d).mkdir(parents=True,exist_ok=True)
 (fixtures/"ui/local-app-data").mkdir(parents=True)
 # every run gets its own temporary folder too: the application cleans %TEMP%\\BeCompareAsm when it ends
 tmp=fixtures/"tmp"; tmp.mkdir()
 ui_env=dict(os.environ,LOCALAPPDATA=str(fixtures/"ui/local-app-data"),TEMP=str(tmp),TMP=str(tmp))
+concurrency_dir=fixtures/"concurrency";concurrency_dir.mkdir()
+r=run([OUT/"test_concurrency.exe"],concurrency_dir,timeout=60,env=ui_env)
+(fixtures/"test_concurrency.log").write_text(r.stdout,encoding="utf-8")
+concurrency_checks=int(re.search(r"(\d+) checks, 0 failures",r.stdout).group(1))
+from test_concurrency import process_checks
+concurrency_checks+=process_checks(OUT/"test_concurrency.exe",fixtures/"processes",ui_env)
 ui_checks=0
 for mode in ["text","merge","fmerge","browse","folder","folderpv","find","findmft","findusn"]:
     r=run([OUT/"test_ui.exe",mode],fixtures/"ui",timeout=200 if mode.startswith("find") else 90,env=ui_env)
@@ -228,4 +239,4 @@ assert not any((ex/f).exists() for f in ["w1.xlsx","w2.docx","w3.xlsx","w4.xlsx"
 assert not any((ex/f).exists() for f in ["e4.docx","e7.docx"])
 print("PASS export file contents")
 (fixtures/"cli-results.json").write_text(json.dumps(LOG,indent=2),encoding="utf-8")
-print("All regression checks passed: 44 save + 21 state/worker +",ui_checks,"UI +",len(LOG),"CLI cases + 1 temporary-folder check")
+print("All regression checks passed:",unit_checks["test_safe_save"],"save +",unit_checks["test_view_state"],"state/worker +",concurrency_checks,"concurrency +",ui_checks,"UI +",len(LOG),"CLI cases + 1 temporary-folder check")

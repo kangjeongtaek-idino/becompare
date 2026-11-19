@@ -17,8 +17,12 @@ extern GetCursorPos, ScreenToClient, TrackPopupMenu, DestroyMenu
 extern calloc, free, wcslen, wcscpy, wcsncpy, wcscmp, _wcsicmp, wcsrchr, _snwprintf, wcscat
 extern WritePrivateProfileStringW, GetPrivateProfileStringW, GetPrivateProfileIntW
 extern CreateFileW, WriteFile, CloseHandle, DeleteFileW
+extern cfg_prepare
+extern co_changes_init, co_changes_message
 extern g_hinst, g_hframe, g_htab, g_hstatus, g_font, g_dpi, g_dark
 extern th_panelbrush
+extern SelectObject, SetTextColor, SetBkMode, DrawTextW, g_iconfont
+extern SetWindowSubclass, DefSubclassProc, GetDC, ReleaseDC
 extern g_mem_batch
 extern mk, reg_class, scl, set_status, msgbox, browse_open_as, browse_save_as
 extern theme_set, fonts_init, s_appname
@@ -251,6 +255,7 @@ WinMain:
     invoke InitCommonControlsEx, rbx
     invoke LoadLibraryW, &s_msftedit
     call ini_path_init
+    invoke co_changes_init, &g_ini
     call policy_load
     call keys_load
     call fonts_init
@@ -1191,22 +1196,7 @@ type_for_path:
 
 ; ini_prepare(rcx=file): make sure the file exists as UTF-16 (BOM) so Unicode survives
 ini_prepare:
-    PROLOG 96
-    mov rbx, rcx
-    invoke GetFileAttributesW, rbx
-    cmp eax, -1
-    jne .ok
-    invoke CreateFileW, rbx, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0
-    cmp rax, -1
-    je .ok
-    mov rsi, rax
-    mov word [rsp+96], 0xFEFF
-    lea rdx, [rsp+96]
-    lea r9, [rsp+88]                 ; (rsp+104 was the caller's saved r15)
-    invoke WriteFile, rsi, rdx, 2, r9, 0
-    invoke CloseHandle, rsi
-.ok:
-    EPILOG 96
+    jmp cfg_prepare
 
 ; session_write(sess, file, section)
 session_write:
@@ -1792,6 +1782,46 @@ parse_cmdline:
 .d:
     EPILOG 160
 
+; Preserve the native button's complete painting; overlay only the red power glyph.
+; WM_PRINTCLIENT follows the same path so previews and pixel checks match the UI.
+exit_button_proc:
+    PROLOG 160
+    mov rbx, rcx
+    mov rsi, rdx
+    mov rdi, r8
+    mov r12, r9
+    invoke DefSubclassProc, rbx, rsi, rdi, r12
+    mov r13, rax
+    cmp esi, 0xF                    ; WM_PAINT
+    je .paint
+    cmp esi, 0x318                  ; WM_PRINTCLIENT
+    jne .d
+    mov r15, rdi
+    jmp .glyph
+.paint:
+    invoke GetDC, rbx
+    mov r15, rax
+.glyph:
+    test r15, r15
+    jz .d
+    invoke GetClientRect, rbx, &rsp+96
+    invoke SelectObject, r15, [g_iconfont]
+    mov r14, rax
+    invoke SetTextColor, r15, 0x0000FF ; RGB(255, 0, 0)
+    mov [rsp+112], eax
+    invoke SetBkMode, r15, 1         ; TRANSPARENT
+    mov [rsp+116], eax
+    invoke DrawTextW, r15, &g_appexit, 1, &rsp+96, 0x25
+    invoke SetBkMode, r15, #[rsp+116]
+    invoke SetTextColor, r15, #[rsp+112]
+    invoke SelectObject, r15, r14
+    cmp esi, 0xF
+    jne .d
+    invoke ReleaseDC, rbx, r15
+.d:
+    mov rax, r13
+    EPILOG 160
+
 ; ---------------------------------------------------------------- frame window procedure
 frame_proc:
     PROLOG 256
@@ -1799,6 +1829,9 @@ frame_proc:
     mov edi, edx
     mov r12, r8
     mov r13, r9
+    invoke co_changes_message, rdi
+    test eax, eax
+    jnz .files_changed
     cmp edi, WM_CREATE
     je .create
     cmp edi, WM_SIZE
@@ -1820,6 +1853,13 @@ frame_proc:
 .def:
     invoke DefWindowProcW, rsi, rdi, r12, r13
     EPILOG 256
+.files_changed:
+    lea rax, [g_sess]
+    mov rax, [rax]
+    test rax, rax
+    jz .ok0
+    invoke PostMessageW, [rax+SS_HVIEW], WM_COMMAND, 3011, 0 ; refresh Home's existing query
+    jmp .ok0
 
 .create:
     mov [g_hframe], rsi
@@ -1832,6 +1872,12 @@ frame_proc:
     invoke icon_set, rsi, IDM_CLOSE_TAB, &g_tabclose, &s_tip_tabclose
     invoke mk_btn, rsi, &s_nolabel, IDM_EXIT
     invoke icon_set, rsi, IDM_EXIT, &g_appexit, &s_tip_appexit
+    ; Let the same native button paint its frame and interaction states. Only
+    ; the red glyph is added after that painting, so omit the default text.
+    invoke GetDlgItem, rsi, IDM_EXIT
+    mov r14, rax
+    invoke SetWindowTextW, r14, &s_nolabel
+    invoke SetWindowSubclass, r14, &exit_button_proc, 1, 0
     xor eax, eax
     EPILOG 256
 

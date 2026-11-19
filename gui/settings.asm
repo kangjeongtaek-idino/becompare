@@ -14,6 +14,7 @@ extern mk, reg_class, scl, msgbox, mk_btn, mk_lbl, mk_edit, ctl_color
 extern g_ini, theme_set, apply_theme_all
 
 global g_policy, g_keytab, policy_load, keys_load, settings_colors, ext_launch, settings_show, settings_font
+extern cfg_begin, cfg_end, cfg_cancel, cfg_edit_watch, cfg_edit_begin, fs_forget
 
 ; ---------------------------------------------------------------- data
 %define POL_SYNC     1
@@ -614,6 +615,9 @@ st_fill:
 st_save:
     PROLOG 512
     mov rsi, rcx
+    invoke cfg_edit_begin, rsi, &g_ini, rsi
+    test eax, eax
+    jz .failed
     xor ebx, ebx
 .r:
     cmp ebx, ST_NROWS
@@ -688,9 +692,19 @@ st_save:
     jmp .skipnl
 .done:
     invoke free, r12
+    call cfg_end
+    test eax, eax
+    jz .failed
+    EPILOG 512
+.failed:
+    invoke msgbox, rsi, &s_settings_conflict, MB_OK|MB_ICONWARNING
+    xor eax, eax
     EPILOG 512
 
 ; sg_layout(hwnd)
+section .rdata
+WSTR s_settings_conflict, "설정이 다른 창에서 변경되었거나 저장할 수 없습니다. 설정 창을 다시 열어 최신 설정을 확인하세요."
+section .text
 sg_create:
     PROLOG 192
     mov rsi, rcx
@@ -774,7 +788,16 @@ sg_create:
     SPLACE 548, 540, 100, 28
     invoke mk_btn, rsi, &s_sg_defs, SG_DEFS
     SPLACE 12, 540, 130, 28
+    invoke cfg_begin, &g_ini
+    test eax, eax
+    jz .settings_unavailable
+    invoke cfg_edit_watch, rsi, &g_ini
     invoke st_fill, rsi, 0
+    call cfg_cancel
+    jmp .settings_filled
+.settings_unavailable:
+    invoke st_fill, rsi, 0
+.settings_filled:
     ; policy line
     invoke calloc, 1, 1200
     mov r12, rax
@@ -844,6 +867,8 @@ sg_proc:
     jmp .zero
 .ok:
     invoke st_save, rsi
+    test eax, eax
+    jz .zero
     mov qword [g_sg_result], 1
     jmp .zero
 .close:
@@ -917,6 +942,7 @@ settings_show:
     invoke PostQuitMessage, 0
 .done:
     invoke EnableWindow, rbx, 1
+    invoke fs_forget, rdi
     invoke DestroyWindow, rdi
     invoke SetFocus, rbx
     mov rax, [g_sg_result]

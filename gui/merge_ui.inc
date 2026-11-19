@@ -96,6 +96,10 @@ mg_align_clear:
 mg_free_texts:
     PROLOG 64
     mov rbx, rcx
+    invoke fs_forget, rbx
+    invoke fs_forget, &rbx+MG_TXL
+    invoke fs_forget, &rbx+MG_TXR
+    invoke fs_forget, &rbx+MG_TXO
     invoke free, [rbx+MG_TXL]
     invoke free, [rbx+MG_TXR]
     invoke free, [rbx+MG_TXO]
@@ -437,7 +441,8 @@ mg_save:
     mov r9d, [rbx+MG_CRLF]
     shl r9d, 8
     or r9d, [rbx+MG_ENC]
-    invoke text_save, &r12+SS_PATHO, r13, r14, r9
+    mov [rsp+104], r9
+    invoke guarded_text_save, rbx, &r12+SS_PATHO, r13, r14, [rsp+104]
     mov r15d, eax
     invoke free, r13
     test r15d, r15d

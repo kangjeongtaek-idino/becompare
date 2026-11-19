@@ -13,6 +13,7 @@ extern WideCharToMultiByte, MultiByteToWideChar, CreateFileW, WriteFile, CloseHa
 global vec_push, fmt_size, fmt_time, wild_w, excl_match, excl_match2
 extern GetFullPathNameW, GetTempFileNameW, GetFileAttributesW, GetLastError, GetCurrentProcessId, GetTickCount, _snwprintf
 extern FlushFileBuffers, ReplaceFileW, MoveFileExW, DeleteFileW
+extern fs_before_commit, co_file_lock, co_file_unlock
 global safe_write2
 global safe_writev
 global sb_init, sb_append, sb_append_esc, sb_free, write_utf8, read_file_bytes, lower_w
@@ -487,6 +488,10 @@ safe_writev:
     xor ebx, ebx
     xor esi, esi
     xor edi, edi
+    call co_file_lock
+    mov [rsp+128], rax
+    test rax, rax
+    jz .fail
     invoke malloc, 131072
     test rax, rax
     jz .fail
@@ -550,6 +555,9 @@ safe_writev:
     invoke CloseHandle, rbp
     test eax, eax
     jz .cleanup
+    invoke fs_before_commit, rbx, rsi
+    test eax, eax
+    jz .cleanup
     invoke GetFileAttributesW, rbx
     cmp eax, -1
     je .new
@@ -576,6 +584,7 @@ safe_writev:
 .free:
     invoke free, rbx
 .fail:
+    invoke co_file_unlock, [rsp+128]
     mov eax, edi
     EPILOG 160
 

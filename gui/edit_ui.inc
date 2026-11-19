@@ -247,6 +247,7 @@ ed_save:
     test eax, eax
     jz .d
     invoke SetWindowTextW, r13, &rsp+96
+    invoke fs_watch, &rbx+E_TXT, &rsp+96 ; Save As: snapshot the newly confirmed destination
 .have:
     cmp qword [rbx+E_LOADED], 0
     jne .go
@@ -283,7 +284,8 @@ ed_save:
     mov edx, [rsp+1160]
     call text_opts
     mov r9d, eax
-    invoke text_save, &rsp+96, rbp, r13, r9
+    mov [rsp+1176], r9
+    invoke guarded_text_save, &rbx+E_TXT, &rsp+96, rbp, r13, [rsp+1176]
     mov r14d, eax
     invoke free, rbp
     test r14d, r14d
@@ -644,6 +646,7 @@ ed_proc:
     invoke SendMessageW, [r15+E_HR], EM_GETMODIFY, 0, 0
     EPILOG 320
 .destroy:
+    invoke fs_forget, &r15+E_TXT
     invoke free, [r15+E_TXT]
     invoke free, r15
     mov qword [r14+SS_DATA], 0

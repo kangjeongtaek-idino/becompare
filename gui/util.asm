@@ -6,6 +6,7 @@ extern CreateWindowExW, SendMessageW, RegisterClassExW, LoadCursorW, CreateFontW
 extern CreateSolidBrush, DeleteObject, GetDeviceCaps, GetDC, ReleaseDC
 extern MessageBoxW, GetOpenFileNameW, GetSaveFileNameW, PostMessageW
 extern g_batch, g_exitcode
+extern fs_take_conflict
 extern SHBrowseForFolderW, SHGetPathFromIDListW, CoTaskMemFree
 extern MonitorFromWindow, GetMonitorInfoW, GetWindowRect, SetWindowPos, GetWindow
 extern wcslen, wcscpy, memset, malloc, _snwprintf, wcscmp
@@ -26,6 +27,7 @@ global theme_set, fonts_init, str_dup, s_appname, set_ctl_theme
 
 section .rdata
 WSTR s_save_failed, "저장하지 못했습니다. 파일 경로, 쓰기 권한 및 남은 공간을 확인하세요. 변경 내용은 유지됩니다."
+WSTR s_save_conflict, "파일이 다른 창이나 프로그램에서 변경되었거나 삭제되었습니다. 변경 내용을 덮어쓰지 않았습니다. 파일을 다시 열어 확인하거나 다른 이름으로 저장하세요."
 WSTR s_appname, "BeCompare"
 WSTR s_segoe, "Segoe UI"
 WSTR s_consolas, "Consolas"
@@ -81,9 +83,16 @@ bf_again:       resq 1              ; the folder dialog is fitted once more on i
 section .text
 
 save_error:
+    PROLOG 64
+    mov rbx, rcx
+    call fs_take_conflict
     lea rdx, [s_save_failed]
-    mov r8d, MB_OK|MB_ICONWARNING
-    jmp msgbox
+    test eax, eax
+    jz .show
+    lea rdx, [s_save_conflict]
+.show:
+    invoke msgbox, rbx, rdx, MB_OK|MB_ICONWARNING
+    EPILOG 64
 
 ; scl(rcx=px) -> eax = px * dpi / 96
 scl:

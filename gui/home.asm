@@ -18,6 +18,9 @@ extern mk, reg_class, scl, tip_add
 extern ini_prepare, open_any_file, g_sess, g_nsess
 extern ShowWindow, SetTimer, KillTimer, InvalidateRect, GetWindowTextW, SetWindowTextW
 extern find_start, find_query2, find_path, fi_state, fi_vis
+extern find_forget, msgbox, GetLastError
+extern cfg_begin, cfg_end
+extern co_changes_publish, co_changes_poll, find_forget_path
 extern find_sort, find_time, find_size, find_flags, find_name, find_parent, find_volcount, find_volname
 extern lv_dark_header, fmt_size, FileTimeToLocalFileTime, FileTimeToSystemTime, malloc
 extern browse_folder, GetWindowTextLengthW, SetWindowPos
@@ -151,6 +154,7 @@ WSTR f_select, `/select,"%s"`
 WSTR s_copied, "경로를 클립보드에 복사했습니다."
 WSTR s_noapp, "이 파일을 열 프로그램을 찾지 못했습니다."
 WSTR s_find_selall, "전체 선택"
+WSTR s_find_unselall, "전체 해제"
 WSTR s_find_copy,   "복사"
 WSTR s_find_share,  "공유"
 WSTR s_find_email,  "이메일"
@@ -173,6 +177,7 @@ WSTR s_sm_clip,     "📋 메신저 대화창 붙여넣기 복사 (Ctrl+V)"
 WSTR s_sm_nearby,   "🌐 Windows 주변 기기 공유"
 WSTR s_status_copied, "%u개 항목을 클립보드에 복사했습니다."
 WSTR s_status_deleted, "%u개 항목을 휴지통으로 이동했습니다."
+WSTR s_confirm_delete, "선택한 %u개 항목을 휴지통으로 이동하시겠습니까?"
 WSTR s_status_delfail, "삭제를 취소했거나 일부 항목을 지우지 못했습니다."
 WSTR s_status_email, "이메일 프로그램을 열었습니다. 본문에 Ctrl+V로 파일을 첨부하세요."
 WSTR s_status_props, "파일 속성 창을 열었습니다."
@@ -343,6 +348,9 @@ settings_load:
 recent_add:
     PROLOG 1200
     mov r12, rcx
+    invoke cfg_begin, &g_ini
+    test eax, eax
+    jz .return
     lea rsi, [rsp+96]                ; key buffer (16 wchar)
     lea rdi, [rsp+128]               ; value buffer (520 wchar)
     invoke _snwprintf, rsi, 16, &f_r, 0
@@ -381,6 +389,8 @@ recent_add:
     jz .done
     invoke PostMessageW, [rax+SS_HVIEW], WM_APP+30, 0, 0
 .done:
+    call cfg_end
+.return:
     EPILOG 1200
 
 ; fill_recent(hwnd)
@@ -1197,9 +1207,9 @@ home_proc:
     je .n_click
     cmp eax, -155                     ; LVN_KEYDOWN
     je .n_keydown
-    cmp eax, -110                     ; LVN_ITEMCHANGED
+    cmp eax, LVN_ITEMCHANGED
     je .n_selchange
-    cmp eax, -113                     ; LVN_ODSTATECHANGED
+    cmp eax, LVN_ODSTATECHANGED
     je .n_selchange
     jmp .def
 .n_selchange:
@@ -1514,6 +1524,7 @@ home_find_drives:
 home_find:
     PROLOG 1184
     mov rsi, rcx
+    invoke co_changes_poll, &find_forget_path, [fi_state]
     cmp qword [hf_ids], 0
     jne .have
     invoke malloc, HF_CAP*4
@@ -1661,6 +1672,7 @@ home_find:
 .skip_memset:
     invoke home_find_resort, rsi
     invoke SendMessageW, r12, LVM_SETITEMCOUNT, r15, 0
+    invoke home_find_update_selall, rsi
     invoke InvalidateRect, r12, 0, 1
     invoke ShowWindow, r13, 0
     invoke ShowWindow, r12, 5
@@ -2062,6 +2074,9 @@ home_find_menu:
     ; Copy / Share / Email / Delete / Properties used to take the checked rows even when the menu was opened on
     ; another row (Open and Show took the clicked one): on an unchecked row they are for that row
     mov qword [hf_only], 0
+    invoke SendMessageW, rbx, 0x1032, 0, 0 ; LVM_GETSELECTEDCOUNT
+    cmp eax, 1
+    jg .pick                         ; preserve the highlighted group for batch actions
     cmp qword [hf_chk_cnt], 0
     je .pick
     mov rax, [hf_chk]
@@ -2142,6 +2157,11 @@ home_find_update_chk_lbl:
     jmp .chk_cnt_loop
 .chk_cnt_done:
     mov [hf_chk_cnt], rdx
+    invoke GetDlgItem, rsi, ID_FIND_LIST
+    invoke SendMessageW, rax, 0x1032, 0, 0 ; LVM_GETSELECTEDCOUNT
+    cmp eax, 1
+    jg .selected_lbl
+    mov rdx, [hf_chk_cnt]
     test edx, edx
     jz .chk_none_maybe_sel
     mov r12, rdx
@@ -2155,6 +2175,7 @@ home_find_update_chk_lbl:
     invoke SendMessageW, rax, 0x1032, 0, 0            ; LVM_GETSELECTEDCOUNT
     cmp eax, 1
     jle .chk_none
+.selected_lbl:
     movsxd r12, eax
     mov r13, [fi_vis]
     invoke _snwprintf, &rsp+96, 80, &f_find_ready_chk, [hf_n], r12, r13
@@ -2167,7 +2188,40 @@ home_find_update_chk_lbl:
     invoke GetDlgItem, rsi, ID_RLABEL
     invoke SetWindowTextW, rax, &rsp+96
 .d:
+    invoke home_find_update_selall, rsi
     EPILOG 256
+
+; The caption and the action share the same state, including native multi-selection.
+home_find_all_selected:
+    PROLOG 64
+    cmp qword [hf_n], 0
+    je .no
+    mov rax, [hf_chk_cnt]
+    cmp rax, [hf_n]
+    je .yes
+    invoke GetDlgItem, rcx, ID_FIND_LIST
+    invoke SendMessageW, rax, 0x1032, 0, 0 ; LVM_GETSELECTEDCOUNT
+    cmp rax, [hf_n]
+    je .yes
+.no:
+    xor eax, eax
+    EPILOG 64
+.yes:
+    mov eax, 1
+    EPILOG 64
+
+home_find_update_selall:
+    PROLOG 64
+    mov rsi, rcx
+    invoke home_find_all_selected, rsi
+    lea rbx, [s_find_selall]
+    test eax, eax
+    jz .set
+    lea rbx, [s_find_unselall]
+.set:
+    invoke GetDlgItem, rsi, ID_FIND_SELALL
+    invoke SetWindowTextW, rax, rbx
+    EPILOG 64
 
 ; home_find_show_actions(hwnd, show_flag)
 home_find_show_actions:
@@ -2190,7 +2244,7 @@ home_find_show_actions:
 
 ; home_find_selall(hwnd)
 home_find_selall:
-    PROLOG 64
+    PROLOG 128
     mov rsi, rcx
     mov r8, [hf_n]
     test r8, r8
@@ -2198,20 +2252,29 @@ home_find_selall:
     mov rcx, [hf_chk]
     test rcx, rcx
     jz .d
-    xor edx, edx
-    mov rax, [hf_chk_cnt]
-    cmp rax, r8
-    je .do_set
-    mov dl, 1
+    invoke home_find_all_selected, rsi
+    xor eax, 1
+    mov edx, eax
 .do_set:
+    mov r12d, edx
     mov rcx, [hf_chk]
     mov r8, [hf_n]
     call memset
     invoke GetDlgItem, rsi, ID_FIND_LIST
-    invoke InvalidateRect, rax, 0, 0
+    mov rbx, rax
+    ; Keep native row highlighting in sync with the checkboxes, for every item.
+    mov qword [rsp+96], 0
+    mov qword [rsp+104], 0
+    mov qword [rsp+112], 0
+    shl r12d, 1                     ; LVIS_SELECTED when selecting, 0 when clearing
+    mov [rsp+108], r12d             ; LVITEMW.state
+    mov dword [rsp+112], LVIS_SELECTED ; LVITEMW.stateMask
+    invoke SendMessageW, rbx, LVM_SETITEMSTATE, -1, &rsp+96
+    invoke SetFocus, rbx
+    invoke InvalidateRect, rbx, 0, 0
     invoke home_find_update_chk_lbl, rsi
 .d:
-    EPILOG 64
+    EPILOG 128
 
 ; home_find_get_targets(hwnd, out_ids, max_count) -> eax = count
 home_find_get_targets:
@@ -2235,6 +2298,12 @@ home_find_get_targets:
     mov ebx, 1
     jmp .ret_count
 .usual:
+    ; A highlighted group is the active selection even if an earlier click left
+    ; a checkbox checked. Otherwise retain the checked-items/single-row behavior.
+    invoke GetDlgItem, rsi, ID_FIND_LIST
+    invoke SendMessageW, rax, 0x1032, 0, 0 ; LVM_GETSELECTEDCOUNT
+    cmp eax, 1
+    jg .check_sel
     cmp qword [hf_chk_cnt], 0
     jz .check_sel
     mov r8, [hf_n]
@@ -2539,7 +2608,7 @@ home_find_do_email:
 
 ; home_find_do_del(hwnd)
 home_find_do_del:
-    PROLOG 256
+    PROLOG 2048
     mov rsi, rcx
     invoke malloc, 40000
     test rax, rax
@@ -2550,6 +2619,11 @@ home_find_do_del:
     jz .none_del
     mov r13d, eax
 
+    invoke _snwprintf, &rsp+160, 120, &s_confirm_delete, r13
+    invoke msgbox, [g_hframe], &rsp+160, MB_YESNO|MB_ICONWARNING|0x100 ; default No
+    cmp eax, IDYES
+    jne .cancel_del
+
     imul r14, r13, 1600
     add r14, 64
     invoke malloc, r14
@@ -2558,6 +2632,7 @@ home_find_do_del:
     mov r15, rax
 
     mov rdi, r15
+    mov word [rdi], 0
     xor ebx, ebx
 .del_fill:
     cmp ebx, r13d
@@ -2572,6 +2647,8 @@ home_find_do_del:
     jmp .del_fill
 .del_filled:
     mov word [rdi], 0
+    cmp rdi, r15
+    je .empty_del
 
     invoke memset, &rsp+96, 0, 56
     mov rax, [g_hframe]
@@ -2579,11 +2656,37 @@ home_find_do_del:
     mov dword [rsp+104], 3           ; FO_DELETE
     mov [rsp+112], r15
     mov qword [rsp+120], 0
-    mov word [rsp+128], 0x0040       ; FOF_ALLOWUNDO
+    mov word [rsp+128], 0x0050       ; FOF_ALLOWUNDO | FOF_NOCONFIRMATION (confirmed above)
     invoke SHFileOperationW, &rsp+96
     mov r14d, eax                    ; not 0: failed
     or r14d, [rsp+96+36]             ; fAnyOperationsAborted: cancelled, or not everything was deleted
 
+    ; A failed/cancelled batch can still have deleted some items. Only forget paths
+    ; that are actually gone; access errors must not remove surviving search results.
+    xor ebx, ebx
+.del_check:
+    cmp ebx, r13d
+    jae .del_checked
+    mov ecx, [r12+rbx*4]
+    invoke find_path, rcx, &rsp+160, 790
+    test eax, eax
+    jz .del_next
+    invoke GetFileAttributesW, &rsp+160
+    cmp eax, -1
+    jne .del_next
+    call GetLastError
+    cmp eax, 2                      ; ERROR_FILE_NOT_FOUND
+    je .del_forget
+    cmp eax, 3                      ; ERROR_PATH_NOT_FOUND (deleted parent folder)
+    jne .del_next
+.del_forget:
+    invoke co_changes_publish, &rsp+160
+    mov ecx, [r12+rbx*4]
+    call find_forget
+.del_next:
+    inc ebx
+    jmp .del_check
+.del_checked:
     invoke free, r15
     invoke free, r12
 
@@ -2599,11 +2702,17 @@ home_find_do_del:
     invoke set_status, &rsp+96
     jmp .d
 
+.empty_del:
+    invoke free, r15
+    jmp .none_del
+.cancel_del:
+    invoke free, r12
+    jmp .d
 .none_del:
     invoke free, r12
     invoke set_status, &s_status_none
 .d:
-    EPILOG 256
+    EPILOG 2048
 
 ; ---------------------------------------------------------------- owner-drawn cards & controls
 
@@ -3279,16 +3388,31 @@ home_draw_listitem:
 
 ; home_remove(hwnd): drop the selected entry from the recent list
 home_remove:
-    PROLOG 1200
+    PROLOG 2304
     mov r12, rcx
     invoke GetDlgItem, r12, ID_RECENT
     mov r13, rax
     invoke SendMessageW, r13, LB_GETCURSEL, 0, 0
     movsxd rbx, eax
     test rbx, rbx
-    js .d
+    js .return
+    invoke SendMessageW, r13, LB_GETTEXT, rbx, &rsp+1200
+    invoke cfg_begin, &g_ini
+    test eax, eax
+    jz .return
     lea rsi, [rsp+96]
     lea rdi, [rsp+128]
+    xor ebx, ebx
+.find_current:
+    cmp ebx, MAX_RECENT
+    jae .d
+    invoke _snwprintf, rsi, 16, &f_r, rbx
+    invoke GetPrivateProfileStringW, &sec_recent, rsi, &s_empty, rdi, 520, &g_ini
+    invoke wcscmp, rdi, &rsp+1200
+    test eax, eax
+    jz .sh
+    inc ebx
+    jmp .find_current
 .sh:
     cmp ebx, MAX_RECENT-1
     jae .last
@@ -3302,6 +3426,8 @@ home_remove:
 .last:
     invoke _snwprintf, rsi, 16, &f_r, rbx
     invoke WritePrivateProfileStringW, &sec_recent, rsi, &s_empty, &g_ini
-    invoke fill_recent, r12
 .d:
-    EPILOG 1200
+    call cfg_end
+    invoke fill_recent, r12
+.return:
+    EPILOG 2304

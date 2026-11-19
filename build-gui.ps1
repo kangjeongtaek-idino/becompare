@@ -18,6 +18,9 @@ $objs += '..\build\stubs.obj'
 windres res\app.rc -O coff -o ..\build\app.res.o
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 $objs += '..\build\app.res.o'
+gcc -std=c11 -O2 -Wall -Wextra -c concurrency.c -o ..\build\concurrency.obj
+if ($LASTEXITCODE) { exit $LASTEXITCODE }
+$objs += '..\build\concurrency.obj'
 gcc -mwindows @objs -o ..\bcgui.exe -luser32 -lgdi32 -lcomctl32 -lcomdlg32 -lshell32 -lole32 -ldwmapi -lwininet -lgdiplus -luxtheme -lshlwapi -lversion -ladvapi32 -lnormaliz
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 Write-Host 'built bcgui.exe'

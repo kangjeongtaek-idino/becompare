@@ -10,6 +10,7 @@
 extern int view_can_close(HWND);
 extern LRESULT frame_proc(HWND,UINT,WPARAM,LPARAM);
 extern uint64_t g_nsess;extern void* g_sess[];
+extern int fs_watch(const void*,const wchar_t*);
 static int workerBusy,destroyCalls,timerCalls;
 BOOL WINAPI __wrap_DestroyWindow(HWND h){destroyCalls++;return TRUE;}
 BOOL WINAPI __wrap_EnableWindow(HWND h,BOOL e){return TRUE;}
@@ -53,7 +54,11 @@ int main(void){
  check(tv_proc((HWND)999,BC_ISDIRTY,0,0)!=0,"text view reports dirty");
  check(text_compare((HWND)999,tv,sess)==1&&dirty[0]&&!dirty[1],"repeated redraw preserves dirty state");
  FILE*f=fopen("left.txt","wb");fwrite("original",1,8,f);fclose(f);
- tv_proc((HWND)999,BC_SAVE,0,0);char buf[64]={0};f=fopen("left.txt","rb");size_t n=fread(buf,1,64,f);fclose(f);check(!dirty[0]&&n==7&&!memcmp(buf,"updated",7),"Ctrl+S after recompare saves edited content");
+ fs_watch(tv+TV_TXA,L"left.txt"); /* this synthetic view represents a file that was read */
+ tv_proc((HWND)999,BC_SAVE,0,0);char buf[64]={0};f=fopen("left.txt","rb");size_t n=fread(buf,1,64,f);fclose(f);if(dirty[0]||n!=7||memcmp(buf,"updated",7))printf("save diagnostic: modified=%d, bytes=%llu, text=%.*s\n",dirty[0],(unsigned long long)n,(int)n,buf);check(!dirty[0]&&n==7&&!memcmp(buf,"updated",7),"Ctrl+S after recompare saves edited content");
+ dirty[0]=1;wcscpy(pane[0],L"local edits");f=fopen("left.txt","wb");fwrite("external",1,8,f);fclose(f);
+ tv_proc((HWND)999,BC_SAVE,0,0);memset(buf,0,sizeof buf);f=fopen("left.txt","rb");n=fread(buf,1,64,f);fclose(f);
+ check(dirty[0]&&n==8&&!memcmp(buf,"external",8),"UI save conflict preserves external content and keeps local edits dirty");
  unsigned char ed[E_SIZE]={0},mg[MG_SIZE]={0},hx[HX_SIZE]={0},fold[F_SIZE]={0};
  dirty[0]=1;q(ed,E_HR,201);q(sess,SS_DATA,(uintptr_t)ed);check(ed_proc((HWND)999,BC_ISDIRTY,0,0)!=0,"editor reports dirty");
  q(mg,MG_HM,201);q(sess,SS_DATA,(uintptr_t)mg);check(mg_proc((HWND)999,BC_ISDIRTY,0,0)!=0,"merge reports dirty");

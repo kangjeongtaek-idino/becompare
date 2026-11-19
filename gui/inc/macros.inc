@@ -10,6 +10,20 @@
 default rel
 bits 64
 
+; All INI callers use the same cross-process lock and transaction-aware API.
+%define WritePrivateProfileStringW settings_write
+%define GetPrivateProfileStringW settings_read
+%define GetPrivateProfileIntW settings_read_int
+%define GetPrivateProfileSectionW settings_read_section
+%define SHFileOperationW co_SHFileOperationW
+%define CopyFileW co_CopyFileW
+%define MoveFileW co_MoveFileW
+%define MoveFileExW co_MoveFileExW
+%define DeleteFileW co_DeleteFileW
+%define RemoveDirectoryW co_RemoveDirectoryW
+%define CreateDirectoryW co_CreateDirectoryW
+%define SHCreateDirectoryExW co_SHCreateDirectoryExW
+
 ; Every module allocates through mem.asm: a small request that fails ends the program with a message, a large
 ; one returns 0 as before (those callers check). mem.asm itself defines BC_MEM_IMPL to reach the C runtime.
 %ifndef BC_MEM_IMPL

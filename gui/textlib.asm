@@ -6,6 +6,7 @@ extern malloc, calloc, realloc, free, memcpy, memset, wcslen, wcscmp, wcsstr
 extern MultiByteToWideChar, WideCharToMultiByte, CreateFileW, WriteFile, CloseHandle
 extern safe_write2, tl_convert, tl_isconv, DeleteFileW
 extern read_file_bytes, write_utf8, vec_push, lower_w
+extern fs_watch
 
 global g_tc_rules, text_load, text_save, text_load_raw, lines_split, compare_lines, hunk_free, keys_build, eol_keep, eol_restore, g_tl_cp, text_opts
 ; TXT { wchar* text; qword len; dd enc; dd crlf; dd eol }
@@ -39,6 +40,7 @@ text_load_raw:
     PROLOG 160
     mov r12, rcx
     mov r13, rdx
+    invoke fs_watch, r13, r12
     invoke read_file_bytes, r12, &rsp+96
     test rax, rax
     jz .fail

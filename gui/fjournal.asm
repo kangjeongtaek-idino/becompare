@@ -26,6 +26,7 @@ extern GetFileAttributesW, GetFileAttributesExW, SetFileAttributesW, CopyFileW, 
 extern CreateDirectoryW, RemoveDirectoryW, SHCreateDirectoryExW, FindFirstFileW, FindNextFileW, FindClose
 extern LoadCursorW, SetCursor
 extern str_dup, msgbox, tc_tmp, us_push, us_clear
+extern fs_watch, fs_forget, fs_journal_begin, fs_journal_end
 
 global fj_begin, fj_file, fj_dirs, fj_rmdir, fj_moved, fj_tree, fj_lists, fj_commit, fj_step, fj_discard
 
@@ -73,6 +74,7 @@ WSTR f_fj_redo, "파일 작업을 다시 실행합니다. 파일·폴더 %llu건
 WSTR f_fj_miss, " 백업하지 못한 파일 %llu개는 그대로 둡니다."
 WSTR s_fj_ask, " 계속할까요?"
 WSTR f_fj_fail, "%u건은 처리하지 못했습니다(사용 중이거나 권한이 없는 항목)."
+WSTR s_fj_conflict, "다른 창이나 프로그램이 파일·폴더를 변경했습니다. 해당 변경을 보호하기 위해 이 작업의 되돌리기·다시 실행을 중단했습니다."
 
 section .bss
 g_fj_id: resq 1
@@ -435,6 +437,9 @@ fj_apply:
     PROLOG 1600
     mov rbx, rcx
     mov r12d, edx
+    invoke fs_journal_begin, rbx
+    test eax, eax
+    jz .conflict
     xor r15d, r15d
     mov r13, [rbx+J_N]
     xor r14d, r14d
@@ -544,7 +549,11 @@ fj_apply:
     jz .fail
     jmp .next
 .done:
+    invoke fs_journal_end, rbx
     mov eax, r15d
+    EPILOG 1600
+.conflict:
+    mov eax, -1
     EPILOG 1600
 
 ; fj_discard(j): forget the journal - its backups are deleted, the files on disk stay as they are
@@ -555,6 +564,7 @@ fj_discard:
     test rcx, rcx
     jz .d
     mov rbx, rcx
+    invoke fs_forget, rbx
     xor esi, esi
 .r:
     cmp rsi, [rbx+J_N]
@@ -605,6 +615,23 @@ fj_commit:
     invoke fj_discard, rsi
     jmp .d
 .push:
+    ; Capture both ends after the operation, before making the step available.
+    invoke fs_forget, rsi
+    xor edi, edi
+.capture:
+    cmp rdi, [rsi+J_N]
+    jae .captured
+    mov r12, rdi
+    shl r12, 5
+    add r12, [rsi+J_REC]
+    invoke fs_watch, rsi, [r12+R_P1]
+    cmp qword [r12+R_P2], 0
+    je .capture_next
+    invoke fs_watch, rsi, [r12+R_P2]
+.capture_next:
+    inc rdi
+    jmp .capture
+.captured:
     invoke us_clear, rbx, 1
     mov qword [rsp+64], -1
     mov [rsp+72], rsi
@@ -651,6 +678,8 @@ fj_step:
     invoke fj_apply, r13, r12
     mov r15d, eax
     invoke SetCursor, r14
+    cmp r15d, -1
+    je .conflict
     mov r14d, r12d
     xor r14d, 1
     invoke us_push, rbx, r14, rdi
@@ -661,4 +690,9 @@ fj_step:
     invoke msgbox, rsi, &rsp+FS_MSG, MB_OK|MB_ICONWARNING
 .ok:
     mov eax, 1
+    EPILOG 800
+.conflict:
+    invoke us_push, rbx, r12, rdi
+    invoke msgbox, rsi, &s_fj_conflict, MB_OK|MB_ICONWARNING
+    xor eax, eax
     EPILOG 800

@@ -1,7 +1,7 @@
 # BeCompare — x64 어셈블리 구현 (Win32 GUI)
 
 파일·폴더 비교 도구 기능 PRD를 기반으로 **x64 NASM 어셈블리**로 구현한 Windows GUI 비교·병합·동기화 도구입니다.
-C 런타임은 `printf`/`malloc`/`qsort` 같은 범용 함수에만 쓰고, 화면·스레드·파일·알고리즘은 모두 어셈블리입니다.
+화면과 비교·병합 알고리즘은 어셈블리로 구현하며, 인스턴스 간 파일·설정 충돌 보호는 Windows API를 사용하는 C 지원 모듈(`gui/concurrency.c`)에서 처리합니다.
 
 > PRD(공개 정보를 정리한 문서)의 요구사항을 따라 만든 독립 구현입니다.
 
@@ -30,7 +30,7 @@ powershell -File build.ps1          # src/bc.asm -> bc.exe (이전 단계의 콘
 ```
 
 - 성공하면 마지막 줄에 `built bcgui.exe`(또는 `built bc.exe`)가 출력되고 실행 파일이 저장소 루트에 만들어집니다. 중간 산출물은 `build/`에 쌓입니다.
-- `build-gui.ps1`은 `gui/`의 모듈을 하나씩 `nasm -f win64`로 어셈블하고, 리소스(`gui/res/app.rc`, 매니페스트)를 `windres`로 컴파일한 뒤 `gcc -mwindows`로 링크합니다. 링크 라이브러리: user32, gdi32, comctl32, comdlg32, shell32, ole32, dwmapi, wininet, gdiplus, uxtheme, shlwapi, version, advapi32.
+- `build-gui.ps1`은 `gui/`의 모듈을 하나씩 `nasm -f win64`로 어셈블하고 `concurrency.c`를 C11로 컴파일합니다. 리소스(`gui/res/app.rc`, 매니페스트)는 `windres`로 컴파일한 뒤 `gcc -mwindows`로 링크합니다. 링크 라이브러리: user32, gdi32, comctl32, comdlg32, shell32, ole32, dwmapi, wininet, gdiplus, uxtheme, shlwapi, version, advapi32, normaliz.
 - 새 모듈을 추가하면 `build-gui.ps1`의 `$optional` 목록에 이름을 넣어야 링크됩니다.
 
 ### 검사 (빌드 후)
@@ -38,7 +38,7 @@ powershell -File build.ps1          # src/bc.asm -> bc.exe (이전 단계의 콘
 ```powershell
 python tools/hazard.py              # invoke 인자 덮어쓰기 / 스택 프레임 16바이트 정렬 정적 검사 -> "hazards: 0" 이어야 함
 python tools/bufcheck.py            # 길이 제한 호출에 넘긴 스택 버퍼가 함수 프레임을 넘는지 정적 검사 -> "overflows: 0" 이어야 함
-python tools/test_regressions.py    # 격리된 경로에서 재빌드 + 저장 오류·상태·화면 동작·명령줄 회귀 검사 536개
+python tools/test_regressions.py    # 격리된 경로에서 재빌드 + 저장·다중 프로세스·상태·화면·명령줄 회귀 검사
 powershell -File tools/manual/t_smoke.ps1  # 세션 유형 14가지가 3초 이상 살아 있는지 확인 (실제 창을 띄움, 수동 확인용)
 ```
 
@@ -50,6 +50,18 @@ powershell -File tools/manual/t_smoke.ps1  # 세션 유형 14가지가 3초 이�
 - 화면 캡처형 시험 스크립트(`tools/manual/t_*.ps1`)는 실제 창을 띄우고 화면 좌표·임시 폴더를 가정하므로 자동 검사에 쓰지 않습니다. 참고용이며 [tools/manual/README.md](tools/manual/README.md)에 설명이 있습니다.
 
 ## 실행
+
+### 여러 창을 동시에 실행할 때
+
+여러 인스턴스를 동시에 실행할 수 있습니다. 각 비교·편집 화면은 파일을 읽을 때의 내용·크기·수정 시각·식별 정보를 기억합니다. 텍스트·편집·병합·헥스 저장 전에 다시 확인하며, 다른 창이나 프로그램의 변경·삭제가 감지되면 저장을 중단하고 편집 중인 내용을 유지합니다. 파일을 다시 열어 확인하거나 다른 이름으로 저장할 수 있습니다. 파일 작업 되돌리기·다시 실행도 기록 이후의 변경이 있으면 해당 단계 전체를 중단합니다.
+
+앱의 저장·복사·이동·삭제·되돌리기는 프로세스 간 잠금으로 조정합니다. 다른 프로그램은 이 잠금에 참여하지 않으므로 교체 직전에도 내용을 재검사합니다. 외부 프로그램이 최종 검사와 파일 교체 사이의 매우 짧은 구간에 파일을 교체하는 경우까지 운영체제가 조건부 교체를 보장하지는 않습니다.
+
+공용 설정과 최근 목록은 이름 있는 뮤텍스로 갱신 전체를 보호하고, 별도 파일에서 갱신을 마친 후 교체합니다. 갱신 도중 오류가 나면 원래 설정을 유지합니다. 설정 창을 연 뒤 공용 설정 파일이 바뀌면 최신 설정을 다시 확인하도록 저장을 중단합니다. 최근 항목 삭제는 현재 선택한 경로를 최신 목록에서 찾아 처리합니다.
+
+문서 변환 임시 파일은 프로세스별 작업 폴더에서 실제로 이름을 예약해 생성합니다. 앱에서 파일·폴더를 삭제·이동한 경로는 다른 인스턴스에 통지하여 검색 색인에서 제외합니다. 통지가 쌓여 보관 범위를 넘으면 색인을 다시 검사하여 삭제 정보를 누락하지 않습니다. 외부 프로그램이 만든 새 파일을 실시간으로 수집하는 기능은 포함하지 않습니다.
+
+관련 자동 검사는 `tools/test_concurrency.c`와 `tools/test_concurrency.py`에 있습니다. 실제 저장·최근 목록·되돌리기·색인 함수를 사용하며, 별도 프로세스의 실행 순서를 제어해 충돌을 재현합니다.
 
 ```
 bcgui.exe                                   홈 화면 (세션 유형 선택, 최근 세션)

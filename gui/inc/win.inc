@@ -146,6 +146,7 @@
 %define LVCF_TEXT       0x0004
 %define LVN_GETDISPINFOW (-177)
 %define LVN_ITEMCHANGED (-101)
+%define LVN_ODSTATECHANGED (-115)
 %define LVN_COLUMNCLICK (-108)
 %define LVN_KEYDOWN     (-155)
 %define NM_CLICK        (-2)

@@ -3,10 +3,11 @@
 %include "inc/macros.inc"
 %include "inc/win.inc"
 
-extern GetTempPathW, GetTickCount, CreateProcessW, WaitForSingleObject, GetExitCodeProcess, CloseHandle
+extern CreateProcessW, WaitForSingleObject, GetExitCodeProcess, CloseHandle
 extern GetPrivateProfileStringW, GetFileAttributesW, MultiByteToWideChar, strstr
 extern malloc, calloc, free, memset, memcpy, wcslen, wcscat, wcsrchr, _wcsicmp, _snwprintf
 extern zip_open, zip_extract, vt_free, inflate_buf, read_file_bytes, write_utf8, g_ini
+extern conversion_temp, DeleteFileW
 
 global tl_convert, tl_isconv
 
@@ -24,7 +25,6 @@ WSTR e_docx, ".docx"
 WSTR e_docm, ".docm"
 WSTR e_rtf, ".rtf"
 WSTR e_pdf, ".pdf"
-WSTR f_tmpname, "bcconv_%X.txt"
 WSTR n_docxml, "word\document.xml"
 WSTR t_wt, "w:t"
 WSTR t_cwp, "/w:p"
@@ -46,16 +46,9 @@ k_meta: db "/Metadata", 0
 
 section .text
 
-; cv_tmp(out): "%TEMP%\bcconv_<tick>.txt"
+; cv_tmp(out): exclusively reserved file in this process's temporary folder
 cv_tmp:
-    PROLOG 64
-    mov rbx, rcx
-    invoke GetTempPathW, 400, rbx
-    invoke wcslen, rbx
-    lea rsi, [rbx+rax*2]
-    invoke GetTickCount
-    invoke _snwprintf, rsi, 40, &f_tmpname, rax
-    EPILOG 64
+    jmp conversion_temp
 
 ; cv_name_eq(q = after '<', name) -> eax 1 when the tag name equals `name`
 cv_name_eq:
@@ -1070,6 +1063,13 @@ cv_rule:
     test eax, eax
     jz .no
     invoke WaitForSingleObject, [rsp+1320], 60000
+    test eax, eax
+    jnz .process_no
+    invoke GetExitCodeProcess, [rsp+1320], &rsp+1344
+    test eax, eax
+    jz .process_no
+    cmp dword [rsp+1344], 0
+    jne .process_no
     invoke CloseHandle, [rsp+1320]
     invoke CloseHandle, [rsp+1328]
     invoke GetFileAttributesW, rdi
@@ -1077,6 +1077,9 @@ cv_rule:
     je .no
     mov eax, 1
     EPILOG 2704
+.process_no:
+    invoke CloseHandle, [rsp+1320]
+    invoke CloseHandle, [rsp+1328]
 .no:
     xor eax, eax
     EPILOG 2704
@@ -1086,11 +1089,14 @@ tl_convert:
     PROLOG 64
     mov rsi, rcx
     mov rdi, rdx
+    mov word [rdi], 0
     invoke wcsrchr, rsi, '.'
     test rax, rax
     jz .no
     mov rbx, rax
     invoke cv_tmp, rdi
+    test eax, eax
+    jz .no
     invoke cv_rule, rsi, rdi
     test eax, eax
     jnz .yes
@@ -1107,6 +1113,10 @@ tl_convert:
     test eax, eax
     jz .pdf
 .no:
+    cmp word [rdi], 0
+    je .no_done
+    invoke DeleteFileW, rdi
+.no_done:
     xor eax, eax
     EPILOG 64
 .docx:

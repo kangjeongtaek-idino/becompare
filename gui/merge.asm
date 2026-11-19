@@ -19,6 +19,7 @@ extern mk_btn, mk_chk, mk_lbl, mk_edit, get_chk, ctl_color, theme_checks
 extern pb_create, pb_layout, pb_load, pb_collect, pb_command
 extern rich_create, rich_set_text, rich_get_text, rich_bk, rich_theme, rich_unsel, rich_batch
 extern text_load, text_load_raw, text_save, lines_split, compare_lines, hunk_free, lower_w
+extern fs_watch, fs_forget, guarded_text_save
 extern sb_init, sb_append, sb_free, vec_push
 extern set_tab_title
 extern browse_open, browse_save
@@ -667,6 +668,7 @@ mg_merge:
     invoke GetWindowTextW, rax, &r12+SS_PATHC, 519
     invoke GetDlgItem, rsi, ID_EDIT_O
     invoke GetWindowTextW, rax, &r12+SS_PATHO, 519
+    invoke fs_watch, rbx, &r12+SS_PATHO
     invoke text_load, &r12+SS_PATHA, &rbx+MG_TXL
     test eax, eax
     jz .err

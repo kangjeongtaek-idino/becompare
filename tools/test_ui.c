@@ -76,6 +76,8 @@ extern uint32_t th_lonly, th_ronly, th_conf;
 static int checks, failed, shiftDown, boxes, mergeMode, fmergeMode, browseMode, findMode, mftMode, usnMode, folderMode, pvMode, expectBoxes, shownBoxes;
 static wchar_t findRoot[600], probeName[80], probePath[700];
 static wchar_t lastBox[400];
+static int boxAnswer, deleteCalls, deleteMode;
+static UINT lastBoxFlags, deleteFlags;
 static DWORD mainTid;
 static HWND frame, ra, rb, view;
 static wchar_t cmdline[1200];
@@ -95,9 +97,25 @@ SHORT WINAPI __wrap_GetKeyState(int vk){
  return __real_GetKeyState(vk);
 }
 int WINAPI __wrap_MessageBoxW(HWND h,LPCWSTR t,LPCWSTR c,UINT f){(void)h;(void)c;
- if(expectBoxes){shownBoxes++;wcsncpy(lastBox,t,399);lastBox[399]=0;return (f&15)==MB_YESNO?IDYES:IDOK;}   /* the test answers Yes */
+ if(expectBoxes){shownBoxes++;lastBoxFlags=f;wcsncpy(lastBox,t,399);lastBox[399]=0;return boxAnswer?boxAnswer:(f&15)==MB_YESNO?IDYES:IDOK;}
  boxes++;{char u8[600];WideCharToMultiByte(CP_UTF8,0,t,-1,u8,600,NULL,NULL);printf("unexpected message box (flags %u): %s\n",f,u8);}return (f&15)?IDNO:IDOK;}
 void __wrap_update_start(void){}                      /* no network access from a test */
+/* Simulate recycling inside the isolated fixture, never use the real recycle bin. */
+int WINAPI __real_co_SHFileOperationW(LPSHFILEOPSTRUCTW);
+int WINAPI __wrap_co_SHFileOperationW(LPSHFILEOPSTRUCTW op){
+ if(!findMode||!op->pFrom||wcsncmp(op->pFrom,findRoot,wcslen(findRoot)))return __real_co_SHFileOperationW(op);
+ deleteCalls++;deleteFlags=op->fFlags;
+ check(shownBoxes>0&&boxAnswer==IDYES,"recycling only runs after explicit confirmation");
+ check(op->wFunc==FO_DELETE&&!op->pTo,"search delete uses a delete operation");
+ if(deleteMode==1)return ERROR_ACCESS_DENIED;
+ if(deleteMode==3){op->fAnyOperationsAborted=TRUE;return 0;}
+ for(const wchar_t*p=op->pFrom;*p;p+=wcslen(p)+1){
+  wchar_t dest[1300];swprintf(dest,1300,L"%ls.recycled",p);
+  check(MoveFileW(p,dest),"recycle simulation moves the fixture item");
+  if(deleteMode==2){op->fAnyOperationsAborted=TRUE;return 0;}
+ }
+ return 0;
+}
 /* opening a found item: nothing is started and the clipboard is left alone, the calls are recorded */
 static wchar_t shVerb[32],shFile[1200],shArgs[1200],clipText[1200];static int shCalls,menuAnswer,menuShown;
 HINSTANCE WINAPI __wrap_ShellExecuteW(HWND h,LPCWSTR verb,LPCWSTR file,LPCWSTR args,LPCWSTR dir,int show){
@@ -331,6 +349,28 @@ static void tabRowChecks(void){
  check(rc.left>=rt.right&&rx.left>=rc.right&&rx.right<=o.x,"the buttons follow the tabs: close, then exit, inside the window");
  check(rc.top>=rt.top&&rc.bottom<=disp.top&&rx.top>=rt.top&&rx.bottom<=disp.top,"the buttons are in the tab row, above the pages");
  check(rc.right-rc.left>=16&&rc.bottom-rc.top>=12&&rx.right-rx.left>=16,"the buttons have a usable size");
+ /* Paint the actual native controls and compare their borders and glyph colour. */
+ check((GetWindowLongPtrW(bc,GWL_STYLE)&BS_TYPEMASK)==(GetWindowLongPtrW(bx,GWL_STYLE)&BS_TYPEMASK),"exit and close-tab use the same native button style");
+ {RECT bounds;GetClientRect(bx,&bounds);int w=bounds.right,h=bounds.bottom;
+  HDC screen=GetDC(NULL),dc=CreateCompatibleDC(screen),peer=CreateCompatibleDC(screen);
+  HBITMAP bitmap=CreateCompatibleBitmap(screen,w,h),peerBitmap=CreateCompatibleBitmap(screen,w,h);
+  HGDIOBJ old=SelectObject(dc,bitmap),peerOld=SelectObject(peer,peerBitmap);
+  for(int state=0;state<3;state++){
+   EnableWindow(bx,state!=2);EnableWindow(bc,state!=2);
+   SendMessageW(bx,BM_SETSTATE,state==1,0);SendMessageW(bc,BM_SETSTATE,state==1,0);
+   FillRect(dc,&bounds,(HBRUSH)GetStockObject(WHITE_BRUSH));FillRect(peer,&bounds,(HBRUSH)GetStockObject(WHITE_BRUSH));
+   SendMessageW(bx,WM_PRINTCLIENT,(WPARAM)dc,PRF_CLIENT|PRF_ERASEBKGND);
+   SendMessageW(bc,WM_PRINTCLIENT,(WPARAM)peer,PRF_CLIENT|PRF_ERASEBKGND);
+   int red=0,sameBorder=1;
+   for(int y=0;y<h;y++)for(int x=0;x<w;x++){
+    COLORREF c=GetPixel(dc,x,y);if(GetRValue(c)>150&&GetGValue(c)<80&&GetBValue(c)<80)red++;
+    if((x<2||y<2||x>=w-2||y>=h-2)&&c!=GetPixel(peer,x,y))sameBorder=0;
+   }
+   check(red>0,"native exit button paints a red icon in normal, pressed and disabled states");
+   check(sameBorder,"exit button border matches close-tab in normal, pressed and disabled states");
+  }
+  EnableWindow(bx,TRUE);EnableWindow(bc,TRUE);SendMessageW(bx,BM_SETSTATE,0,0);SendMessageW(bc,BM_SETSTATE,0,0);
+  SelectObject(dc,old);SelectObject(peer,peerOld);DeleteObject(bitmap);DeleteObject(peerBitmap);DeleteDC(dc);DeleteDC(peer);ReleaseDC(NULL,screen);}
 }
 /* close the current tab and then the application through those buttons */
 static void closeThroughButtons(void){
@@ -422,6 +462,7 @@ static int order(HWND home,const wchar_t*want){
  return !wcscmp(got,want);
 }
 static void selectRow(HWND list,int row){LVITEMW it;memset(&it,0,sizeof it);it.state=it.stateMask=LVIS_SELECTED|LVIS_FOCUSED;SendMessageW(list,LVM_SETITEMSTATE,row,(LPARAM)&it);}
+static void clearSelection(HWND list){LVITEMW it;memset(&it,0,sizeof it);it.stateMask=LVIS_SELECTED;SendMessageW(list,LVM_SETITEMSTATE,-1,(LPARAM)&it);}
 static void clickColumn(HWND home,int col){
  NMLISTVIEW nm;memset(&nm,0,sizeof nm);nm.hdr.hwndFrom=GetDlgItem(home,ID_FIND_LIST);nm.hdr.idFrom=ID_FIND_LIST;nm.hdr.code=LVN_COLUMNCLICK;nm.iItem=-1;nm.iSubItem=col;
  SendMessageW(home,WM_NOTIFY,ID_FIND_LIST,(LPARAM)&nm);
@@ -581,14 +622,24 @@ static void findChecks(void){
  {HWND bSelAll=GetDlgItem(home,ID_FIND_SELALL),bCopy=GetDlgItem(home,ID_FIND_COPY),bShare=GetDlgItem(home,ID_FIND_SHARE),bEmail=GetDlgItem(home,ID_FIND_EMAIL),bDel=GetDlgItem(home,ID_FIND_DEL),bProps=GetDlgItem(home,ID_FIND_PROPS);
   check(bSelAll&&bCopy&&bShare&&bEmail&&bDel&&bProps,"action buttons (select all, copy, share, email, del, props) exist");
   check(shown(bSelAll)&&shown(bCopy)&&shown(bDel)&&shown(bProps),"action buttons are shown with search results");
+  clearSelection(list);
+  GetWindowTextW(bSelAll,label,200);
+  check(!wcscmp(label,L"\xC804\xCCB4 \xC120\xD0DD"),"unselected results show Select All on the button");
   SendMessageW(bSelAll,BM_CLICK,0,0);
+  GetWindowTextW(bSelAll,label,200);
+  check(!wcscmp(label,L"\xC804\xCCB4 \xD574\xC81C"),"selecting all changes the button caption to Clear All");
+  check(SendMessageW(list,LVM_GETSELECTEDCOUNT,0,0)==rows(home),"select all highlights every result row");
   GetWindowTextW(GetDlgItem(home,ID_RLABEL),label,200);
   check(wcsstr(label,L"\xC120\xD0DD\xB428")!=NULL,"select all checks items and updates count label");
   clipText[0]=0;SendMessageW(bCopy,BM_CLICK,0,0);
   check(wcsstr(clipText,L"other.bin")!=NULL,"copy copies checked items to clipboard");
   SendMessageW(bSelAll,BM_CLICK,0,0);
+  GetWindowTextW(bSelAll,label,200);
+  check(!wcscmp(label,L"\xC804\xCCB4 \xC120\xD0DD"),"clearing all restores the Select All caption");
   GetWindowTextW(GetDlgItem(home,ID_RLABEL),label,200);
-  check(wcsstr(label,L"\xC120\xD0DD\xB428")==NULL,"select all again unchecks items");}
+  check(wcsstr(label,L"\xC120\xD0DD\xB428")==NULL,"select all again unchecks items");
+  check(SendMessageW(list,LVM_GETSELECTEDCOUNT,0,0)==0,"select all again clears row highlighting");}
+ selectRow(list,0);
  menuAnswer=2;shCalls=0;SendMessageW(home,WM_CONTEXTMENU,(WPARAM)list,(LPARAM)-1);
  check(shCalls==1&&!wcscmp(shVerb,L"openas")&&!_wcsicmp(shFile,want),"menu: choose the program");
  menuAnswer=3;shCalls=0;SendMessageW(home,WM_CONTEXTMENU,(WPARAM)list,(LPARAM)-1);
@@ -602,6 +653,61 @@ static void findChecks(void){
   for(int i=0;i<40&&g_nsess==before;i++)Sleep(50);
   check(shCalls==0&&g_nsess==before+1,"menu: open in a session of the application");}
  menuAnswer=0;
+ /* Deletion: decline, failure, shell cancellation, success, partial batch, folder descendants. */
+ filtered(home,L"other.bin",0,L"",L"");selectRow(list,0);
+ expectBoxes=1;shownBoxes=0;boxAnswer=IDNO;deleteCalls=0;
+ SendMessageW(GetDlgItem(home,ID_FIND_DEL),BM_CLICK,0,0);
+ check(shownBoxes==1&&deleteCalls==0&&rows(home)==1,"declining delete keeps the result and never calls the shell");
+ check((lastBoxFlags&MB_DEFBUTTON2)&&wcsstr(lastBox,L"1"),"confirmation shows target count and defaults to No");
+ boxAnswer=IDYES;deleteMode=1;
+ SendMessageW(GetDlgItem(home,ID_FIND_DEL),BM_CLICK,0,0);
+ check(deleteCalls==1&&rows(home)==1,"failed deletion keeps the file in search results");
+ selectRow(list,0);deleteMode=3;
+ SendMessageW(GetDlgItem(home,ID_FIND_DEL),BM_CLICK,0,0);
+ check(rows(home)==1&&find_query(L"other.bin",ids,10)==1,"shell cancellation keeps the indexed file");
+ selectRow(list,0);deleteMode=0;
+ SendMessageW(GetDlgItem(home,ID_FIND_DEL),BM_CLICK,0,0);
+ check(rows(home)==0&&find_query(L"other.bin",ids,10)==0,"confirmed deletion removes the result and index entry");
+ check((deleteFlags&(FOF_ALLOWUNDO|FOF_NOCONFIRMATION))==(FOF_ALLOWUNDO|FOF_NOCONFIRMATION),"confirmed deletion recycles without a duplicate shell prompt");
+ check(search(home,L"other.bin")==0,"deleted file stays absent on another search");
+ check(filtered(home,L"report",0,L"",L"")==2,"two files for a partial batch deletion");
+ /* A single checked row must not mask a highlighted group. */
+ selectRow(list,0);
+ {NMLVKEYDOWN key;memset(&key,0,sizeof key);key.hdr.hwndFrom=list;key.hdr.idFrom=ID_FIND_LIST;key.hdr.code=LVN_KEYDOWN;key.wVKey=VK_SPACE;
+  SendMessageW(home,WM_NOTIFY,ID_FIND_LIST,(LPARAM)&key);}
+ selectRow(list,1);
+ check(SendMessageW(list,LVM_GETSELECTEDCOUNT,0,0)==2,"two highlighted rows with one checkbox checked");
+ {int before=deleteCalls;boxAnswer=IDNO;
+  SendMessageW(GetDlgItem(home,ID_FIND_DEL),BM_CLICK,0,0);
+  check(wcsstr(lastBox,L"2")&&deleteCalls==before&&rows(home)==2,"multi-selection confirmation counts both rows; declining keeps both");}
+ boxAnswer=IDYES;deleteMode=1;
+ SendMessageW(GetDlgItem(home,ID_FIND_DEL),BM_CLICK,0,0);
+ check(wcsstr(lastBox,L"2")&&rows(home)==2,"failed deletion of a highlighted group keeps both results");
+ filtered(home,L"report",0,L"",L"");
+ clearSelection(list);
+ SendMessageW(GetDlgItem(home,ID_FIND_SELALL),BM_CLICK,0,0);deleteMode=2;
+ check(SendMessageW(list,LVM_GETSELECTEDCOUNT,0,0)==2,"select all highlights both rows of a multiple-result search");
+ SendMessageW(GetDlgItem(home,ID_FIND_DEL),BM_CLICK,0,0);
+ check(rows(home)==1&&find_query(L"report",ids,10)==1,"partial deletion removes only the file actually deleted");
+ check(wcsstr(lastBox,L"2")!=NULL,"batch confirmation shows both checked targets");
+ check(filtered(home,L"Alpha",2,L"",L"")==1,"folder to delete with indexed descendants");
+ selectRow(list,0);deleteMode=0;
+ SendMessageW(GetDlgItem(home,ID_FIND_DEL),BM_CLICK,0,0);
+ check(rows(home)==0&&find_query(L"Deep",ids,10)==0&&find_query(KO_DOC,ids,10)==0,"deleted folder and its descendants disappear from searches");
+ check(filtered2(home,L"",2,L"",L"",0,0)==2,"two remaining folders for highlighted multi-delete without checks");
+ selectRow(list,0);selectRow(list,1);
+ GetWindowTextW(GetDlgItem(home,ID_FIND_SELALL),label,200);
+ check(!wcscmp(label,L"\xC804\xCCB4 \xD574\xC81C"),"manually selecting every row also shows Clear All");
+ {int before=deleteCalls;boxAnswer=IDNO;menuAnswer=8; /* FA_DEL */
+  SendMessageW(home,WM_CONTEXTMENU,(WPARAM)list,(LPARAM)-1);
+  check(wcsstr(lastBox,L"2")&&deleteCalls==before&&rows(home)==2,"context menu preserves the highlighted group when deletion is declined");}
+ menuAnswer=0;boxAnswer=IDYES;
+ SendMessageW(GetDlgItem(home,ID_FIND_DEL),BM_CLICK,0,0);
+ check(wcsstr(lastBox,L"2")&&rows(home)==0,"confirming a highlighted group deletes both items");
+ GetWindowTextW(GetDlgItem(home,ID_FIND_SELALL),label,200);
+ check(!wcscmp(label,L"\xC804\xCCB4 \xC120\xD0DD"),"empty results reset the button to Select All");
+ check(filtered2(home,L"",1,L"",L"",0,0)==0,"files inside both deleted folders stay absent on re-search");
+ expectBoxes=0;boxAnswer=0;
  search(home,L"");
  GetWindowTextW(GetDlgItem(home,ID_RLABEL),label,200);
  check(!shown(list)&&shown(recent)&&!wcscmp(label,L"\xCD5C\xADFC \xC138\xC158"),"empty fields and no filter bring the recent sessions back");

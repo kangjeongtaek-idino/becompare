@@ -26,6 +26,9 @@ extern SetFilePointerEx, ReadFile, RegOpenKeyExW, RegEnumKeyExW, RegEnumValueW, 
 extern CharLowerBuffW, memcpy, wcslen, malloc, realloc, free, qsort, wcscat, wcscpy
 
 global find_start, find_query, find_query2, find_path, find_sort
+global find_forget
+global find_forget_path
+extern _wcsicmp, wcsrchr, GetFileAttributesW, GetLastError
 global find_time, find_size, find_flags, find_name, find_parent, find_volcount, find_volname
 global fi_state, fi_vis, fi_mode, fi_cancel, fi_ncloud
 
@@ -38,6 +41,7 @@ global fi_state, fi_vis, fi_mode, fi_cancel, fi_ncloud
 %define FI_TIME   16                 ; dq last modification (FILETIME), 0 = unknown
 %define FI_BYTES  24                 ; dq size in bytes
 %define FI_SHIFT  5
+%define FI_DELETED 4                 ; removed through file search; keep ids/parents stable
 %define FI_ESIZE  32
 %define FI_MAXENT  0x1000000         ; 16M entries (512MB of address space, committed as it fills)
 %define FI_MAXPOOL 0x40000000        ; 1G characters
@@ -75,6 +79,7 @@ fi_state:   resq 1                   ; 0 not started, 1 listing, 2 ready
 fi_vis:     resq 1                   ; entries a search may look at (their parents are final)
 fi_mode:    resq 1                   ; bit 0 file table parsed, bit 1 folders walked, bit 2 file table enumerated
 fi_cancel:  resq 1
+fi_deleted: resq 1                   ; ancestor checks are needed only after a deletion
 fi_full:    resq 1                   ; ran out of room
 fi_force:   resq 1                   ; 0 try every way, 1 no parsing, 2 walk only
 fi_nvol:    resq 1
@@ -630,6 +635,23 @@ find_query2:
     inc r8d
     jmp .ps
 .store:
+    ; A removed folder also hides its descendants, regardless of entry order.
+    cmp qword [fi_deleted], 0
+    je .alive_done
+    mov r8, [fi_ent]
+    mov ecx, ebx
+    mov edx, 128
+.alive:
+    test ecx, ecx
+    jz .alive_done
+    mov rax, rcx
+    shl rax, FI_SHIFT
+    test word [r8+rax+FI_FLAGS], FI_DELETED
+    jnz .next
+    mov ecx, [r8+rax+FI_PARENT]
+    dec edx
+    jnz .alive
+.alive_done:
     cmp ebp, r12d
     jae .nostore
     mov [rdi+rbp*4], ebx
@@ -644,6 +666,75 @@ find_query2:
 .zero:
     xor eax, eax
     EPILOG 2160
+
+; find_forget(id): invalidate a confirmed missing item without moving indexed entries.
+find_forget:
+    test ecx, ecx
+    jz .d
+    cmp rcx, [fi_vis]
+    jae .d
+    shl rcx, FI_SHIFT
+    mov rax, [fi_ent]
+    or word [rax+rcx+FI_FLAGS], FI_DELETED
+    mov qword [fi_deleted], 1
+.d:
+    ret
+
+; find_forget_path(path or 0): invalidate another instance's deletion. A ring
+; overflow (0) verifies every visible path, so no missed notification revives files.
+find_forget_path:
+    PROLOG 2304
+    mov r12, rcx
+    xor r13d, r13d
+    test r12, r12
+    jz .scan
+    invoke wcsrchr, r12, 0x5C
+    test rax, rax
+    jz .done
+    lea r13, [rax+2]                 ; compare names before rebuilding full paths
+.scan:
+    mov ebx, 1
+.entry:
+    cmp rbx, [fi_vis]
+    jae .done
+    mov rax, rbx
+    shl rax, FI_SHIFT
+    mov r14, [fi_ent]
+    test word [r14+rax+FI_FLAGS], FI_DELETED
+    jnz .next
+    test r13, r13
+    jz .path
+    mov edx, [r14+rax+FI_NAME]
+    mov rax, [fi_pool]
+    lea rdx, [rax+rdx*2]
+    invoke _wcsicmp, r13, rdx
+    test eax, eax
+    jnz .next
+.path:
+    invoke find_path, rbx, &rsp+96, 1090
+    test eax, eax
+    jz .next
+    test r12, r12
+    jz .verify
+    invoke _wcsicmp, r12, &rsp+96
+    test eax, eax
+    jnz .next
+.verify:
+    invoke GetFileAttributesW, &rsp+96
+    cmp eax, -1
+    jne .next
+    call GetLastError
+    cmp eax, 2
+    je .forget
+    cmp eax, 3
+    jne .next
+.forget:
+    invoke find_forget, rbx
+.next:
+    inc rbx
+    jmp .entry
+.done:
+    EPILOG 2304
 
 ; ---------------------------------------------------------------- sort
 ; find_sort(ids, count, key, descending): key 0 name, 1 modification time, 2 type (extension), 3 size,

@@ -1129,7 +1129,8 @@ tv_save:
     mov edx, [rsp+1160]
     call text_opts
     mov r9d, eax
-    invoke text_save, &rsp+96, rbp, r13, r9
+    mov [rsp+1176], r9
+    invoke guarded_text_save, r15, &rsp+96, rbp, r13, [rsp+1176]
     mov r14d, eax
     invoke free, rbp
     test r14d, r14d
@@ -1845,6 +1846,8 @@ tv_proc:
     or eax, ebx
     EPILOG 320
 .destroy:
+    invoke fs_forget, &r15+TV_TXA
+    invoke fs_forget, &r15+TV_TXB
     invoke free, [r15+TV_ROWS]
     invoke free, [r15+TV_BLK]
     invoke free, [r15+TV_BUFA]
