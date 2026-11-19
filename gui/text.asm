@@ -18,7 +18,7 @@ extern g_font, g_iconfont, th_same, th_conf
 extern th_tc_mod, th_tc_modin, th_tc_ins, th_tc_del, th_tc_modb, th_tc_insb, th_tc_delb, th_tc_gap
 extern g_hinst, g_mono, th_bg, th_fg, th_panel, th_diff, th_lonly, th_ronly, th_hl, th_panelbrush
 extern save_error
-extern guarded_text_save, fs_watch, fs_forget
+extern guarded_text_save, fs_watch, fs_forget, lh_keep, lh_show
 extern mk, reg_class, scl, set_status, msgbox
 extern mk_btn, mk_chk, mk_lbl, mk_edit, get_chk, ctl_color, theme_checks
 extern pb_create, pb_layout, pb_load, pb_collect, pb_command
@@ -132,6 +132,7 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define ID_BTN_PCLIP 253
 %define ID_BTN_UNDO  254
 %define ID_BTN_REDO  255
+%define ID_BTN_HIST  256
 %define FILLER      0x200B
 
 section .rdata
