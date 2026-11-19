@@ -15,6 +15,7 @@ extern g_ini, theme_set, apply_theme_all
 
 global g_policy, g_keytab, policy_load, keys_load, settings_colors, ext_launch, settings_show, settings_font
 extern cfg_begin, cfg_end, cfg_cancel, cfg_edit_watch, cfg_edit_begin, fs_forget
+extern ShowWindow, mk_chk, get_chk
 
 ; ---------------------------------------------------------------- data
 %define POL_SYNC     1
@@ -33,11 +34,11 @@ section .rdata
 WSTR cn_sg, "BCSettings"
 WSTR cn_edit, "EDIT"
 WSTR s_empty, ""
-WSTR s_sg_title, "설정 — 글꼴 · 색 · 단축키 · 외부 도구"
+WSTR s_sg_title, "환경설정"
 WSTR s_sg_ok, "확인"
 WSTR s_sg_cancel, "취소"
 WSTR s_sg_defs, "기본값으로"
-WSTR s_sg_note, "글꼴 변경은 프로그램을 다시 시작하면 적용됩니다. 색은 현재 모드(라이트/다크)의 값이며 즉시 적용됩니다(열려 있는 비교는 다시 실행해야 완전히 바뀝니다)."
+WSTR s_sg_note, "테마는 즉시, 글꼴은 재시작 후 적용됩니다. 비교 기본값은 새 탭에 적용됩니다. 현재 모드의 비교 색상 변경은 비교를 다시 실행하면 완전히 반영됩니다."
 WSTR s_sg_ext, "외부 도구 (한 줄에 하나: .확장자=명령줄  —  %1 = 왼쪽 파일, %2 = 오른쪽 파일, 폴더 비교에서 더블클릭하면 실행):"
 WSTR s_sg_locked, "관리자 정책으로 설정이 잠겨 있습니다."
 WSTR s_pol_none, "적용 중인 관리자 정책: 없음"
@@ -609,12 +610,16 @@ st_fill:
     invoke GetDlgItem, rsi, ID_EXT
     invoke SetWindowTextW, rax, &s_empty
 .pol:
+    invoke sg_prefs_fill, rsi, r15
     EPILOG 512
 
 ; st_save(hwnd)
 st_save:
     PROLOG 512
     mov rsi, rcx
+    invoke sg_prefs_validate, rsi
+    test eax, eax
+    jz .invalid
     invoke cfg_edit_begin, rsi, &g_ini, rsi
     test eax, eax
     jz .failed
@@ -692,12 +697,14 @@ st_save:
     jmp .skipnl
 .done:
     invoke free, r12
+    invoke sg_prefs_save, rsi
     call cfg_end
     test eax, eax
     jz .failed
     EPILOG 512
 .failed:
     invoke msgbox, rsi, &s_settings_conflict, MB_OK|MB_ICONWARNING
+.invalid:
     xor eax, eax
     EPILOG 512
 
@@ -708,6 +715,7 @@ section .text
 sg_create:
     PROLOG 192
     mov rsi, rcx
+    invoke sg_prefs_create, rsi
     xor ebp, ebp
 .rows:
     cmp ebp, ST_NROWS
@@ -717,7 +725,7 @@ sg_create:
     lea rdi, [st_rows]
     add rdi, rax
     mov r15d, 16
-    mov eax, 12
+    mov eax, 24
     mov edx, 175
     mov r8d, 150
     mov r9d, 170
@@ -726,7 +734,7 @@ sg_create:
     ; right column: shortcuts
     lea ecx, [rbp-7]
     imul ecx, 30
-    lea r15d, [rcx+16]
+    lea r15d, [rcx+68]
     mov eax, 400
     mov edx, 495
     mov r8d, 90
@@ -735,13 +743,14 @@ sg_create:
 .col1:
     mov ecx, ebp
     imul ecx, 30
-    lea r15d, [rcx+16]
+    lea r15d, [rcx+68]
 .place:
     mov [rsp+96], eax                 ; label x
     mov [rsp+100], edx                ; edit x
     mov [rsp+104], r8d                ; label width
     mov [rsp+108], r9d                ; edit width
-    invoke mk_lbl, rsi, [rdi], 0
+    lea r8d, [rbp+600]
+    invoke mk_lbl, rsi, [rdi], r8
     mov rbx, rax
     mov ecx, [rsp+96]
     call scl
@@ -774,10 +783,10 @@ sg_create:
     inc ebp
     jmp .rows
 .rest:
-    invoke mk_lbl, rsi, &s_sg_ext, 0
-    SPLACE 12, 292, 740, 22
+    invoke mk_lbl, rsi, &s_sg_ext, 543
+    SPLACE 24, 68, 710, 40
     invoke mk, rsi, &cn_edit, 0, WS_BORDER|ES_MULTILINE|ES_AUTOVSCROLL|ES_AUTOHSCROLL|WS_VSCROLL|WS_TABSTOP|ES_WANTRETURN, ID_EXT
-    SPLACE 12, 316, 740, 130
+    SPLACE 24, 116, 710, 310
     invoke mk_lbl, rsi, &s_empty, ID_POL
     SPLACE 12, 454, 740, 22
     invoke mk_lbl, rsi, &s_sg_note, ID_NOTE
@@ -798,6 +807,7 @@ sg_create:
 .settings_unavailable:
     invoke st_fill, rsi, 0
 .settings_filled:
+    invoke sg_page, rsi
     ; policy line
     invoke calloc, 1, 1200
     mov r12, rax
@@ -838,6 +848,8 @@ sg_proc:
     je .create
     cmp edi, WM_COMMAND
     je .command
+    cmp edi, WM_NOTIFY
+    je .notify
     cmp edi, WM_CLOSE
     je .close
     cmp edi, WM_ERASEBKGND
@@ -864,6 +876,13 @@ sg_proc:
     cmp eax, SG_DEFS
     jne .zero
     invoke st_fill, rsi, 1
+    jmp .zero
+.notify:
+    cmp qword [r13+NMH_ID], 550
+    jne .def
+    cmp dword [r13+NMH_CODE], TCN_SELCHANGE
+    jne .def
+    invoke sg_page, rsi
     jmp .zero
 .ok:
     invoke st_save, rsi
@@ -934,6 +953,9 @@ settings_show:
     invoke GetMessageW, &rsp+96, 0, 0, 0
     test eax, eax
     jle .quit
+    invoke IsDialogMessageW, rdi, &rsp+96
+    test eax, eax
+    jnz .loop
     invoke TranslateMessage, &rsp+96
     invoke DispatchMessageW, &rsp+96
     jmp .loop
@@ -949,6 +971,8 @@ settings_show:
     test rax, rax
     jz .out
     call keys_load
+    invoke GetPrivateProfileIntW, &sp_ui, &sp_dark, 0, &g_ini
+    mov [g_dark], rax
     invoke theme_set, [g_dark]
     call apply_theme_all
 .out:
@@ -956,6 +980,8 @@ settings_show:
 .fail:
     xor eax, eax
     EPILOG 256
+
+%include "settings_prefs.inc"
 
 ; ---------------------------------------------------------------- tiny modal text input
 extern IsDialogMessageW

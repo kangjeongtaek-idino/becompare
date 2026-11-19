@@ -46,7 +46,7 @@ for mod,names in exports.items():
 run(["gcc","-I",OUT,ROOT/"tools/test_view_state.c",*[OUT/(m+(".test" if m in exports else "")+".obj") for m in MODS],*["-Wl,--wrap="+x for x in ["SendMessageW","GetWindowLongPtrW","GetDlgItem","GetWindowTextW","SetWindowTextW","InvalidateRect","msgbox","DestroyWindow","EnableWindow","SetTimer","KillTimer"]],*LIBS,"-o",OUT/"test_view_state.exe"])
 # UI behaviour: the whole application in one process with a hidden window (tools/test_ui.c)
 run(["objcopy","--redefine-sym","WinMain=bc_winmain",OUT/"main.obj",OUT/"main.ui.obj"])
-run(["gcc",ROOT/"tools/test_ui.c",*[OUT/(m+(".ui" if m=="main" else "")+".obj") for m in MODS],*["-Wl,--wrap="+x for x in ["GetCommandLineW","ShowWindow","GetKeyState","MessageBoxW","co_SHFileOperationW","update_start","ShellExecuteW","TrackPopupMenu","EmptyClipboard","SetClipboardData","browse_folder"]],OUT/"app.res.o",*LIBS,"-o",OUT/"test_ui.exe"])   # with the manifest: the same common controls as the application
+run(["gcc",ROOT/"tools/test_ui.c",*[OUT/(m+(".ui" if m=="main" else "")+".obj") for m in MODS],*["-Wl,--wrap="+x for x in ["CreateWindowExW","GetCommandLineW","ShowWindow","GetKeyState","MessageBoxW","co_SHFileOperationW","update_start","ShellExecuteW","TrackPopupMenu","EmptyClipboard","SetClipboardData","browse_folder"]],OUT/"app.res.o",*LIBS,"-o",OUT/"test_ui.exe"])   # with the manifest: the same common controls as the application
 run(["gcc",ROOT/"tools/test_concurrency.c",*[OUT/(m+(".ui" if m=="main" else ".test" if m=="fjournal" else "")+".obj") for m in MODS],"-Wl,--wrap=WriteFile","-Wl,--wrap=ReplaceFileW","-Wl,--wrap=GetTickCount","-Wl,--wrap=msgbox","-Wl,--wrap=settings_read",*LIBS,"-o",OUT/"test_concurrency.exe"])
 # Keep the fixture directory and logs for inspection. Each run has independent paths.
 fixtures=Path(tempfile.mkdtemp(prefix="fixtures-",dir=OUT))
@@ -69,7 +69,7 @@ concurrency_checks=int(re.search(r"(\d+) checks, 0 failures",r.stdout).group(1))
 from test_concurrency import process_checks
 concurrency_checks+=process_checks(OUT/"test_concurrency.exe",fixtures/"processes",ui_env)
 ui_checks=0
-for mode in ["text","merge","fmerge","browse","folder","folderpv","find","findmft","findusn"]:
+for mode in ["text","merge","fmerge","browse","folder","folderpv","find","findmft","findusn","settings"]:
     r=run([OUT/"test_ui.exe",mode],fixtures/"ui",timeout=200 if mode.startswith("find") else 90,env=ui_env)
     if "SKIP" in r.stdout: print(r.stdout.splitlines()[0])
     (fixtures/("test_ui_"+mode+".log")).write_text(r.stdout,encoding="utf-8")

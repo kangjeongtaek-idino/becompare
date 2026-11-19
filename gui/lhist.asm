@@ -2,8 +2,8 @@
 ;
 ;   Before a text view writes a file (text compare, the editor, the merge output), the file as it is on disk
 ;   is copied to  <settings folder>\history\<hash of the path>\<last write time>.bak . The name is the time
-;   the content was written, so the same content is kept once. The newest LH_MAX versions of a file stay,
-;   older ones are deleted; a file of more than LH_BIG bytes is not kept. Nothing is recorded in an
+;   the content was written, so the same content is kept once. History preferences choose how many
+;   versions stay and the maximum file size (defaults LH_MAX / LH_BIG). Nothing is recorded in an
 ;   unattended run.
 ;   lh_show lists the versions of a file in a menu (newest first); the chosen one is copied to the temporary
 ;   folder of this process and opened in a text compare against the file as it is now.
@@ -16,6 +16,7 @@ extern malloc, free, wcscpy, wcsrchr, wcslen, _snwprintf, _wcstoui64
 extern CreateDirectoryW, GetFileAttributesExW, CopyFileW, DeleteFileW, FindFirstFileW, FindNextFileW, FindClose
 extern CharLowerBuffW, CreatePopupMenu, AppendMenuW, TrackPopupMenu, DestroyMenu, GetCursorPos
 extern FileTimeToLocalFileTime, FileTimeToSystemTime, GetTickCount
+extern GetPrivateProfileIntW
 
 global lh_keep, lh_show
 
@@ -46,6 +47,10 @@ WSTR f_lh_item, "%04u-%02u-%02u %02u:%02u:%02u    %u KB"
 WSTR f_lh_tmp, "기록%X_"
 WSTR s_lh_none, "이 파일의 로컬 기록이 없습니다. 이 프로그램에서 파일을 저장할 때마다 저장 직전의 내용이 기록됩니다."
 WSTR s_lh_fail, "기록된 내용을 임시 파일로 꺼낼 수 없습니다."
+WSTR s_lh_section, "History"
+WSTR s_lh_enabled, "Enabled"
+WSTR s_lh_max, "MaxVersions"
+WSTR s_lh_mb, "MaxFileMB"
 
 section .text
 
@@ -131,13 +136,19 @@ lh_list:
     mov eax, ebx
     EPILOG 1968
 
-; lh_prune(folder): only the newest LH_MAX versions stay
+; lh_prune(folder): only the configured number of newest versions stay
 lh_prune:
     PROLOG 3424
     mov rsi, rcx
     invoke lh_list, rsi, &rsp+64
     mov r12d, eax
     mov ebx, LH_MAX
+    invoke GetPrivateProfileIntW, &s_lh_section, &s_lh_max, LH_MAX, &g_ini
+    cmp eax, 1
+    jb .l
+    cmp eax, 100
+    ja .l
+    mov ebx, eax
 .l:
     cmp ebx, r12d
     jae .d
@@ -156,6 +167,9 @@ lh_keep:
     mov rsi, rcx
     cmp qword [g_batch], 0
     jne .d
+    invoke GetPrivateProfileIntW, &s_lh_section, &s_lh_enabled, 1, &g_ini
+    test eax, eax
+    jz .d
     cmp word [rsi], 0
     je .d
     invoke GetFileAttributesExW, rsi, 0, &rsp+64
@@ -165,7 +179,17 @@ lh_keep:
     jnz .d
     cmp dword [rsp+64+28], 0
     jne .d
-    cmp dword [rsp+64+32], LH_BIG
+    invoke GetPrivateProfileIntW, &s_lh_section, &s_lh_mb, 16, &g_ini
+    cmp eax, 1
+    jb .default_limit
+    cmp eax, 1024
+    ja .default_limit
+    shl eax, 20
+    jmp .limit
+.default_limit:
+    mov eax, LH_BIG
+.limit:
+    cmp dword [rsp+64+32], eax
     ja .d
     invoke lh_dir, rsi, &rsp+112
     test eax, eax

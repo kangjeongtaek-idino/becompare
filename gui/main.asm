@@ -53,6 +53,8 @@ WSTR s_unsaved_close, "저장하지 않은 변경 내용이 있습니다. 저장
 WSTR cn_frame, "BCFrame"
 g_tabclose: dw 0xE8BB, 0             ; Segoe MDL2: close
 g_appexit:  dw 0xE7E8, 0             ; Segoe MDL2: power
+g_settings: dw 0xE713, 0             ; Segoe MDL2: settings, native button style
+WSTR s_tip_settings, "환경설정"
 WSTR s_tip_tabclose, "현재 탭 닫기 (Ctrl+W)"
 WSTR s_tip_appexit, "프로그램 종료"
 WSTR s_nolabel, ""
@@ -1024,8 +1026,8 @@ layout_frame:
     mov edi, [rbx+RC_B]
     sub edi, r13d                    ; height without status
     mov [rbx+RC_B], edi
-    ; the tab control ends before the two buttons at the right end of the tab row
-    mov ecx, 64
+    ; reserve the right of the tab row for close-tab, preferences and exit
+    mov ecx, 96
     call scl
     mov [rsp+148], eax               ; space kept for the buttons
     mov eax, esi
@@ -1048,6 +1050,12 @@ layout_frame:
     mov r13d, [rsp+144]
     add r13d, 3
     invoke GetDlgItem, [g_hframe], IDM_CLOSE_TAB
+    test rax, rax
+    jz .nb
+    invoke MoveWindow, rax, r13, 2, r12, #[rsp+152], 1
+    add r13d, r12d
+    add r13d, 2
+    invoke GetDlgItem, [g_hframe], IDM_SETTINGS
     test rax, rax
     jz .nb
     invoke MoveWindow, rax, r13, 2, r12, #[rsp+152], 1
@@ -1887,6 +1895,8 @@ frame_proc:
     ; close-tab and exit buttons at the right end of the tab row; their ids are the menu commands
     invoke mk_btn, rsi, &s_nolabel, IDM_CLOSE_TAB
     invoke icon_set, rsi, IDM_CLOSE_TAB, &g_tabclose, &s_tip_tabclose
+    invoke mk_btn, rsi, &s_nolabel, IDM_SETTINGS
+    invoke icon_set, rsi, IDM_SETTINGS, &g_settings, &s_tip_settings
     invoke mk_btn, rsi, &s_nolabel, IDM_EXIT
     invoke icon_set, rsi, IDM_EXIT, &g_appexit, &s_tip_appexit
     ; Let the same native button paint its frame and interaction states. Only

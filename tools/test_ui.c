@@ -51,6 +51,7 @@ extern uint32_t th_lonly, th_ronly, th_conf;
 #define ID_BTN_RUNM 710
 #define IDM_CLOSE_TAB 1020
 #define IDM_EXIT 1021
+#define IDM_SETTINGS 1060
 #define ID_RECENT 3001
 #define ID_RLABEL 3002
 #define ID_FIND_EDIT 3010
@@ -73,7 +74,7 @@ extern uint32_t th_lonly, th_ronly, th_conf;
 #define IDM_LIGHT 1030
 #define IDM_DARK 1031
 
-static int checks, failed, shiftDown, ctrlDown, boxes, mergeMode, fmergeMode, browseMode, findMode, mftMode, usnMode, folderMode, pvMode, expectBoxes, shownBoxes;
+static int checks, failed, shiftDown, ctrlDown, boxes, mergeMode, fmergeMode, browseMode, findMode, mftMode, usnMode, folderMode, pvMode, settingsMode, expectBoxes, shownBoxes;
 static wchar_t findRoot[600], probeName[80], probePath[700];
 static wchar_t lastBox[400];
 static int boxAnswer, deleteCalls, deleteMode;
@@ -85,6 +86,11 @@ static void check(int ok,const char*name){checks++;printf("%s %s\n",ok?"PASS":"F
 
 /* ---- the application's surroundings */
 BOOL WINAPI __real_ShowWindow(HWND,int);
+HWND WINAPI __real_CreateWindowExW(DWORD,LPCWSTR,LPCWSTR,DWORD,int,int,int,int,HWND,HMENU,HINSTANCE,LPVOID);
+HWND WINAPI __wrap_CreateWindowExW(DWORD ex,LPCWSTR cls,LPCWSTR title,DWORD style,int x,int y,int w,int h,HWND parent,HMENU menu,HINSTANCE inst,LPVOID data){
+ if(!getenv("BC_UITEST_SHOW")&&(ULONG_PTR)cls>65535&&!wcscmp(cls,L"BCSettings"))x=y=-30000;
+ return __real_CreateWindowExW(ex,cls,title,style,x,y,w,h,parent,menu,inst,data);
+}
 SHORT WINAPI __real_GetKeyState(int);
 LPWSTR WINAPI __wrap_GetCommandLineW(void){return cmdline;}
 BOOL WINAPI __wrap_ShowWindow(HWND h,int c){
@@ -338,16 +344,18 @@ static void tooltipChecks(void){
  check(tipped>0&&tipless==0,"every button, check box, edit field and combo box has a tooltip");
  check(tipText(GetDlgItem(frame,IDM_CLOSE_TAB),t)&&wcsstr(t,L"\xD0ED")!=NULL,"close-tab button explains itself");
  check(tipText(GetDlgItem(frame,IDM_EXIT),t)&&wcsstr(t,L"\xC885\xB8CC")!=NULL,"exit button explains itself");
+ check(tipText(GetDlgItem(frame,IDM_SETTINGS),t)&&wcsstr(t,L"\xD658\xACBD\xC124\xC815")!=NULL,"preferences button explains itself");
 }
 /* ---- the two buttons at the right end of the tab row */
 static void tabRowChecks(void){
- HWND tab=FindWindowExW(frame,NULL,L"SysTabControl32",NULL),bc=GetDlgItem(frame,IDM_CLOSE_TAB),bx=GetDlgItem(frame,IDM_EXIT);
- check(tab&&bc&&bx,"tab row has a close-tab and an exit button");
- if(!tab||!bc||!bx)return;
- RECT rt,rc,rx,cl,disp;GetWindowRect(tab,&rt);GetWindowRect(bc,&rc);GetWindowRect(bx,&rx);GetClientRect(frame,&cl);
+ HWND tab=FindWindowExW(frame,NULL,L"SysTabControl32",NULL),bc=GetDlgItem(frame,IDM_CLOSE_TAB),bx=GetDlgItem(frame,IDM_EXIT),bs=GetDlgItem(frame,IDM_SETTINGS);
+ check(tab&&bc&&bx&&bs,"tab row has close-tab, preferences and exit buttons");
+ if(!tab||!bc||!bx||!bs)return;
+ RECT rt,rc,rx,rs,cl,disp;GetWindowRect(tab,&rt);GetWindowRect(bc,&rc);GetWindowRect(bx,&rx);GetWindowRect(bs,&rs);GetClientRect(frame,&cl);
  POINT o={cl.right,0};ClientToScreen(frame,&o);
  disp=rt;SendMessageW(tab,TCM_ADJUSTRECT,0,(LPARAM)&disp);          /* top of the page area = bottom of the tab row */
- check(rc.left>=rt.right&&rx.left>=rc.right&&rx.right<=o.x,"the buttons follow the tabs: close, then exit, inside the window");
+ check(rc.left>=rt.right&&rs.left>=rc.right&&rx.left>=rs.right&&rx.right<=o.x,"the buttons follow the tabs: close, preferences, exit, inside the window");
+ check((GetWindowLongPtrW(bs,GWL_STYLE)&BS_TYPEMASK)==(GetWindowLongPtrW(bc,GWL_STYLE)&BS_TYPEMASK),"preferences keeps the existing native button style");
  check(rc.top>=rt.top&&rc.bottom<=disp.top&&rx.top>=rt.top&&rx.bottom<=disp.top,"the buttons are in the tab row, above the pages");
  check(rc.right-rc.left>=16&&rc.bottom-rc.top>=12&&rx.right-rx.left>=16,"the buttons have a usable size");
  /* Paint the actual native controls and compare their borders and glyph colour. */
@@ -373,6 +381,73 @@ static void tabRowChecks(void){
   EnableWindow(bx,TRUE);EnableWindow(bc,TRUE);SendMessageW(bx,BM_SETSTATE,0,0);SendMessageW(bc,BM_SETSTATE,0,0);
   SelectObject(dc,old);SelectObject(peer,peerOld);DeleteObject(bitmap);DeleteObject(peerBitmap);DeleteDC(dc);DeleteDC(peer);ReleaseDC(NULL,screen);}
 }
+/* Preferences are driven through real controls while the main thread runs its modal loop. */
+extern wchar_t g_ini[];
+extern void lh_keep(const wchar_t*);
+static HWND prefsWindow;
+static void prefsSnapshot(HWND h,const wchar_t*path){
+ RECT r;GetClientRect(h,&r);HDC screen=GetDC(h),dc=CreateCompatibleDC(screen);BITMAPINFO bi;memset(&bi,0,sizeof bi);bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=r.right;bi.bmiHeader.biHeight=-r.bottom;bi.bmiHeader.biPlanes=1;bi.bmiHeader.biBitCount=32;
+ void*pixels=NULL;HBITMAP bitmap=CreateDIBSection(screen,&bi,DIB_RGB_COLORS,&pixels,NULL,0);if(bitmap){HGDIOBJ old=SelectObject(dc,bitmap);PrintWindow(h,dc,PW_CLIENTONLY);
+  BITMAPFILEHEADER head={0};head.bfType=0x4d42;head.bfOffBits=sizeof head+sizeof(BITMAPINFOHEADER);head.bfSize=head.bfOffBits+r.right*r.bottom*4;FILE*f=_wfopen(path,L"wb");if(f){fwrite(&head,1,sizeof head,f);fwrite(&bi.bmiHeader,1,sizeof(BITMAPINFOHEADER),f);fwrite(pixels,1,r.right*r.bottom*4,f);fclose(f);}SelectObject(dc,old);DeleteObject(bitmap);}
+ DeleteDC(dc);ReleaseDC(h,screen);
+}
+static BOOL CALLBACK onSettings(HWND h,LPARAM p){wchar_t cls[40];(void)p;GetClassNameW(h,cls,40);if(!wcscmp(cls,L"BCSettings")){prefsWindow=h;return FALSE;}return TRUE;}
+static void prefsPage(HWND h,int page){HWND tab=GetDlgItem(h,550);SendMessageW(tab,TCM_SETCURSEL,page,0);NMHDR nm={tab,550,TCN_SELCHANGE};SendMessageW(h,WM_NOTIFY,550,(LPARAM)&nm);}
+static DWORD WINAPI prefsDriver(void*arg){
+ int phase=(int)(intptr_t)arg;HWND h=NULL;wchar_t t[80];
+ for(int i=0;i<200;i++){prefsWindow=NULL;EnumThreadWindows(mainTid,onSettings,0);h=prefsWindow;if(h&&GetDlgItem(h,1)&&GetWindowTextW(GetDlgItem(h,572),t,80)>0)break;Sleep(25);}
+ check(h&&GetDlgItem(h,550),"preferences button opens the application preferences dialog");if(!h)return 0;
+ if(phase==0)prefsSnapshot(h,L"preferences-general.bmp");
+ check(SendMessageW(GetDlgItem(h,550),TCM_GETITEMCOUNT,0,0)==3,"preferences groups general/compare/history, appearance/keys and external tools");
+ check((GetWindowLongPtrW(GetDlgItem(h,560),GWL_STYLE)&WS_VISIBLE)&&!(GetWindowLongPtrW(GetDlgItem(h,501),GWL_STYLE)&WS_VISIBLE),"general page is initially visible and appearance page is hidden");
+ prefsPage(h,1);if(phase==0)prefsSnapshot(h,L"preferences-appearance.bmp");check((GetWindowLongPtrW(GetDlgItem(h,501),GWL_STYLE)&WS_VISIBLE)&&!(GetWindowLongPtrW(GetDlgItem(h,560),GWL_STYLE)&WS_VISIBLE),"appearance tab exposes the existing font and shortcut fields");
+ prefsPage(h,2);if(phase==0)prefsSnapshot(h,L"preferences-external.bmp");check((GetWindowLongPtrW(GetDlgItem(h,540),GWL_STYLE)&WS_VISIBLE)&&!(GetWindowLongPtrW(GetDlgItem(h,501),GWL_STYLE)&WS_VISIBLE),"external-tools tab exposes its command editor");prefsPage(h,0);
+ if(phase==0){SetWindowTextW(GetDlgItem(h,572),L"7");SendMessageW(h,WM_COMMAND,2,0);return 0;}
+ if(phase==2){
+  GetWindowTextW(GetDlgItem(h,572),t,80);check(!wcscmp(t,L"3"),"saved history limit appears when preferences reopen");
+  SendMessageW(h,WM_COMMAND,3,0);GetWindowTextW(GetDlgItem(h,572),t,80);check(!wcscmp(t,L"30")&&SendMessageW(GetDlgItem(h,570),CB_GETCURSEL,0,0)==0,"defaults reset controls to documented values");
+  SendMessageW(h,WM_COMMAND,2,0);return 0;
+ }
+ int before=shownBoxes;SetWindowTextW(GetDlgItem(h,572),L"0");prefsPage(h,1);PostMessageW(h,WM_COMMAND,1,0);
+ for(int i=0;i<100&&shownBoxes==before;i++)Sleep(10);
+ check(shownBoxes==before+1&&IsWindow(h)&&SendMessageW(GetDlgItem(h,550),TCM_GETCURSEL,0,0)==0,"invalid history limits show an error and return to the field's tab without closing preferences");
+ SetWindowTextW(GetDlgItem(h,572),L"3");SetWindowTextW(GetDlgItem(h,573),L"1");
+ SendMessageW(GetDlgItem(h,560),BM_SETCHECK,BST_CHECKED,0);SendMessageW(GetDlgItem(h,563),BM_SETCHECK,BST_CHECKED,0);
+ SendMessageW(GetDlgItem(h,565),BM_SETCHECK,BST_UNCHECKED,0);SendMessageW(GetDlgItem(h,567),BM_SETCHECK,BST_UNCHECKED,0);
+ SendMessageW(GetDlgItem(h,569),BM_SETCHECK,BST_CHECKED,0);SendMessageW(GetDlgItem(h,570),CB_SETCURSEL,1,0);SendMessageW(GetDlgItem(h,571),CB_SETCURSEL,4,0);
+ SendMessageW(h,WM_COMMAND,1,0);return 0;
+}
+static int historyCount(const wchar_t*path){
+ wchar_t normalized[1200],dir[1600];wcscpy(normalized,path);CharLowerBuffW(normalized,(DWORD)wcslen(normalized));uint64_t hash=0xcbf29ce484222325ull;
+ for(const wchar_t*p=normalized;*p;p++){hash^=*p;hash*=0x100000001b3ull;}
+ wcscpy(dir,g_ini);wchar_t*slash=wcsrchr(dir,L'\\');if(!slash)return 0;*slash=0;
+ size_t n=wcslen(dir);swprintf(dir+n,1600-n,L"\\history\\%016llX\\*.bak",(unsigned long long)hash);
+ WIN32_FIND_DATAW data;HANDLE f=FindFirstFileW(dir,&data);int count=0;if(f==INVALID_HANDLE_VALUE)return 0;
+ do{if(!(data.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY))count++;}while(FindNextFileW(f,&data));FindClose(f);return count;
+}
+static void preferencesChecks(void){
+ int original=(int)GetPrivateProfileIntW(L"History",L"MaxVersions",30,g_ini);expectBoxes=1;
+ for(int phase=0;phase<3;phase++){
+  HANDLE driver=CreateThread(NULL,0,prefsDriver,(void*)(intptr_t)phase,0,NULL);
+  SendMessageW(GetDlgItem(frame,IDM_SETTINGS),BM_CLICK,0,0);check(WaitForSingleObject(driver,5000)==WAIT_OBJECT_0,"preferences closes through its own buttons");CloseHandle(driver);
+  if(phase==0)check(GetPrivateProfileIntW(L"History",L"MaxVersions",30,g_ini)==(UINT)original,"Cancel does not persist changed controls");
+ }
+ expectBoxes=0;
+ check(GetPrivateProfileIntW(L"History",L"MaxVersions",0,g_ini)==3&&GetPrivateProfileIntW(L"History",L"MaxFileMB",0,g_ini)==1,"history limits persist and cancelling Defaults preserves them");
+ check(g_dark==1&&GetPrivateProfileIntW(L"UI",L"Dark",0,g_ini)==1,"theme preference persists and applies immediately");
+ uint64_t before=g_nsess;SendMessageW(frame,WM_COMMAND,1002,0);for(int i=0;i<100&&g_nsess==before;i++)Sleep(10);
+ HWND text=FindWindowExW(frame,NULL,L"BCText",NULL);
+ check(text&&SendMessageW(GetDlgItem(text,217),BM_GETCHECK,0,0)==BST_CHECKED&&SendMessageW(GetDlgItem(text,226),BM_GETCHECK,0,0)==BST_CHECKED,"new text views consume the saved folding and character-highlight defaults");
+ check(text&&SendMessageW(GetDlgItem(text,222),CB_GETCURSEL,0,0)==4,"new text views consume the saved context-line default");
+ wchar_t probe[1200];GetFullPathNameW(L"preferences-history.txt",1200,probe,NULL);
+ for(int i=0;i<5;i++){putfile(probe,"recorded version");HANDLE f=CreateFileW(probe,FILE_WRITE_ATTRIBUTES,FILE_SHARE_READ,NULL,OPEN_EXISTING,0,NULL);ULONGLONG value=133000000000000000ull+(ULONGLONG)i*10000000;FILETIME time={(DWORD)value,(DWORD)(value>>32)};SetFileTime(f,NULL,NULL,&time);CloseHandle(f);lh_keep(probe);}
+ check(historyCount(probe)==3,"local history actually enforces the configured version count");
+ WritePrivateProfileStringW(L"History",L"Enabled",L"0",g_ini);putfile(probe,"a later version");lh_keep(probe);check(historyCount(probe)==3,"turning history off leaves existing versions intact");
+ WritePrivateProfileStringW(L"History",L"Enabled",L"1",g_ini);
+ GetFullPathNameW(L"preferences-large.txt",1200,probe,NULL);FILE*f=_wfopen(probe,L"wb");if(f){fseek(f,2*1024*1024,SEEK_SET);fputc('x',f);fclose(f);}lh_keep(probe);
+ check(historyCount(probe)==0,"local history actually skips files over the configured size limit");
+}
+
 /* close the current tab and then the application through those buttons */
 static void closeThroughButtons(void){
  uint64_t before=g_nsess;
@@ -1114,6 +1189,7 @@ static DWORD WINAPI watcher(void*arg){
   Sleep(50);
  }
  if(browseMode){tabRowChecks();tooltipChecks();browseChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
+ if(settingsMode){tabRowChecks();preferencesChecks();tooltipChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
  if(findMode){findChecks();tooltipChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
  if(folderMode){folderChecks();tooltipChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
  if(pvMode){pvChecks();tooltipChecks();SendMessageW(fv,0x8000+14,0,0);PostMessageW(frame,WM_CLOSE,0,0);return 0;}
@@ -1203,6 +1279,7 @@ int main(int argc,char**argv){
  mergeMode=argc>1&&!strcmp(argv[1],"merge");
  fmergeMode=argc>1&&!strcmp(argv[1],"fmerge");
  browseMode=argc>1&&!strcmp(argv[1],"browse");
+ settingsMode=argc>1&&!strcmp(argv[1],"settings");
  findMode=argc>1&&!strcmp(argv[1],"find");
  folderMode=argc>1&&!strcmp(argv[1],"folder");
  if(folderMode)folderFixture();
@@ -1217,7 +1294,7 @@ int main(int argc,char**argv){
  fixture();
  GetFullPathNameW(L"ui_a.c",400,a,NULL);GetFullPathNameW(L"ui_b.c",400,b,NULL);
  swprintf(cmdline,1200,L"bcgui.exe %ls \"%ls\" \"%ls\"",mergeMode?L"merge":L"text",a,b);
- if(browseMode||findMode||mftMode)wcscpy(cmdline,L"bcgui.exe");
+ if(browseMode||findMode||mftMode||settingsMode)wcscpy(cmdline,L"bcgui.exe");
  if(pvMode){wchar_t fa[400],fb[400];GetFullPathNameW(L"fp\\a",400,fa,NULL);GetFullPathNameW(L"fp\\b",400,fb,NULL);swprintf(cmdline,1200,L"bcgui.exe folder \"%ls\" \"%ls\"",fa,fb);}
  if(folderMode){wchar_t fa[400],fb[400];GetFullPathNameW(L"fc\\a",400,fa,NULL);GetFullPathNameW(L"fc\\b",400,fb,NULL);swprintf(cmdline,1200,L"bcgui.exe folder \"%ls\" \"%ls\"",fa,fb);}
  if(fmergeMode){
