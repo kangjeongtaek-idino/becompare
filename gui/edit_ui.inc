@@ -18,6 +18,7 @@
 %define ID_ED_INFO   311
 %define ID_ED_LFIND  312
 %define ID_ED_LREPL  313
+%define ID_ED_HIST   314
 %define EM_FINDTEXTEXW 0x047C
 %define EM_GETSELTEXT  0x043E
 %define EN_SELCHANGE   0x0702
@@ -76,10 +77,11 @@ ed_layout:
     mov r12d, r14d
     mov r13d, r14d
     ; row 1: path edit takes the remaining width
-    mov ecx, 30+70+70+160
+    mov ecx, 30+70+70+160+60
     call scl
     mov ebx, eax
     lea eax, [r14*4+r14]
+    add eax, r14d
     add ebx, eax
     mov ebp, [rsp+104]
     sub ebp, ebx
@@ -93,6 +95,7 @@ ed_layout:
     EPLACE ID_COMPARE, 70
     EPLACE ID_ED_SAVE, 70
     EPLACE ID_ED_SAVEAS, 160
+    EPLACE ID_ED_HIST, 60
     lea r13d, [r13+r15]
     add r13d, r14d
     mov r12d, r14d
@@ -229,6 +232,15 @@ ed_load:
     invoke msgbox, rsi, &s_ed_loadfail, MB_OK|MB_ICONWARNING
     EPILOG 1216
 
+; ed_hist(hwnd): local history of the file whose path is in the path box
+ed_hist:
+    PROLOG 1216
+    mov rsi, rcx
+    invoke GetDlgItem, rsi, ID_EDIT_A
+    invoke GetWindowTextW, rax, &rsp+96, 519
+    invoke lh_show, rsi, &rsp+96
+    EPILOG 1216
+
 ; ed_save(hwnd, E, saveas)
 ed_save:
     PROLOG 1216
@@ -285,6 +297,7 @@ ed_save:
     call text_opts
     mov r9d, eax
     mov [rsp+1176], r9
+    invoke lh_keep, &rsp+96          ; local history: what the file holds now
     invoke guarded_text_save, &rbx+E_TXT, &rsp+96, rbp, r13, [rsp+1176]
     mov r14d, eax
     invoke free, rbp
@@ -508,6 +521,7 @@ ed_proc:
     invoke mk_btn, rsi, &s_ed_open, ID_COMPARE
     invoke mk_btn, rsi, &s_ed_save, ID_ED_SAVE
     invoke mk_btn, rsi, &s_ed_saveas, ID_ED_SAVEAS
+    invoke mk_btn, rsi, &s_b_hist, ID_ED_HIST
     invoke mk_lbl, rsi, &s_ed_lfind, ID_ED_LFIND
     invoke mk_edit, rsi, ID_ED_FIND
     invoke mk_btn, rsi, &s_ed_next, ID_ED_NEXT
@@ -585,6 +599,8 @@ ed_proc:
     je .b_save
     cmp ebx, ID_ED_SAVEAS
     je .b_saveas
+    cmp ebx, ID_ED_HIST
+    je .b_hist
     cmp ebx, ID_ED_NEXT
     je .b_next
     cmp ebx, ID_ED_PREV
@@ -606,6 +622,9 @@ ed_proc:
     jmp .zero
 .b_saveas:
     invoke ed_save, rsi, r15, 1
+    jmp .zero
+.b_hist:
+    invoke ed_hist, rsi
     jmp .zero
 .b_next:
     invoke ed_find, rsi, r15, 1
@@ -677,6 +696,7 @@ tt_edit:
     dq ID_COMPARE, tt_edit_2
     dq ID_ED_SAVE, tt_edit_3
     dq ID_ED_SAVEAS, tt_edit_4
+    dq ID_ED_HIST, tt_text_hist
     dq ID_ED_SYN, tt_edit_5
     dq ID_ED_FIND, tt_edit_6
     dq ID_ED_NEXT, tt_edit_7

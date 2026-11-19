@@ -1135,6 +1135,7 @@ tv_save:
     call text_opts
     mov r9d, eax
     mov [rsp+1176], r9
+    invoke lh_keep, &rsp+96          ; local history: what the file holds now
     invoke guarded_text_save, r15, &rsp+96, rbp, r13, [rsp+1176]
     mov r14d, eax
     invoke free, rbp
@@ -1211,6 +1212,7 @@ tv_layout:
     PLACE ID_BTN_XLS, 90
     PLACE ID_BTN_PATCH, 90
     PLACE ID_BTN_PCLIP, 90
+    PLACE ID_BTN_HIST, 60
     lea r13d, [r13+r15]
     add r13d, r14d
     mov r12d, r14d
@@ -1473,6 +1475,7 @@ tv_proc:
     invoke mk_btn, rsi, &s_b_xls, ID_BTN_XLS
     invoke mk_btn, rsi, &s_b_patch, ID_BTN_PATCH
     invoke mk_btn, rsi, &s_b_pclip, ID_BTN_PCLIP
+    invoke mk_btn, rsi, &s_b_hist, ID_BTN_HIST
     invoke icon_set, rsi, ID_BTN_PREV, &g_prev, &s_b_prev
     invoke icon_set, rsi, ID_BTN_NEXT, &g_next, &s_b_next
     invoke icon_set, rsi, ID_BTN_CLR, &g_copyr, &s_b_clr
@@ -1632,6 +1635,8 @@ tv_proc:
     je .b_patch
     cmp ebx, ID_BTN_PCLIP
     je .b_pclip
+    cmp ebx, ID_BTN_HIST
+    je .b_hist
     cmp ebx, ID_BTN_UNDO
     je .btn_undo
     cmp ebx, ID_BTN_REDO
@@ -1764,6 +1769,14 @@ tv_proc:
     jmp .zero
 .b_pclip:
     invoke text_patch_clip, rsi, r15
+    jmp .zero
+.b_hist:                             ; local history of the file in the pane that was used last
+    lea rdx, [r15+TV_PATHA]
+    cmp qword [r15+TV_LASTP], 0
+    je .hist_go
+    lea rdx, [r15+TV_PATHB]
+.hist_go:
+    invoke lh_show, rsi, rdx
     jmp .zero
 .btn_undo:                           ; the toolbar buttons do what Ctrl+Z / Ctrl+Y do
     invoke SendMessageW, rsi, BC_UNDO, 0, 0
@@ -1907,6 +1920,8 @@ WSTR tt_text_1, "오른쪽 파일을 저장합니다"
 WSTR tt_text_2, "양쪽에서 고른 줄을 같은 위치로 맞춰 다시 비교합니다"
 WSTR tt_text_3, "지정한 정렬을 모두 해제합니다"
 WSTR tt_text_pclip, "차이를 패치(unified diff) 텍스트로 클립보드에 복사합니다"
+WSTR s_b_hist, "기록"
+WSTR tt_text_hist, "로컬 기록: 이 프로그램이 저장하기 직전의 내용들을 목록으로 보여 주고, 고른 것을 현재 파일과 비교합니다 (마지막으로 쓴 창의 파일)"
 WSTR tt_text_patch, "차이를 패치 파일(unified diff)로 저장합니다"
 WSTR tt_text_4, "비교 결과를 엑셀 파일(.xlsx)로 저장합니다"
 WSTR tt_text_5, "대소문자 차이를 무시합니다"
@@ -1944,6 +1959,7 @@ tt_text:
     dq ID_BTN_XLS, s_tip_report
     dq ID_BTN_PATCH, tt_text_patch
     dq ID_BTN_PCLIP, tt_text_pclip
+    dq ID_BTN_HIST, tt_text_hist
     dq ID_CHK_CASE, tt_text_5
     dq ID_CHK_SPC, tt_text_6
     dq ID_CHK_TRIM, tt_text_7

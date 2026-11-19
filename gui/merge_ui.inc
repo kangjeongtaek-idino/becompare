@@ -476,6 +476,7 @@ mg_save:
     shl r9d, 8
     or r9d, [rbx+MG_ENC]
     mov [rsp+104], r9
+    invoke lh_keep, &r12+SS_PATHO    ; local history: what the output file holds now
     invoke guarded_text_save, rbx, &r12+SS_PATHO, r13, r14, [rsp+104]
     mov r15d, eax
     invoke free, r13
