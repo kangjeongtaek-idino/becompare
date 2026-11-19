@@ -3,6 +3,7 @@
 %include "inc/win.inc"
 %include "inc/app.inc"
 
+extern rich_key
 extern SetTimer, KillTimer, EnableWindow
 extern OleInitialize, InitCommonControlsEx, LoadLibraryW, GetModuleHandleW
 extern CreateWindowExW, ShowWindow, UpdateWindow, GetMessageW, TranslateMessage, DispatchMessageW, LoadImageW
@@ -311,7 +312,17 @@ WinMain:
     jle .exit
     mov eax, [rbx+MSG_MSG]
     cmp eax, WM_KEYDOWN
+    je .key
+    cmp eax, 0x0104                  ; WM_SYSKEYDOWN: Alt+Shift+Up / Down moves lines in an editor pane
     jne .disp
+    invoke GetKeyState, VK_SHIFT
+    test ax, ax
+    jns .disp
+    invoke rich_key, [rbx+MSG_HWND], [rbx+MSG_WPARAM], 6
+    test eax, eax
+    jnz .loop
+    jmp .disp
+.key:
     invoke pre_key, rbx
     test eax, eax
     jnz .loop
@@ -439,6 +450,12 @@ pre_key:
     je .nextdiff
     jmp .prevdiff
 .fixed:
+    invoke rich_key, [rsi+MSG_HWND], rdi, rbp    ; line editing keys of an editor pane (rich_keys.inc)
+    test eax, eax
+    jz .nork
+    mov eax, 1
+    EPILOG 96
+.nork:
     cmp edi, 0x76                    ; VK_F7 / Shift+F7: next / previous difference (IntelliJ)
     jne .nof7
     test ebp, 1
