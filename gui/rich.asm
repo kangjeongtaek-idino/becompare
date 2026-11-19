@@ -435,3 +435,5 @@ rich_unsel:
     PROLOG 64
     invoke SendMessageW, rcx, EM_SETSEL, 0, 0
     EPILOG 64
+
+%include "rich_keys.inc"

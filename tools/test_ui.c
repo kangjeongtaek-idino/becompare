@@ -73,7 +73,7 @@ extern uint32_t th_lonly, th_ronly, th_conf;
 #define IDM_LIGHT 1030
 #define IDM_DARK 1031
 
-static int checks, failed, shiftDown, boxes, mergeMode, fmergeMode, browseMode, findMode, mftMode, usnMode, folderMode, pvMode, expectBoxes, shownBoxes;
+static int checks, failed, shiftDown, ctrlDown, boxes, mergeMode, fmergeMode, browseMode, findMode, mftMode, usnMode, folderMode, pvMode, expectBoxes, shownBoxes;
 static wchar_t findRoot[600], probeName[80], probePath[700];
 static wchar_t lastBox[400];
 static int boxAnswer, deleteCalls, deleteMode;
@@ -93,7 +93,8 @@ BOOL WINAPI __wrap_ShowWindow(HWND h,int c){
 }
 SHORT WINAPI __wrap_GetKeyState(int vk){
  if(vk==VK_SHIFT)return shiftDown?(SHORT)0x8000:0;
- if(vk==VK_CONTROL||vk==VK_MENU)return 0;
+ if(vk==VK_CONTROL)return ctrlDown?(SHORT)0x8000:0;
+ if(vk==VK_MENU)return 0;
  return __real_GetKeyState(vk);
 }
 int WINAPI __wrap_MessageBoxW(HWND h,LPCWSTR t,LPCWSTR c,UINT f){(void)h;(void)c;
@@ -1165,6 +1166,13 @@ static DWORD WINAPI watcher(void*arg){
  check(key(VK_F7,1,3)&&key(VK_F7,1,1)&&info(L"현재 1/4"),"Shift+F7 walks back to the first difference");
  shiftDown=1;PostMessageW(ra,WM_KEYDOWN,VK_F7,0);Sleep(300);shiftDown=0;
  check(bothAt(1),"Shift+F7 on the first difference stays there");
+ /* Ctrl+D in an editor pane duplicates the line of the caret (rich_keys.inc); one undo takes it back */
+ {int n0=(int)SendMessageW(ra,EM_GETLINECOUNT,0,0),m0=(int)SendMessageW(ra,EM_GETMODIFY,0,0);
+  ctrlDown=1;PostMessageW(ra,WM_KEYDOWN,'D',0);Sleep(300);ctrlDown=0;
+  check((int)SendMessageW(ra,EM_GETLINECOUNT,0,0)==n0+1,"Ctrl+D duplicates the line of the caret");
+  SendMessageW(ra,EM_UNDO,0,0);SendMessageW(ra,EM_SETMODIFY,m0,0);
+  check((int)SendMessageW(ra,EM_GETLINECOUNT,0,0)==n0,"one undo takes the duplicated line back");
+  caretTo(1);}
  /* a caret inside a block: F7 leaves the block, Shift+F7 from below returns to its first row */
  caretTo(4);
  check(key(VK_F7,0,5),"F7 from an unchanged row goes to the next difference below");
