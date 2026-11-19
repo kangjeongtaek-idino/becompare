@@ -100,6 +100,7 @@ global text_register, text_create, edit_create, tv_anchor_add, tv_cmp_anch
 %define ID_CHK_BLANK 224
 %define ID_CMB_ENC   225
 %define ID_CHK_CHAR  226
+%define ID_CHK_SPLIT 227
 %define ID_EDIT_RULES 232
 %define ID_LBL_RULES 233
 %define TV_RULES  3168
@@ -296,6 +297,7 @@ sum_len:
 %include "text_blank.inc"
 %include "text_enc.inc"
 %include "text_prefs.inc"
+%include "text_split.inc"
 %include "text_word.inc"
 %include "text_fold.inc"
 %include "text_uni.inc"

@@ -682,6 +682,11 @@ text_compare:
     mov [rbx+TV_OPTS], r13                ; the word level highlight follows the same options
     invoke wcscpy, &rbx+TV_CMT, &rsp+C_CP
     invoke tv_cmp_anch, rbx, &rsp+C_LA, &rsp+C_LB, r13, &rsp+C_CP, &rsp+C_HV
+    invoke get_chk, rsi, ID_CHK_SPLIT
+    test eax, eax
+    jz .nosplit
+    invoke tv_split_hunks, rbx, &rsp+C_LA, &rsp+C_LB, &rsp+C_HV   ; lines that belong together, piece by piece
+.nosplit:
     invoke tv_build, rbx, &rsp+C_LA, &rsp+C_LB, &rsp+C_HV
     mov qword [rbx+TV_NIGN], 0
     invoke get_chk, rsi, ID_CHK_BLANK
@@ -1223,6 +1228,7 @@ tv_layout:
     PLACE ID_CHK_UNI, 110
     PLACE ID_CHK_WORD, 110
     PLACE ID_CHK_CHAR, 110
+    PLACE ID_CHK_SPLIT, 120
     PLACE ID_CHK_SCRL, 130
     PLACE ID_CHK_WS, 100
     PLACE ID_CHK_NUM, 90
@@ -1500,6 +1506,7 @@ tv_proc:
     invoke mk_chk, rsi, &s_c_uni, ID_CHK_UNI, 0
     invoke mk_chk, rsi, &s_c_word, ID_CHK_WORD, 1
     invoke mk_chk, rsi, &s_c_char, ID_CHK_CHAR, 0
+    invoke mk_chk, rsi, &s_c_split, ID_CHK_SPLIT, 0
     invoke mk_chk, rsi, &s_c_scrl, ID_CHK_SCRL, 1
     invoke mk_chk, rsi, &s_c_ws, ID_CHK_WS, 0
     invoke mk_chk, rsi, &s_c_num, ID_CHK_NUM, 1
@@ -1648,6 +1655,8 @@ tv_proc:
     cmp ebx, ID_CHK_WORD
     je .doreq
     cmp ebx, ID_CHK_CHAR
+    je .doreq
+    cmp ebx, ID_CHK_SPLIT
     je .doreq
     cmp ebx, ID_CHK_SCRL
     je .scrl
@@ -1917,6 +1926,7 @@ WSTR tt_text_blank, "빈 줄(공백·탭만 있는 줄 포함)만 추가·삭제
 WSTR tt_text_ws, "공백을 · 로, 탭을 → 로 표시합니다 (읽기 전용 표시)"
 WSTR tt_text_scrl, "끄면 두 창을 따로 스크롤합니다. 다시 켜면 오른쪽 창이 왼쪽 창 위치로 맞춰집니다"
 WSTR tt_text_char, "단어 강조를 글자 단위로 합니다: 단어 안에서 바뀐 글자만 칠합니다 (256자 이하인 줄)"
+WSTR tt_text_split, "여러 줄이 함께 바뀐 블록을 비슷한 줄끼리 짝지어 작은 차이로 나눕니다 (끼어든 줄은 추가·삭제로 따로 표시)"
 WSTR tt_text_word, "줄 안의 바뀐 단어를 따로 강조합니다. 끄면 바뀐 줄 전체만 칠합니다"
 WSTR tt_text_uni, "좌우 두 창 대신 삭제·추가 줄을 한 창에 이어서 보여 줍니다"
 WSTR tt_text_14, "다음 일치 항목으로 이동합니다"
@@ -1955,6 +1965,7 @@ tt_text:
     dq ID_CHK_UNI, tt_text_uni
     dq ID_CHK_WORD, tt_text_word
     dq ID_CHK_CHAR, tt_text_char
+    dq ID_CHK_SPLIT, tt_text_split
     dq ID_CHK_SCRL, tt_text_scrl
     dq ID_CHK_WS, tt_text_ws
     dq ID_CHK_BLANK, tt_text_blank

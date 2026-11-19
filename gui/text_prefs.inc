@@ -1,6 +1,6 @@
 ; text_prefs.inc - Text Compare: the view options are remembered (IntelliJ keeps its diff settings too)
 ;
-;   Folding and its context, the unified view, word / character highlight, scroll sync, whitespace marks, line
+;   Folding and its context, the unified view, word / character highlight, split changes, scroll sync, whitespace marks, line
 ;   numbers and "ignore blank lines" are written to settings.ini ([TextCompare]) when they are changed and
 ;   read when a text view is created. The options that belong to a comparison (case, blanks, comments, rules)
 ;   stay with the session as before; the encoding is a property of the files and is not kept.
@@ -16,6 +16,7 @@ WSTR k_tp_ctx, "FoldContext"
 WSTR k_tp_uni, "Unified"
 WSTR k_tp_word, "WordHighlight"
 WSTR k_tp_char, "CharHighlight"
+WSTR k_tp_split, "SplitChanges"
 WSTR k_tp_scrl, "SyncScroll"
 WSTR k_tp_ws, "Whitespace"
 WSTR k_tp_num, "LineNumbers"
@@ -27,6 +28,7 @@ tp_tab:                              ; {control id, key}: the check boxes
     dq ID_CHK_UNI, k_tp_uni
     dq ID_CHK_WORD, k_tp_word
     dq ID_CHK_CHAR, k_tp_char
+    dq ID_CHK_SPLIT, k_tp_split
     dq ID_CHK_SCRL, k_tp_scrl
     dq ID_CHK_WS, k_tp_ws
     dq ID_CHK_NUM, k_tp_num
