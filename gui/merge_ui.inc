@@ -96,6 +96,7 @@ mg_align_clear:
 mg_free_texts:
     PROLOG 64
     mov rbx, rcx
+    invoke mg_bases_free, rbx
     invoke fs_forget, rbx
     invoke fs_forget, &rbx+MG_TXL
     invoke fs_forget, &rbx+MG_TXR
@@ -217,9 +218,9 @@ mg_resolve:
     invoke set_status, &s_nocur
     EPILOG 192
 
-; mg_apply(hwnd, mg, choice 0 left / 1 right / 2 both, target conflict index or -1 for all)
+; mg_apply(hwnd, mg, choice 0 left / 1 right / 2 both / 3 merged when simple, target conflict index or -1 for all)
 mg_apply:
-    PROLOG 192
+    PROLOG 320
     mov rsi, rcx
     mov rbx, rdx
     mov r12d, r8d
@@ -227,6 +228,7 @@ mg_apply:
     invoke us_clear, &rbx+MG_UST, 1  ; the output before this choice becomes an undo step
     invoke mg_us_snap, rbx, 0
     invoke sb_init, &rsp+96
+    mov dword [rsp+128], 0           ; conflicts merged by choice 3
     xor edi, edi                     ; line
     xor r15d, r15d                   ; next conflict index to meet
 .l:
@@ -244,6 +246,14 @@ mg_apply:
     cmp r15, r14
     jne .keep
 .take:
+    cmp r12d, 3
+    jne .side
+    invoke mg_simple_one, rbx, rbp, &rsp+96      ; merged token by token when the two changes do not meet
+    test eax, eax
+    jz .keep
+    inc dword [rsp+128]
+    jmp .skip
+.side:
     ; chosen conflict: left part start+1..mid-1, right part mid+1..end-1
     cmp r12d, 1
     je .right
@@ -278,6 +288,19 @@ mg_apply:
     inc rdi
     jmp .l
 .built:
+    cmp r12d, 3
+    jne .trim
+    cmp dword [rsp+128], 0
+    jne .trim
+    invoke sb_free, &rsp+96          ; nothing was simple: the output stays, and so does the undo list
+    invoke us_pop, &rbx+MG_UST, 0, &rsp+136
+    test eax, eax
+    jz .nostep
+    invoke free, [rsp+144]
+.nostep:
+    invoke set_status, &s_ms_none
+    EPILOG 320
+.trim:
     mov rax, [rsp+96+8]
     test rax, rax
     jz .set
@@ -300,7 +323,13 @@ mg_apply:
     invoke mg_colorout, rbx
     invoke SendMessageW, [rbx+MG_HM], EM_EMPTYUNDOBUFFER, 0, 0   ; the colouring is nothing for Ctrl+Z to take back
     invoke mg_info, rsi, rbx
-    EPILOG 192
+    cmp r12d, 3
+    jne .d
+    invoke _snwprintf, &rsp+160, 78, &f_ms_done, #[rsp+128], [rbx+MG_NCONF]
+    mov word [rsp+160+156], 0
+    invoke set_status, &rsp+160
+.d:
+    EPILOG 320
 
 ; ---------------------------------------------------------------- undo / redo (Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z)
 ; Choosing a side writes the whole output pane again, which empties the editor's own undo buffer. So the
@@ -405,7 +434,12 @@ mg_resolve_all:
     cmp qword [rbx+MG_CONF+8], 0
     je .d
     invoke mg_apply, rsi, rbx, r12, -1
+    EPILOG 64
 .d:
+    cmp r12d, 3
+    jne .q
+    invoke set_status, &s_ms_none
+.q:
     EPILOG 64
 
 ; mg_save(hwnd, mg, sess) -> eax 1 saved
@@ -551,6 +585,7 @@ mg_layout:
     PLACE ID_BTN_ALC, 80
     PLACE ID_BTN_ALLL, 110
     PLACE ID_BTN_ALLR, 120
+    PLACE ID_BTN_SIMPLE, 120
     PLACE ID_BTN_SAVE, 40
     PLACE ID_BTN_DOC, 90
     PLACE ID_MG_CASE, 110
@@ -711,6 +746,7 @@ mg_proc:
     invoke mk_btn, rsi, &s_b_alc, ID_BTN_ALC
     invoke mk_btn, rsi, &s_b_alll, ID_BTN_ALLL
     invoke mk_btn, rsi, &s_b_allr, ID_BTN_ALLR
+    invoke mk_btn, rsi, &s_b_simple, ID_BTN_SIMPLE
     invoke mk_btn, rsi, &s_b_save, ID_BTN_SAVE
     invoke mk_btn, rsi, &s_b_doc, ID_BTN_DOC
     invoke icon_set, rsi, ID_BTN_PREV, &g_prev, &s_b_prev
@@ -845,6 +881,8 @@ mg_proc:
     je .b_al
     cmp ebx, ID_BTN_ALLR
     je .b_ar
+    cmp ebx, ID_BTN_SIMPLE
+    je .b_simple
     cmp ebx, ID_BTN_SAVE
     je .save
     cmp ebx, ID_BTN_DOC
@@ -952,6 +990,9 @@ mg_proc:
 .b_ar:
     invoke mg_resolve_all, rsi, r15, 1
     jmp .zero
+.b_simple:
+    invoke mg_resolve_all, rsi, r15, 3
+    jmp .zero
 
 .cedit:
     invoke ctl_color, r12, 0
@@ -1004,6 +1045,7 @@ WSTR tt_merge_4, "양쪽에서 고른 줄을 같은 위치로 맞춰 다시 병�
 WSTR tt_merge_5, "지정한 정렬을 모두 해제합니다"
 WSTR tt_merge_6, "남은 충돌을 모두 왼쪽 내용으로 해결합니다"
 WSTR tt_merge_7, "남은 충돌을 모두 오른쪽 내용으로 해결합니다"
+WSTR tt_merge_simple, "양쪽이 같은 줄의 서로 다른 부분을 고친 충돌을 단어 단위로 합쳐 자동으로 해결합니다 (기준 파일이 있는 3-way 병합)"
 WSTR tt_merge_8, "병합 결과를 워드 파일(.docx)로 저장합니다"
 WSTR tt_merge_case, "병합 비교 시 대소문자 차이를 무시합니다"
 WSTR tt_merge_spc, "병합 비교 시 줄 안의 공백 차이를 무시합니다"
@@ -1019,6 +1061,7 @@ tt_merge:
     dq ID_BTN_ALC, tt_merge_5
     dq ID_BTN_ALLL, tt_merge_6
     dq ID_BTN_ALLR, tt_merge_7
+    dq ID_BTN_SIMPLE, tt_merge_simple
     dq ID_BTN_DOC, s_tip_report_merge
     dq ID_MG_CASE, tt_merge_case
     dq ID_MG_SPC, tt_merge_spc

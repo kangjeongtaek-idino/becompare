@@ -49,7 +49,8 @@ global merge_register, merge_create, diff3_try_file
 %define MG_GUARD  232           ; scroll sync guard
 %define MG_OPTS   240           ; compare options (1 case, 2 space, 4 trim)
 %define MG_UST    248           ; undo / redo steps (undo.asm): earlier texts of the output pane
-%define MG_SIZE   256
+%define MG_BASES  256           ; vec of {left, right, base} texts: the conflicts of the last 3-way merge (merge_simple.inc)
+%define MG_SIZE   280
 %define MG_ANCSZ  2960          ; must exceed text.asm TV_NANC (2880) + 4
 
 %define ID_RL       601
@@ -72,6 +73,7 @@ global merge_register, merge_create, diff3_try_file
 %define ID_BTN_DOC  655
 %define ID_BTN_UNDO 656
 %define ID_BTN_REDO 657
+%define ID_BTN_SIMPLE 658
 %define ID_MG_CASE  661
 %define ID_MG_SPC   662
 %define ID_MG_TRIM  663
@@ -845,6 +847,7 @@ mg_merge:
     mov [rsp+M_BLK+40], r15
     mov rax, [rsp+M_RJ]
     mov [rsp+M_BLK+48], rax
+    invoke mg_base_add, rbx, &rsp+M_BLK, &rsp+M_LO, r13, rbp     ; with its base lines, for "resolve simple conflicts"
     invoke conflict, &rsp+M_BLK
 .after:
     cmp rbp, [rsp+M_LO+8]
@@ -1106,4 +1109,5 @@ diff3_try_file:
     EPILOG 416
 
 %include "merge_ui.inc"
+%include "merge_simple.inc"
 %include "merge_doc.inc"
