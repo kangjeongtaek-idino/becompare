@@ -1276,6 +1276,16 @@ static DWORD WINAPI watcher(void*arg){
   SendMessageW(ra,EM_UNDO,0,0);SendMessageW(ra,EM_UNDO,0,0);SendMessageW(ra,EM_SETMODIFY,m0,0);
   check(GetWindowTextLengthW(ra)==l0,"two undos take the pair and the blank back");
   caretTo(1);}
+ /* Home in an editor pane stops at the first character of an indented line, then goes on to the line start */
+ {int m0=(int)SendMessageW(ra,EM_GETMODIFY,0,0),l0=GetWindowTextLengthW(ra);CHARRANGE r,q;
+  SendMessageW(ra,EM_EXGETSEL,0,(LPARAM)&r);SendMessageW(ra,EM_REPLACESEL,1,(LPARAM)L"	zz");
+  PostMessageW(ra,WM_KEYDOWN,VK_HOME,0);Sleep(300);SendMessageW(ra,EM_EXGETSEL,0,(LPARAM)&q);
+  check(q.cpMin==r.cpMin+1&&q.cpMax==q.cpMin,"Home goes to the first character behind the indent");
+  PostMessageW(ra,WM_KEYDOWN,VK_HOME,0);Sleep(300);SendMessageW(ra,EM_EXGETSEL,0,(LPARAM)&q);
+  check(q.cpMin==r.cpMin,"Home again goes to the line start");
+  SendMessageW(ra,EM_UNDO,0,0);SendMessageW(ra,EM_SETMODIFY,m0,0);
+  check(GetWindowTextLengthW(ra)==l0,"the typed indent is taken back");
+  caretTo(1);}
  /* a caret inside a block: F7 leaves the block, Shift+F7 from below returns to its first row */
  caretTo(4);
  check(key(VK_F7,0,5),"F7 from an unchanged row goes to the next difference below");
