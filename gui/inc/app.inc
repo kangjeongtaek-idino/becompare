@@ -74,6 +74,7 @@
 %define IDM_CANCEL     1041
 %define IDM_SAVE       1042
 %define IDM_ABOUT      1050
+%define IDM_HELP       1051
 %define IDM_SETTINGS   1060
 %define IDM_UPDATE     1070
 %define IDM_CLIP       1071

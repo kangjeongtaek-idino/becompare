@@ -8,6 +8,8 @@ import os, re, subprocess, tempfile, json
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "build" / "regression"
 OUT.mkdir(parents=True, exist_ok=True)
+import shutil
+shutil.copytree(ROOT/"help",OUT/"help",dirs_exist_ok=True)
 def _mods():
     # keep in step with build-gui.ps1: its $optional list plus the three mandatory modules
     text = (ROOT / "build-gui.ps1").read_text(encoding="utf-8")

@@ -456,6 +456,9 @@ static void preferencesChecks(void){
 
 /* close the current tab and then the application through those buttons */
 static void closeThroughButtons(void){
+ {int before=shCalls;wchar_t guide[1200];GetModuleFileNameW(NULL,guide,1200);wchar_t*slash=wcsrchr(guide,L'\\');if(slash)wcscpy(slash+1,L"help\\index.html");
+  SendMessageW(frame,WM_COMMAND,1051,0);
+  check(shCalls==before+1&&!wcscmp(shVerb,L"open")&&!wcscmp(shFile,guide),"Help menu opens the offline manual relative to the executable");}
  uint64_t before=g_nsess;
  SendMessageW(GetDlgItem(frame,IDM_CLOSE_TAB),BM_CLICK,0,0);
  for(int i=0;i<40&&g_nsess==before;i++)Sleep(50);

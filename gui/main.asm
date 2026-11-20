@@ -4,6 +4,7 @@
 %include "inc/app.inc"
 
 extern rich_key, rich_char
+extern GetModuleFileNameW, ShellExecuteW
 extern SetTimer, KillTimer, EnableWindow
 extern OleInitialize, InitCommonControlsEx, LoadLibraryW, GetModuleHandleW
 extern CreateWindowExW, ShowWindow, UpdateWindow, GetMessageW, TranslateMessage, DispatchMessageW, LoadImageW
@@ -68,6 +69,10 @@ WSTR m_file, "파일(&F)"
 WSTR m_view, "보기(&V)"
 WSTR m_sess, "세션(&S)"
 WSTR m_help, "도움말(&H)"
+WSTR m_guide, `사용 설명서\tF1`
+WSTR s_guide_path, "help\index.html"
+WSTR s_guide_open, "open"
+WSTR s_guide_fail, "도움말을 열 수 없습니다. 프로그램과 함께 제공된 help 폴더가 bcgui.exe 옆에 있는지 확인하세요."
 WSTR m_nf, "새 폴더 비교"
 WSTR m_nt, "새 텍스트 비교"
 WSTR m_nb, "새 표 비교"
@@ -353,6 +358,33 @@ theme_apply_title:
     invoke DwmSetWindowAttribute, rbx, 20, &rsp+80, 4
     EPILOG 96
 
+; Resolve offline help relative to the executable, independent of the working directory.
+help_open:
+    PROLOG 1280
+    mov rbx, rcx
+    invoke GetModuleFileNameW, 0, &rsp+96, 520
+    test eax, eax
+    jz .fail
+    cmp eax, 500
+    jae .fail
+    invoke wcsrchr, &rsp+96, 92
+    test rax, rax
+    jz .fail
+    lea rcx, [rax+2]
+    invoke wcscpy, rcx, &s_guide_path
+    invoke GetFileAttributesW, &rsp+96
+    cmp eax, -1
+    je .fail
+    test eax, 0x10
+    jnz .fail
+    invoke ShellExecuteW, rbx, &s_guide_open, &rsp+96, 0, 0, 1
+    cmp rax, 32
+    jbe .fail
+    EPILOG 1280
+.fail:
+    invoke msgbox, rbx, &s_guide_fail, MB_OK|MB_ICONWARNING
+    EPILOG 1280
+
 ; ---------------------------------------------------------------- menu
 build_menu:
     PROLOG 96
@@ -404,6 +436,7 @@ build_menu:
     ; Help
     call CreatePopupMenu
     mov rbx, rax
+    invoke AppendMenuW, rbx, MF_STRING, IDM_HELP, &m_guide
     invoke AppendMenuW, rbx, MF_STRING, IDM_UPDATE, &m_upd
     invoke AppendMenuW, rbx, MF_STRING, IDM_ABOUT, &m_ab
     invoke AppendMenuW, r12, MF_POPUP, rbx, &m_help
@@ -416,6 +449,12 @@ pre_key:
     PROLOG 96
     mov rsi, rcx
     mov rdi, [rsi+MSG_WPARAM]
+    cmp edi, 0x70                    ; F1 is always available, including editor panes
+    jne .nothelp
+    invoke SendMessageW, [g_hframe], WM_COMMAND, IDM_HELP, 0
+    mov eax, 1
+    EPILOG 96
+.nothelp:
     invoke GetKeyState, VK_CONTROL
     xor r12d, r12d
     test ax, ax
@@ -2017,6 +2056,8 @@ frame_proc:
     je .c_patch
     cmp eax, IDM_ABOUT
     je .c_about
+    cmp eax, IDM_HELP
+    je .c_help
     jmp .def
 .c_settings:
     invoke settings_show, rsi
@@ -2087,6 +2128,9 @@ frame_proc:
     jmp .ok0
 .c_about:
     invoke msgbox, rsi, &s_about, MB_OK|MB_ICONINFO
+    jmp .ok0
+.c_help:
+    invoke help_open, rsi
 .ok0:
     xor eax, eax
     EPILOG 256
