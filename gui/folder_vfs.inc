@@ -181,6 +181,10 @@ fold_side_path:
     mov eax, 1
     EPILOG 1600
 .virt:
+    invoke wcslen, r13
+    invoke vt_safe_name, r13, rax
+    test eax, eax
+    jz .fail
     mov [rsp+1560], r13              ; the original relative name
     cmp qword [rbx+F_KIND+r12*8], 2
     je .tmp
@@ -196,7 +200,11 @@ fold_side_path:
     jz .fail
     mov rdi, rax
 .tmp:
-    invoke GetTempPathW, 400, &rsp+96
+    invoke GetTempPathW, 360, &rsp+96
+    test eax, eax
+    jz .fail
+    cmp eax, 360
+    jae .fail
     invoke wcscat, &rsp+96, &s_tmpdir
     invoke CreateDirectoryW, &rsp+96, 0
     mov r15d, 'A'
@@ -207,8 +215,20 @@ fold_side_path:
     call GetCurrentProcessId
     mov ebp, eax
     invoke _snwprintf, r14, 519, &f_tmpuniq, &rsp+96, rbp, rbx, r15   ; <tmp>\<pid>_<session>\A
-    invoke SHCreateDirectoryExW, 0, r14, 0
     invoke wcslen, r14
+    mov [rsp+1552], rax
+    invoke wcslen, r13
+    add rax, [rsp+1552]
+    add rax, 2                      ; separator + terminator within out wchar[520]
+    cmp rax, 520
+    ja .fail
+    invoke SHCreateDirectoryExW, 0, r14, 0
+    test eax, eax
+    jz .rootready
+    cmp eax, 183                    ; ERROR_ALREADY_EXISTS
+    jne .fail
+.rootready:
+    mov rax, [rsp+1552]
     lea r15, [r14+rax*2]
     mov word [r15], 0x5C
     invoke wcscpy, &r15+2, r13       ; keep the relative path
@@ -217,6 +237,11 @@ fold_side_path:
     mov word [rbp], 0
     invoke SHCreateDirectoryExW, 0, r14, 0
     mov word [rbp], 0x5C
+    test eax, eax
+    jz .parentready
+    cmp eax, 183
+    jne .fail
+.parentready:
     cmp qword [rbx+F_KIND+r12*8], 2
     je .dl
     invoke zip_extract, rsi, rdi, r14

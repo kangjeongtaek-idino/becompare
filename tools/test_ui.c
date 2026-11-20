@@ -384,6 +384,7 @@ static void tabRowChecks(void){
 /* Preferences are driven through real controls while the main thread runs its modal loop. */
 extern wchar_t g_ini[];
 extern void lh_keep(const wchar_t*);
+extern void lh_show(HWND,const wchar_t*);
 static HWND prefsWindow;
 static void prefsSnapshot(HWND h,const wchar_t*path){
  RECT r;GetClientRect(h,&r);HDC screen=GetDC(h),dc=CreateCompatibleDC(screen);BITMAPINFO bi;memset(&bi,0,sizeof bi);bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=r.right;bi.bmiHeader.biHeight=-r.bottom;bi.bmiHeader.biPlanes=1;bi.bmiHeader.biBitCount=32;
@@ -442,6 +443,10 @@ static void preferencesChecks(void){
  wchar_t probe[1200];GetFullPathNameW(L"preferences-history.txt",1200,probe,NULL);
  for(int i=0;i<5;i++){putfile(probe,"recorded version");HANDLE f=CreateFileW(probe,FILE_WRITE_ATTRIBUTES,FILE_SHARE_READ,NULL,OPEN_EXISTING,0,NULL);ULONGLONG value=133000000000000000ull+(ULONGLONG)i*10000000;FILETIME time={(DWORD)value,(DWORD)(value>>32)};SetFileTime(f,NULL,NULL,&time);CloseHandle(f);lh_keep(probe);}
  check(historyCount(probe)==3,"local history actually enforces the configured version count");
+ WritePrivateProfileStringW(L"History",L"MaxVersions",L"40",g_ini);
+ for(int i=5;i<45;i++){putfile(probe,"recorded version");HANDLE h=CreateFileW(probe,FILE_WRITE_ATTRIBUTES,FILE_SHARE_READ,NULL,OPEN_EXISTING,0,NULL);ULONGLONG value=133000000000000000ull+(ULONGLONG)i*10000000;FILETIME time={(DWORD)value,(DWORD)(value>>32)};SetFileTime(h,NULL,NULL,&time);CloseHandle(h);lh_keep(probe);}
+ menuAnswer=0;menuShown=0;lh_show(frame,probe);check(historyCount(probe)==40&&menuShown==40,"history menu exposes all versions when the configured limit exceeds thirty");
+ WritePrivateProfileStringW(L"History",L"MaxVersions",L"3",g_ini);lh_keep(probe);
  WritePrivateProfileStringW(L"History",L"Enabled",L"0",g_ini);putfile(probe,"a later version");lh_keep(probe);check(historyCount(probe)==3,"turning history off leaves existing versions intact");
  WritePrivateProfileStringW(L"History",L"Enabled",L"1",g_ini);
  GetFullPathNameW(L"preferences-large.txt",1200,probe,NULL);FILE*f=_wfopen(probe,L"wb");if(f){fseek(f,2*1024*1024,SEEK_SET);fputc('x',f);fclose(f);}lh_keep(probe);

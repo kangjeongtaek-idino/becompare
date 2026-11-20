@@ -17,6 +17,7 @@ extern fs_before_commit, co_file_lock, co_file_unlock
 global safe_write2
 global safe_writev
 global sb_init, sb_append, sb_append_esc, sb_free, write_utf8, read_file_bytes, lower_w
+global read_file_bytes_limit
 
 section .rdata
 WSTR s_tmp_prefix, "BCA"
@@ -635,9 +636,14 @@ write_utf8:
 
 ; read_file_bytes(rcx=path, rdx=&size) -> rax = buffer (size+4 bytes, zero padded) or 0
 read_file_bytes:
+    mov r8, -1
+; read_file_bytes_limit(path, size*, limit): reject oversized input before allocating.
+read_file_bytes_limit:
     PROLOG 160
     mov r12, rcx
     mov r13, rdx
+    mov [rsp+112], r8
+    mov qword [r13], 0
     invoke CreateFileW, r12, GENERIC_READ, 3, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0
     cmp rax, -1
     je .fail
@@ -646,7 +652,11 @@ read_file_bytes:
     test eax, eax
     jz .close
     mov rdi, [rsp+96]
-    mov [r13], rdi
+    cmp rdi, [rsp+112]
+    ja .close
+    mov rax, -5
+    cmp rdi, rax
+    ja .close
     lea rcx, [rdi+4]
     call malloc
     test rax, rax
@@ -669,7 +679,7 @@ read_file_bytes:
     jz .rderr
     mov eax, [rsp+104]
     test eax, eax
-    jz .got                          ; the file got shorter meanwhile
+    jz .rderr                        ; a disappearing tail is not a complete read
     add r14, rax
     jmp .rd
 .got:

@@ -67,6 +67,9 @@ ftp_open:
     jae .usd
     cmp word [rcx], ':'
     je .pw
+    lea rax, [r13+518]
+    cmp rdx, rax
+    jae .fail
     movzx eax, word [rcx]
     mov [rdx], ax
     add rdx, 2
@@ -79,6 +82,9 @@ ftp_open:
 .pwl:
     cmp rcx, rbp
     jae .usd
+    lea rax, [r14+518]
+    cmp rdx, rax
+    jae .fail
     movzx eax, word [rcx]
     mov [rdx], ax
     add rdx, 2
@@ -104,6 +110,9 @@ ftp_open:
     jae .hld
     cmp word [rcx], ':'
     je .port
+    lea rax, [r15+518]
+    cmp rdx, rax
+    jae .fail
     movzx eax, word [rcx]
     mov [rdx], ax
     add rdx, 2
@@ -112,27 +121,40 @@ ftp_open:
 .port:
     mov word [rdx], 0
     add rcx, 2
+    cmp rcx, rdi
+    jae .fail
     xor eax, eax
 .pl:
     cmp rcx, rdi
     jae .pld
     movzx edx, word [rcx]
     sub edx, '0'
+    cmp edx, 9
+    ja .fail
     imul eax, eax, 10
     add eax, edx
+    cmp eax, 65535
+    ja .fail
     add rcx, 2
     jmp .pl
 .pld:
+    test eax, eax
+    jz .fail
     mov [rsp+FT_PORT], eax
     jmp .path
 .hld:
     mov word [rdx], 0
 .path:
+    cmp word [r15], 0
+    je .fail
     ; remote path (default "/"), without a trailing slash
     lea r13, [rsp+FT_PATH]
     mov word [r13], 0
     cmp word [rdi], 0
     je .pathd
+    invoke wcslen, rdi
+    cmp rax, 519
+    ja .fail
     invoke wcscpy, r13, rdi
 .pathd:
     invoke wcslen, r13

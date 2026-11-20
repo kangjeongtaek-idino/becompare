@@ -219,9 +219,17 @@ lh_show:
     mov r12d, eax
     test eax, eax
     jz .none
-    cmp r12d, LH_MAX
+    invoke GetPrivateProfileIntW, &s_lh_section, &s_lh_max, LH_MAX, &g_ini
+    cmp eax, 1
+    jb .default_count
+    cmp eax, 100
+    jbe .count
+.default_count:
+    mov eax, LH_MAX
+.count:
+    cmp r12d, eax
     jbe .menu
-    mov r12d, LH_MAX
+    mov r12d, eax
 .menu:
     call CreatePopupMenu
     mov r13, rax

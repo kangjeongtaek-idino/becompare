@@ -4,10 +4,14 @@
 
 extern malloc, free, memcpy, memset, wcslen, wcscpy, _wcsicmp, _wcsnicmp, _wcstoui64, qsort, realloc
 extern MultiByteToWideChar, DosDateTimeToFileTime, LocalFileTimeToFileTime, CreateFileW, WriteFile, CloseHandle
-extern read_file_bytes, vec_push, str_dup, text_load, lines_split
+extern read_file_bytes_limit, safe_write2, vec_push, str_dup, text_load, lines_split
 extern inflate_buf, crc32_update
 
 global zip_open, zip_extract, snap_open, vt_enum, vt_free
+global vt_safe_name
+
+%define ZIP_INPUT_LIMIT 0x20000000  ; whole archive is resident: 512 MiB
+%define ZIP_ENTRY_LIMIT 0x10000000  ; one extraction buffer: 256 MiB
 
 ; VT { ve*, count, data*, datasize, kind }
 %define VT_VE    0
@@ -36,6 +40,8 @@ section .rdata
 WSTR s_hdr, "BCSS1"
 
 section .text
+
+%include "vtab_path.inc"
 
 ; cmp_ve(a, b): by name (case-insensitive); real entries before implied ones
 cmp_ve:
@@ -114,7 +120,9 @@ vt_sort:
 vt_implied:
     PROLOG 2400
     mov rbx, rcx
+    invoke vt_sort, rbx              ; common parents are adjacent, so create each only once
     mov r12, [rbx+VT_N]              ; only the original entries
+    mov qword [rsp+80], 0            ; prior original name (strings do not move with the vector)
     xor esi, esi
 .e:
     cmp rsi, r12
@@ -123,6 +131,7 @@ vt_implied:
     imul rax, VE_BYTES
     add rax, [rbx+VT_VE]
     mov rdi, [rax+VE_NAME]
+    mov [rsp+88], rdi
     xor ecx, ecx
 .c:
     movzx eax, word [rdi+rcx*2]
@@ -134,6 +143,14 @@ vt_implied:
     ja .cn
     ; prefix [0, ecx) is a directory
     mov r13, rcx
+    cmp qword [rsp+80], 0
+    je .add
+    lea r8, [r13+1]                  ; include the separator: 'a' must not match 'ab'
+    invoke _wcsnicmp, rdi, [rsp+80], r8
+    mov rcx, r13
+    test eax, eax
+    jz .cn
+.add:
     lea rdx, [rsp+96]
     mov r8, rcx
     shl r8, 1
@@ -154,6 +171,8 @@ vt_implied:
     inc rcx
     jmp .c
 .next:
+    mov rax, [rsp+88]
+    mov [rsp+80], rax
     inc rsi
     jmp .e
 .d:
@@ -166,7 +185,7 @@ zip_open:
     mov r12, rcx
     mov rbx, rdx
     invoke memset, rbx, 0, VT_STRUCT
-    invoke read_file_bytes, r12, &rbx+VT_SIZE
+    invoke read_file_bytes_limit, r12, &rbx+VT_SIZE, ZIP_INPUT_LIMIT
     mov [rbx+VT_DATA], rax
     test rax, rax
     jz .fail
@@ -184,14 +203,31 @@ zip_open:
     mov r13, rax
 .eocd:
     cmp dword [rsi+rcx], 0x06054b50
-    je .found
+    je .candidate
+.previous:
     cmp rcx, r13
     jbe .fail
     dec rcx
     jmp .eocd
+.candidate:
+    movzx eax, word [rsi+rcx+20]
+    lea rax, [rcx+rax+22]
+    cmp rax, rdi                    ; do not mistake a signature inside the comment for the EOCD
+    jne .previous
 .found:
+    cmp dword [rsi+rcx+4], 0        ; single disk only
+    jne .fail
     movzx r14d, word [rsi+rcx+10]    ; total entries
+    cmp r14w, [rsi+rcx+8]
+    jne .fail
+    cmp r14d, 0xFFFF                ; ZIP64 is not supported
+    je .fail
     mov r15d, [rsi+rcx+16]           ; central directory offset
+    mov eax, [rsi+rcx+12]
+    add rax, r15
+    cmp rax, rcx                    ; all central records must fit exactly before the EOCD
+    jne .fail
+    mov [rsp+152], rcx              ; central directory end
     lea rbp, [rsi+r15]               ; cursor
     mov [rsp+96], r14
 .entry:
@@ -203,12 +239,26 @@ zip_open:
     mov rax, rbp
     sub rax, rsi
     add rax, 46
-    cmp rax, rdi
-    ja .built
+    cmp rax, [rsp+152]
+    ja .fail
     cmp dword [rbp], 0x02014b50
-    jne .built
+    jne .fail
     movzx r8d, word [rbp+8]          ; flags
+    test r8d, 0x2041                ; traditional/strong encryption or masked header
+    jnz .fail
+    cmp word [rbp+34], 0            ; entry's disk number
+    jne .fail
     movzx r9d, word [rbp+10]         ; method
+    cmp r9d, 8
+    je .method
+    test r9d, r9d
+    jnz .fail
+    mov eax, [rbp+20]
+    cmp eax, [rbp+24]
+    jne .fail
+.method:
+    cmp dword [rbp+24], ZIP_ENTRY_LIMIT
+    ja .fail
     movzx r10d, word [rbp+28]        ; name length
     movzx r11d, word [rbp+30]
     movzx eax, word [rbp+32]
@@ -221,8 +271,8 @@ zip_open:
     mov rax, rbp                     ; the whole record (its name) must lie inside the file
     sub rax, rsi
     add rax, rcx
-    cmp rax, rdi
-    ja .built
+    cmp rax, [rsp+152]
+    ja .fail
     ; name -> wide
     mov ecx, CP_UTF8
     test r8d, 0x800
@@ -232,12 +282,18 @@ zip_open:
     lea rdx, [rbp+46]
     mov [rsp+136], rdx
     mov [rsp+144], rcx
-    invoke MultiByteToWideChar, [rsp+144], 0, [rsp+136], [rsp+120], 0, 0
+    invoke MultiByteToWideChar, [rsp+144], 8, [rsp+136], [rsp+120], 0, 0
+    test eax, eax
+    jz .fail
+    cmp eax, 512
+    ja .fail
     mov r13, rax
     lea rcx, [rax*2+8]
     call malloc
     mov r14, rax
-    invoke MultiByteToWideChar, [rsp+144], 0, [rsp+136], [rsp+120], r14, r13
+    invoke MultiByteToWideChar, [rsp+144], 8, [rsp+136], [rsp+120], r14, r13
+    test eax, eax
+    jz .badname
     mov word [r14+r13*2], 0
     ; '/' -> '\'
     xor ecx, ecx
@@ -253,12 +309,16 @@ zip_open:
 .sld:
     xor r15d, r15d                   ; attr
     test r13, r13
-    jz .skip
+    jz .badname
     cmp word [r14+r13*2-2], 0x5C
     jne .nodir
     mov word [r14+r13*2-2], 0
+    dec r13
     mov r15d, FILE_ATTRIBUTE_DIRECTORY
 .nodir:
+    invoke vt_safe_name, r14, r13
+    test eax, eax
+    jz .badname
     invoke ve_new, rbx
     mov rdi, rax
     mov [rdi+VE_NAME], r14
@@ -281,14 +341,19 @@ zip_open:
     mov rsi, [rbx+VT_DATA]
     mov rdi, [rbx+VT_SIZE]
     jmp .adv
-.skip:
+.badname:
     invoke free, r14
+    jmp .fail
 .adv:
     mov rsi, [rbx+VT_DATA]
     mov rdi, [rbx+VT_SIZE]
     add rbp, [rsp+128]
     jmp .entry
 .built:
+    mov rax, rbp
+    sub rax, rsi
+    cmp rax, [rsp+152]
+    jne .fail
     invoke vt_implied, rbx
     invoke vt_sort, rbx
     mov qword [rbx+VT_KIND], 0
@@ -305,6 +370,9 @@ zip_extract:
     mov rbx, rcx
     mov rsi, rdx
     mov r12, r8
+    mov qword [rsp+96], 0
+    test dword [rsi+VE_ATTR], FILE_ATTRIBUTE_DIRECTORY
+    jnz .fail
     mov rdi, [rbx+VT_DATA]
     mov rax, [rsi+VE_LHO]
     lea rcx, [rax+30]
@@ -312,6 +380,12 @@ zip_extract:
     ja .fail
     cmp dword [rdi+rax], 0x04034b50
     jne .fail
+    test word [rdi+rax+6], 0x2041
+    jnz .fail
+    movzx ecx, word [rdi+rax+8]
+    cmp ecx, [rsi+VE_METH]
+    jne .fail
+    lea rcx, [rax+30]
     movzx edx, word [rdi+rax+26]
     movzx r8d, word [rdi+rax+28]
     lea r13, [rcx+rdx]
@@ -322,6 +396,8 @@ zip_extract:
     ja .fail
     lea r15, [rdi+r13]               ; compressed data
     mov rbp, [rsi+VE_SIZE]
+    cmp rbp, ZIP_ENTRY_LIMIT
+    ja .fail
     cmp dword [rsi+VE_METH], 0
     je .stored
     cmp dword [rsi+VE_METH], 8
@@ -334,30 +410,23 @@ zip_extract:
     invoke inflate_buf, r15, r14, rax, rbp
     test eax, eax
     jz .fail2
-    mov rbp, rdx                     ; what was produced, not the size the directory claims
+    cmp rbp, rdx
+    jne .fail2
     mov r15, [rsp+96]
     jmp .write
 .stored:
-    mov rbp, r14
+    cmp rbp, r14
+    jne .fail
 .write:
-    invoke CreateFileW, r12, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0
-    cmp rax, -1
-    je .fail2
-    mov r13, rax
-    test rbp, rbp
-    jz .close
-    invoke WriteFile, r13, r15, rbp, &rsp+104, 0
-.close:
-    invoke CloseHandle, r13
-    cmp dword [rsi+VE_METH], 8
-    jne .ok
+    invoke crc32_update, 0, r15, rbp
+    cmp eax, [rsi+VE_CRC]
+    jne .fail2
+    invoke safe_write2, r12, r15, rbp, 0, 0
+    mov ebp, eax
     invoke free, [rsp+96]
-.ok:
-    mov eax, 1
+    mov eax, ebp
     EPILOG 256
 .fail2:
-    cmp dword [rsi+VE_METH], 8
-    jne .fail
     invoke free, [rsp+96]
 .fail:
     xor eax, eax
@@ -371,6 +440,7 @@ snap_open:
     PROLOG 256
     mov rbx, rdx
     mov rsi, rcx
+    mov qword [rsp+N_LNS], 0
     invoke memset, rbx, 0, VT_STRUCT
     invoke text_load, rsi, &rsp+N_TXT
     test eax, eax
@@ -392,6 +462,8 @@ snap_open:
     jae .built
     mov rax, [rsp+N_LNS]
     mov rsi, [rax+r12*8]             ; line
+    cmp word [rsi], 0               ; allow blank lines, including the final CRLF
+    je .skip
     ; fields split on TAB (in place)
     mov rdi, rsi
     xor r13d, r13d                   ; field number
@@ -415,7 +487,24 @@ snap_open:
     jmp .f
 .fd:
     cmp r13d, 5
-    jb .skip
+    jb .fail
+    mov rsi, [r14]
+    invoke wcslen, rsi
+    mov rdi, rax
+    xor ecx, ecx
+.slash:
+    cmp rcx, rdi
+    jae .checkname
+    cmp word [rsi+rcx*2], '/'
+    jne .slashnext
+    mov word [rsi+rcx*2], 0x5C
+.slashnext:
+    inc rcx
+    jmp .slash
+.checkname:
+    invoke vt_safe_name, rsi, rdi
+    test eax, eax
+    jz .fail
     invoke ve_new, rbx
     mov r15, rax
     mov rsi, [r14]
@@ -444,6 +533,7 @@ snap_open:
     mov eax, 1
     EPILOG 256
 .fail:
+    invoke free, [rsp+N_LNS]
     invoke vt_free, rbx
     xor eax, eax
     EPILOG 256

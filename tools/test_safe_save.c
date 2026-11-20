@@ -9,6 +9,7 @@ extern int text_save(const wchar_t*,const wchar_t*,uint64_t,uint64_t);
 extern int safe_write2(const wchar_t*,const void*,uint64_t,const void*,uint64_t);
 extern int bc_snwprintf(wchar_t*,uint64_t,const wchar_t*,...);
 extern void *read_file_bytes(const wchar_t*,uint64_t*);
+extern void *read_file_bytes_limit(const wchar_t*,uint64_t*,uint64_t);
 struct block{const void*p;uint64_t n;};
 extern int safe_writev(const wchar_t*,const struct block*,uint64_t);
 /* the converter hooks of textlib.asm are not part of this unit test */
@@ -24,7 +25,8 @@ static int reads;
 BOOL WINAPI __wrap_ReadFile(HANDLE h,LPVOID p,DWORD n,LPDWORD got,LPOVERLAPPED ov){
  reads++;
  if(fault==6&&reads==3){*got=0;SetLastError(ERROR_READ_FAULT);return FALSE;}
- if((fault==5||fault==6)&&n>1000)n=1000;
+ if(fault==7&&reads==3){*got=0;return TRUE;}
+ if((fault==5||fault==6||fault==7)&&n>1000)n=1000;
  return __real_ReadFile(h,p,n,got,ov);
 }
 BOOL WINAPI __wrap_WriteFile(HANDLE h,LPCVOID p,DWORD n,LPDWORD written,LPOVERLAPPED ov){
@@ -64,7 +66,10 @@ int main(void){
   unsigned char*b=read_file_bytes(L"read.bin",&n);check(b&&n==5000&&!memcmp(b,src,5000)&&!b[5000],"read whole file");free(b);
   fault=5;reads=0;n=0;b=read_file_bytes(L"read.bin",&n);fault=0;check(b&&n==5000&&!memcmp(b,src,5000)&&reads>=5,"short reads are continued");free(b);
   fault=6;reads=0;n=77;b=read_file_bytes(L"read.bin",&n);fault=0;check(!b&&n==0,"failed read returns nothing");free(b);
-  n=77;b=read_file_bytes(L"no-such-file.bin",&n);check(!b,"missing file returns nothing");
+  fault=7;reads=0;n=77;b=read_file_bytes(L"read.bin",&n);fault=0;check(!b&&n==0,"file shrinking during read never returns truncated content");free(b);
+  reads=0;n=77;b=read_file_bytes_limit(L"read.bin",&n,4999);check(!b&&n==0&&reads==0,"input limit is enforced before allocation or reading");free(b);
+  n=77;b=read_file_bytes_limit(L"read.bin",&n,5000);check(b&&n==5000&&!memcmp(b,src,5000),"input exactly at the limit is accepted");free(b);
+  n=77;b=read_file_bytes(L"no-such-file.bin",&n);check(!b&&n==0,"missing file resets the output size");
   f=fopen("read0.bin","wb");fclose(f);n=77;b=read_file_bytes(L"read0.bin",&n);check(b&&n==0,"empty file reads as empty");free(b);}
  /* safe_writev: blocks are written one after the other, an empty block in between is fine */
  {struct block bl[3]={{"head-",5},{NULL,0},{"-tail",5}};seed();

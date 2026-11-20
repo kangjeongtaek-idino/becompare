@@ -11,6 +11,9 @@ extern int view_can_close(HWND);
 extern LRESULT frame_proc(HWND,UINT,WPARAM,LPARAM);
 extern uint64_t g_nsess;extern void* g_sess[];
 extern int fs_watch(const void*,const wchar_t*);
+extern int ftp_open(void*,int,const wchar_t*),fold_side_path(void*,int,const wchar_t*,wchar_t*);
+static int networkCalls;
+HANDLE WINAPI __wrap_InternetOpenW(const wchar_t*a,DWORD b,const wchar_t*c,const wchar_t*d,DWORD e){networkCalls++;return NULL;}
 static int workerBusy,destroyCalls,timerCalls;
 BOOL WINAPI __wrap_DestroyWindow(HWND h){destroyCalls++;return TRUE;}
 BOOL WINAPI __wrap_EnableWindow(HWND h,BOOL e){return TRUE;}
@@ -45,6 +48,18 @@ LRESULT WINAPI __wrap_SendMessageW(HWND h,UINT m,WPARAM w,LPARAM l){
 }
 static void initText(void){memset(sess,0,sizeof sess);memset(tv,0,sizeof tv);q(sess,SS_DATA,(uintptr_t)tv);q(tv,TV_HA,201);q(tv,TV_HB,202);d(tv,TV_LDA,1);d(tv,TV_LDB,1);wcscpy((wchar_t*)(tv+TV_PATHA),L"left.txt");wcscpy((wchar_t*)(tv+TV_PATHB),L"right.txt");q(tv,TV_TXA,(uintptr_t)calloc(16,1));q(tv,TV_TXB,(uintptr_t)calloc(16,1));d(tv,TV_TXA+16,1);d(tv,TV_TXB+16,1);wcscpy(pane[0],L"updated");wcscpy(pane[1],L"updated");}
 int main(void){
+ {unsigned char state[F_SIZE]={0};wchar_t url[1600],part[700];
+  for(int i=0;i<600;i++)part[i]=L'a';part[600]=0;
+  const wchar_t*bad[]={L"ftp://host:0/",L"ftp://host:/",L"ftp://host:65536/",L"ftp://host:-1/",L"ftp://host:21x/",L"ftp:///path",L"ftp://host:999999999999999999/"};
+  for(size_t i=0;i<sizeof bad/sizeof *bad;i++){networkCalls=0;check(!ftp_open(state,0,bad[i])&&!networkCalls,"invalid FTP authority rejected before networking");}
+  const wchar_t*formats[]={L"ftp://%ls@host/",L"ftp://user:%ls@host/",L"ftp://%ls/",L"ftp://host/%ls"};
+  for(int i=0;i<4;i++){swprintf(url,1600,formats[i],part);networkCalls=0;check(!ftp_open(state,0,url)&&!networkCalls,"oversized FTP component rejected before networking");}
+  networkCalls=0;ftp_open(state,0,L"ftp://user:pass@host:65535/path");check(networkCalls==1,"valid FTP fields reach the network layer");
+  q(state,F_KIND,2);struct{wchar_t path[520];uint64_t guard;}out;memset(&out,0,sizeof out);out.guard=0x123456789abcdef0ull;
+  check(!fold_side_path(state,0,L"..\\outside.txt",out.path)&&out.guard==0x123456789abcdef0ull,"virtual extraction rejects path traversal");
+  for(int i=0;i<500;i++)part[i]=(i%10==9?L'\\':L'a');part[500]=L'x';part[501]=0;
+  check(!fold_side_path(state,0,part,out.path)&&out.guard==0x123456789abcdef0ull,"combined extraction path cannot overflow its output buffer");
+ }
  closeMode=1;dirty[0]=0;dirty[1]=0;prompts=0;check(view_can_close((HWND)999)&&!prompts,"clean view closes without prompt");
  dirty[0]=1;answer=IDCANCEL;check(!view_can_close((HWND)999)&&dirty[0],"cancel preserves unsaved view");
  answer=IDNO;check(view_can_close((HWND)999)&&dirty[0],"discard allows close");

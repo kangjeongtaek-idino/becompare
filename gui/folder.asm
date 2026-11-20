@@ -22,6 +22,7 @@ extern th_type, th_diff
 %define CBN_SELCHANGE 1
 extern InternetOpenW, InternetConnectW, FtpFindFirstFileW, InternetFindNextFileW, InternetCloseHandle, FtpGetFileW
 extern vt_enum, vt_free, zip_open, snap_open, zip_extract, crc32_update, GetTempPathW
+extern vt_safe_name
 extern g_hinst, g_font, g_dark, th_bg, th_fg, th_panel, th_diff, th_lonly, th_ronly, th_type, th_same
 extern th_panelbrush, th_bgbrush
 extern mk, reg_class, scl, set_status, msgbox, browse_save
