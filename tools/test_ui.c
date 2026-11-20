@@ -1301,6 +1301,19 @@ static DWORD WINAPI watcher(void*arg){
   SendMessageW(ra,EM_UNDO,0,0);SendMessageW(ra,EM_SETMODIFY,m0,0);
   check(GetWindowTextLengthW(ra)==l0,"the typed indent is taken back");
   caretTo(1);}
+ /* Alt+Up in an editor pane extends the selection to the word at the caret, Alt+Down takes the step back */
+ {int m0=(int)SendMessageW(ra,EM_GETMODIFY,0,0),l0=GetWindowTextLengthW(ra);CHARRANGE r,q;
+  SendMessageW(ra,EM_EXGETSEL,0,(LPARAM)&r);SendMessageW(ra,EM_REPLACESEL,1,(LPARAM)L"(zz9) ");
+  q.cpMin=q.cpMax=r.cpMin+2;SendMessageW(ra,EM_EXSETSEL,0,(LPARAM)&q);
+  PostMessageW(ra,WM_SYSKEYDOWN,VK_UP,0x20000000);Sleep(300);SendMessageW(ra,EM_EXGETSEL,0,(LPARAM)&q);
+  check(q.cpMin==r.cpMin+1&&q.cpMax==r.cpMin+4,"Alt+Up selects the word at the caret");
+  PostMessageW(ra,WM_SYSKEYDOWN,VK_UP,0x20000000);Sleep(300);SendMessageW(ra,EM_EXGETSEL,0,(LPARAM)&q);
+  check(q.cpMin==r.cpMin&&q.cpMax==r.cpMin+5,"Alt+Up again takes the brackets around it in");
+  PostMessageW(ra,WM_SYSKEYDOWN,VK_DOWN,0x20000000);Sleep(300);SendMessageW(ra,EM_EXGETSEL,0,(LPARAM)&q);
+  check(q.cpMin==r.cpMin+1&&q.cpMax==r.cpMin+4,"Alt+Down goes back to the word");
+  SendMessageW(ra,EM_UNDO,0,0);SendMessageW(ra,EM_SETMODIFY,m0,0);
+  check(GetWindowTextLengthW(ra)==l0,"the typed brackets are taken back");
+  caretTo(1);}
  /* a caret inside a block: F7 leaves the block, Shift+F7 from below returns to its first row */
  caretTo(4);
  check(key(VK_F7,0,5),"F7 from an unchanged row goes to the next difference below");

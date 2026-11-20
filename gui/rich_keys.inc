@@ -15,6 +15,9 @@
 ;                       bracket, to the opening bracket around the caret)
 ;   Enter               the new line starts with the indent of the line it comes from; behind ( [ { one
 ;                       level more, and a closing partner at the caret goes to a line of its own below
+;   Alt+Up              extend the selection: the word at the caret, what stands between the brackets
+;                       around it, the brackets too, the line without its blanks, the line, ... everything
+;   Alt+Down            shrink it again, step by step
 ;   Home                to the first character of the line that is not a blank; from there to the line start
 ;   Shift+Enter         start a new line below the line of the caret, wherever the caret is in it
 ;   Ctrl+Alt+Enter      start a new line above the line of the caret
@@ -740,6 +743,35 @@ rk_pair_back:
     xor eax, eax
     EPILOG 128
 
+; ---------------------------------------------------------------- extend / shrink the selection
+section .bss
+rk_sx_h:  resq 1                     ; the pane the steps belong to
+rk_sx_n:  resd 1
+rk_sx_st: resd 16*4                  ; {selection before: start, end; selection after: start, end}
+section .text
+
+; rk_cand(ecx = start, edx = end, r8 = dword[4]: selection start, end, best start, best end): the range
+;   becomes the best one when it holds the selection, is longer than it and shorter than the best (leaf)
+rk_cand:
+    cmp ecx, [r8]
+    ja .d
+    cmp edx, [r8+4]
+    jb .d
+    mov eax, edx
+    sub eax, ecx
+    mov r9d, [r8+4]
+    sub r9d, [r8]
+    cmp eax, r9d
+    jbe .d
+    mov r9d, [r8+12]
+    sub r9d, [r8+8]
+    cmp eax, r9d
+    jae .d
+    mov [r8+8], ecx
+    mov [r8+12], edx
+.d:
+    ret
+
 ; rich_key(hwnd, virtual key, modifiers 1 Ctrl | 2 Shift | 4 Alt) -> eax 1 when the key was one of the
 ;   line editing keys and the window is an editable RichEdit pane (the key is used up then)
 rich_key:
@@ -807,7 +839,16 @@ rich_key:
     jmp .arrow
 .k6:
     cmp r13d, 6
+    je .arrow
+    cmp r13d, 4
     jne .no
+    mov esi, 16                      ; 16 extend the selection, 17 shrink it
+    cmp r12d, 0x26
+    je .is
+    mov esi, 17
+    cmp r12d, 0x28
+    je .is
+    jmp .no
 .arrow:
     mov esi, 4
     cmp r12d, 0x26                   ; VK_UP
@@ -850,6 +891,10 @@ rich_key:
     je .brace
     cmp esi, 15
     je .home
+    cmp esi, 16
+    je .extend
+    cmp esi, 17
+    je .shrink
     cmp esi, 14
     jne .nl
     invoke rk_pair_back, rbx         ; ---- Backspace
@@ -1293,6 +1338,193 @@ rich_key:
     mov [rsp+RK_SEL+4], r8d
     invoke SendMessageW, rbx, EM_EXSETSEL, 0, &rsp+RK_SEL
     invoke SendMessageW, rbx, EM_SCROLLCARET, 0, 0
+    jmp .done
+
+    ; ---- Alt+Down: back to the selection the last Alt+Up started from
+.shrink:
+    cmp [rk_sx_h], rbx
+    jne .done
+    mov eax, [rk_sx_n]
+    test eax, eax
+    jz .done
+    dec eax
+    shl eax, 4
+    lea r8, [rk_sx_st]
+    cmp [r8+rax+8], r14d             ; the selection was changed since: the steps are forgotten
+    jne .sxclr
+    cmp [r8+rax+12], r15d
+    jne .sxclr
+    mov ecx, [r8+rax]
+    mov [rsp+RK_SEL], ecx
+    mov ecx, [r8+rax+4]
+    mov [rsp+RK_SEL+4], ecx
+    dec dword [rk_sx_n]
+    invoke SendMessageW, rbx, EM_EXSETSEL, 0, &rsp+RK_SEL
+    jmp .done
+.sxclr:
+    mov dword [rk_sx_n], 0
+    jmp .done
+
+    ; ---- Alt+Up: the next larger unit around the selection
+.extend:
+    mov dword [rsp+RK_A], 0          ; GETTEXTLENGTHEX: characters, UTF-16
+    mov dword [rsp+RK_B], 1200
+    invoke SendMessageW, rbx, 0x045F, &rsp+RK_A, 0
+    mov edi, eax                     ; length of the text
+    mov eax, r15d
+    sub eax, r14d
+    cmp eax, edi                     ; everything is selected already
+    jae .done
+    invoke rk_get, rbx, 0, rdi
+    mov [rsp+RK_T], rax
+    mov rsi, rax
+    lea r12, [rsp+RK_CLS]            ; selection and best range; the whole text to begin with
+    mov [r12], r14d
+    mov [r12+4], r15d
+    mov dword [r12+8], 0
+    mov [r12+12], edi
+    cmp r14d, r15d                   ; a caret: the word it stands in or at
+    jne .xbr
+    mov r13d, r14d
+.xw1:
+    test r13d, r13d
+    jz .xw2
+    movzx ecx, word [rsi+r13*2-2]
+    call rk_isword
+    test eax, eax
+    jz .xw2
+    dec r13d
+    jmp .xw1
+.xw2:
+    mov edx, r14d
+.xw3:
+    cmp edx, edi
+    jae .xw4
+    movzx ecx, word [rsi+rdx*2]
+    call rk_isword
+    test eax, eax
+    jz .xw4
+    inc edx
+    jmp .xw3
+.xw4:
+    mov ecx, r13d
+    mov r8, r12
+    call rk_cand
+.xbr:                                ; the brackets around the selection: what is between them, then with them
+    mov r13d, r14d
+    xor r10d, r10d                   ; closing brackets passed on the way back
+.xb1:
+    test r13d, r13d
+    jz .xline
+    dec r13d
+    movzx ecx, word [rsi+r13*2]
+    call rk_br
+    test eax, eax
+    jz .xb1
+    cmp eax, 2
+    jne .xb2
+    inc r10d
+    jmp .xb1
+.xb2:
+    test r10d, r10d
+    jz .xb3
+    dec r10d
+    jmp .xb1
+.xb3:                                ; r13d: the opening bracket
+    mov r11d, r15d
+    xor r10d, r10d
+.xf1:
+    cmp r11d, edi
+    jae .xline
+    movzx ecx, word [rsi+r11*2]
+    call rk_br
+    test eax, eax
+    jz .xf3
+    cmp eax, 1
+    jne .xf2
+    inc r10d
+    jmp .xf3
+.xf2:
+    test r10d, r10d
+    jz .xf4
+    dec r10d
+.xf3:
+    inc r11d
+    jmp .xf1
+.xf4:                                ; r11d: the closing bracket
+    mov [rsp+RK_C], r11d
+    lea ecx, [r13+1]
+    mov edx, r11d
+    mov r8, r12
+    call rk_cand
+    mov ecx, r13d
+    mov edx, [rsp+RK_C]
+    inc edx
+    mov r8, r12
+    call rk_cand
+.xline:                              ; the lines the selection touches: without the blanks around, then whole
+    mov ecx, [rsp+RK_BLK+8]
+    mov edx, [rsp+RK_BLK+12]
+.xl1:
+    cmp ecx, edx
+    jae .xl3
+    movzx eax, word [rsi+rcx*2]
+    cmp eax, 32
+    je .xl2
+    cmp eax, 9
+    jne .xl3
+.xl2:
+    inc ecx
+    jmp .xl1
+.xl3:
+    cmp edx, ecx
+    jbe .xl5
+    movzx eax, word [rsi+rdx*2-2]
+    cmp eax, 32
+    je .xl4
+    cmp eax, 9
+    jne .xl5
+.xl4:
+    dec edx
+    jmp .xl3
+.xl5:
+    mov r8, r12
+    call rk_cand
+    mov ecx, [rsp+RK_BLK+8]
+    mov edx, [rsp+RK_BLK+12]
+    mov r8, r12
+    call rk_cand
+    cmp [rk_sx_h], rbx               ; remember the step for Alt+Down
+    jne .xnew
+    mov eax, [rk_sx_n]
+    test eax, eax
+    jz .xpush
+    dec eax
+    shl eax, 4
+    lea r8, [rk_sx_st]
+    cmp [r8+rax+8], r14d             ; not the selection the last step made: a new start
+    jne .xnew
+    cmp [r8+rax+12], r15d
+    je .xpush
+.xnew:
+    mov [rk_sx_h], rbx
+    mov dword [rk_sx_n], 0
+.xpush:
+    mov eax, [rk_sx_n]
+    cmp eax, 16
+    jae .xset
+    inc dword [rk_sx_n]
+    shl eax, 4
+    lea r8, [rk_sx_st]
+    mov [r8+rax], r14d
+    mov [r8+rax+4], r15d
+    mov ecx, [r12+8]
+    mov [r8+rax+8], ecx
+    mov ecx, [r12+12]
+    mov [r8+rax+12], ecx
+.xset:
+    lea rax, [r12+8]
+    invoke SendMessageW, rbx, EM_EXSETSEL, 0, rax
     jmp .done
 
     ; ---- Home
