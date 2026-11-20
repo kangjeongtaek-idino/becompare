@@ -17,12 +17,15 @@
 ;   Shift+Enter         start a new line below the line of the caret, wherever the caret is in it
 ;   Ctrl+Alt+Enter      start a new line above the line of the caret
 ;   Ctrl+Enter          split the line at the caret; the caret stays where it is
+;   ( [ { " '           put the closing partner behind the caret (rich_char); typing that closing character
+;                       steps over it, Backspace on the opening one takes both away
 ;
 ;   Every action is one replacement through EM_REPLACESEL, so the editor's own undo takes it back in one
 ;   step. A read-only pane (folded / unified view, the merge inputs) does not take the keys.
 
 extern GetClassNameW, _wcsicmp, memcpy, IsCharLowerW, CharUpperBuffW, CharLowerBuffW
-extern GetKeyState
+extern GetKeyState, GetPrivateProfileIntW, g_ini
+global rich_char
 extern GetParent, GetDlgCtrlID, GetDlgItem, GetWindowTextW, wcsrchr, wcsncmp, _snwprintf, wcsstr, wcscpy
 
 global rich_key
@@ -42,6 +45,8 @@ global rich_key
 %define RK_C    200
 
 section .rdata
+WSTR s_rk_editor, "Editor"
+WSTR s_rk_autopair, "AutoPair"
 WSTR s_rk_slash, "//"
 WSTR s_rk_hash, "#"
 WSTR s_rk_semi, ";"
@@ -450,6 +455,289 @@ rk_swap:
     mov rax, rbx
     EPILOG 64
 
+; ---------------------------------------------------------------- paired brackets and quotes
+; The closing characters this file typed itself are remembered as their distance from the end of the
+; text (typing in front of one does not change it). Only such a character is typed over or taken away
+; together with its opening one; a bracket the user typed is never skipped.
+section .bss
+rk_ap_h:    resq 1                   ; the pane the list belongs to
+rk_ap_n:    resd 1
+rk_ap_tail: resd 8
+section .text
+
+; rk_ap_find(rcx = pane, edx = distance from the end) -> eax index in the list, -1 when it is not there
+rk_ap_find:
+    mov eax, -1
+    cmp [rk_ap_h], rcx
+    jne .d
+    lea r8, [rk_ap_tail]
+    mov eax, [rk_ap_n]
+.l:
+    dec eax
+    js .d
+    cmp [r8+rax*4], edx
+    jne .l
+.d:
+    ret
+
+; rk_ctx(h, out dword[4]): caret (-1 with a selection), length of the text, character in front of the
+;   caret (0 at the start), character at the caret (0 at the end)
+rk_ctx:
+    PROLOG 96
+    mov rbx, rcx
+    mov rsi, rdx
+    invoke SendMessageW, rbx, EM_EXGETSEL, 0, &rsp+64
+    mov r12d, [rsp+64]
+    mov dword [rsi], -1
+    cmp r12d, [rsp+68]
+    jne .d
+    mov [rsi], r12d
+    mov dword [rsp+72], 0            ; GETTEXTLENGTHEX: characters, UTF-16
+    mov dword [rsp+76], 1200
+    invoke SendMessageW, rbx, 0x045F, &rsp+72, 0
+    mov [rsi+4], eax
+    xor eax, eax
+    mov [rsi+8], rax
+    mov edx, r12d
+    test edx, edx
+    jz .get
+    dec edx
+.get:
+    lea r8d, [r12+1]
+    cmp r8d, [rsi+4]
+    jbe .rng
+    mov r8d, [rsi+4]
+.rng:
+    invoke rk_get, rbx, rdx, r8
+    mov rdi, rax
+    movzx eax, word [rdi]
+    test r12d, r12d
+    jz .first
+    mov [rsi+8], eax
+    test eax, eax
+    jz .free
+    movzx eax, word [rdi+2]
+.first:
+    mov [rsi+12], eax
+.free:
+    invoke free, rdi
+.d:
+    EPILOG 96
+
+; rk_pair_on() -> eax 0 when [Editor] AutoPair=0 switches the pairs off
+rk_pair_on:
+    PROLOG 64
+    invoke GetPrivateProfileIntW, &s_rk_editor, &s_rk_autopair, 1, &g_ini
+    EPILOG 64
+
+; rk_pane(h) -> eax 1 for an editable RichEdit pane
+rk_pane:
+    PROLOG 128
+    mov rbx, rcx
+    xor esi, esi
+    invoke GetClassNameW, rbx, &rsp+64, 32
+    invoke _wcsicmp, &rsp+64, &cn_rich
+    test eax, eax
+    jnz .d
+    invoke GetWindowLongPtrW, rbx, GWL_STYLE
+    test eax, 0x800                  ; ES_READONLY
+    jnz .d
+    mov esi, 1
+.d:
+    mov eax, esi
+    EPILOG 128
+
+; rich_char(hwnd, character) -> eax 1 when the character was used up: called for WM_CHAR before the pane
+;   sees it.  ( [ { and, away from a word, " ' put their closing partner behind the caret; typing a closing
+;   character that was put there that way steps over it.
+rich_char:
+    PROLOG 128
+    mov rbx, rcx
+    mov r12d, edx
+    xor r13d, r13d                   ; the closing partner; 0: the character is a closing bracket
+    mov esi, 1                       ; 1 opening bracket, 2 closing bracket, 3 quote
+    mov r13d, ')'
+    cmp r12d, '('
+    je .is
+    mov r13d, ']'
+    cmp r12d, '['
+    je .is
+    mov r13d, '}'
+    cmp r12d, '{'
+    je .is
+    mov esi, 3
+    mov r13d, r12d
+    cmp r12d, '"'
+    je .is
+    cmp r12d, 39
+    je .is
+    mov esi, 2
+    cmp r12d, ')'
+    je .is
+    cmp r12d, ']'
+    je .is
+    cmp r12d, '}'
+    jne .no
+.is:
+    invoke rk_pane, rbx
+    test eax, eax
+    jz .no
+    call rk_pair_on
+    test eax, eax
+    jz .no
+    invoke rk_ctx, rbx, &rsp+64      ; +64 caret, +68 length, +72 before, +76 at
+    mov r14d, [rsp+64]
+    cmp r14d, -1
+    je .no
+    cmp esi, 1
+    je .open
+    cmp r12d, [rsp+76]               ; a closing character this file put there: step over it
+    jne .notover
+    mov edx, [rsp+68]
+    sub edx, r14d
+    mov rcx, rbx
+    call rk_ap_find
+    test eax, eax
+    js .notover
+    mov [rk_ap_n], eax
+    lea eax, [r14+1]
+    mov [rsp+80], eax
+    mov [rsp+84], eax
+    invoke SendMessageW, rbx, EM_EXSETSEL, 0, &rsp+80
+    invoke SendMessageW, rbx, EM_SCROLLCARET, 0, 0
+    mov eax, 1
+    EPILOG 128
+.notover:
+    cmp esi, 2
+    je .no
+    mov ecx, [rsp+72]                ; a quote behind a word, a quote or a backslash stands alone
+    cmp ecx, r12d
+    je .no
+    cmp ecx, 92
+    je .no
+    call rk_isword
+    test eax, eax
+    jnz .no
+.open:
+    mov eax, [rsp+76]                ; only in front of a blank, a closing bracket, ; , or the line end
+    test eax, eax
+    jz .pair
+    cmp eax, 13
+    je .pair
+    cmp eax, 10
+    je .pair
+    cmp eax, 32
+    je .pair
+    cmp eax, 9
+    je .pair
+    cmp eax, ')'
+    je .pair
+    cmp eax, ']'
+    je .pair
+    cmp eax, '}'
+    je .pair
+    cmp eax, ';'
+    je .pair
+    cmp eax, ','
+    jne .no
+.pair:
+    mov [rsp+96], r12w
+    mov [rsp+98], r13w
+    mov word [rsp+100], 0
+    mov [rsp+80], r14d
+    mov [rsp+84], r14d
+    lea eax, [r14+1]
+    mov [rsp+88], eax
+    mov [rsp+92], eax
+    invoke rk_put, rbx, &rsp+80, &rsp+96, &rsp+88
+    cmp [rk_ap_h], rbx               ; remember the closing character
+    je .same
+    mov [rk_ap_h], rbx
+    mov dword [rk_ap_n], 0
+.same:
+    mov eax, [rk_ap_n]
+    lea r8, [rk_ap_tail]
+    cmp eax, 8
+    jb .push
+    mov rdx, [r8+4]                  ; the list is full: the oldest one goes
+    mov [r8], rdx
+    mov rdx, [r8+12]
+    mov [r8+8], rdx
+    mov rdx, [r8+20]
+    mov [r8+16], rdx
+    mov edx, [r8+28]
+    mov [r8+24], edx
+    mov eax, 7
+.push:
+    mov edx, [rsp+68]
+    sub edx, r14d
+    inc edx
+    mov [r8+rax*4], edx
+    inc eax
+    mov [rk_ap_n], eax
+    mov eax, 1
+    EPILOG 128
+.no:
+    xor eax, eax
+    EPILOG 128
+
+; rk_pair_back(h) -> eax 1 when Backspace took an opening character away together with the closing
+;   partner this file had put behind it
+rk_pair_back:
+    PROLOG 128
+    mov rbx, rcx
+    invoke rk_ctx, rbx, &rsp+64
+    mov r14d, [rsp+64]
+    cmp r14d, 1
+    jl .no
+    mov ecx, [rsp+72]
+    mov eax, [rsp+76]
+    cmp ecx, '('
+    jne .b1
+    cmp eax, ')'
+    je .have
+.b1:
+    cmp ecx, '['
+    jne .b2
+    cmp eax, ']'
+    je .have
+.b2:
+    cmp ecx, '{'
+    jne .b3
+    cmp eax, '}'
+    je .have
+.b3:
+    cmp ecx, eax
+    jne .no
+    cmp ecx, '"'
+    je .have
+    cmp ecx, 39
+    jne .no
+.have:
+    mov edx, [rsp+68]
+    sub edx, r14d
+    mov rcx, rbx
+    call rk_ap_find
+    test eax, eax
+    js .no
+    mov [rk_ap_n], eax
+    call rk_pair_on
+    test eax, eax
+    jz .no
+    lea eax, [r14-1]
+    mov [rsp+80], eax
+    mov [rsp+88], eax
+    mov [rsp+92], eax
+    lea eax, [r14+1]
+    mov [rsp+84], eax
+    mov word [rsp+96], 0
+    invoke rk_put, rbx, &rsp+80, &rsp+96, &rsp+88
+    mov eax, 1
+    EPILOG 128
+.no:
+    xor eax, eax
+    EPILOG 128
+
 ; rich_key(hwnd, virtual key, modifiers 1 Ctrl | 2 Shift | 4 Alt) -> eax 1 when the key was one of the
 ;   line editing keys and the window is an editable RichEdit pane (the key is used up then)
 rich_key:
@@ -465,6 +753,9 @@ rich_key:
     je .is
     mov esi, 10
     cmp r12d, 13                     ; VK_RETURN
+    je .is
+    mov esi, 14                      ; 14 Backspace between a pair
+    cmp r12d, 8                      ; VK_BACK
     je .is
     jmp .no
 .k1:
@@ -552,7 +843,12 @@ rich_key:
     je .unindent
     cmp esi, 9
     je .brace
-    jmp .nl
+    cmp esi, 14
+    jne .nl
+    invoke rk_pair_back, rbx         ; ---- Backspace
+    test eax, eax
+    jz .pass
+    jmp .done
 
     ; ---- Ctrl+D
 .dup:
