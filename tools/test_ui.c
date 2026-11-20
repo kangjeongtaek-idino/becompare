@@ -407,6 +407,7 @@ static DWORD WINAPI prefsDriver(void*arg){
  if(phase==2){
   GetWindowTextW(GetDlgItem(h,572),t,80);check(!wcscmp(t,L"3"),"saved history limit appears when preferences reopen");
   SendMessageW(h,WM_COMMAND,3,0);GetWindowTextW(GetDlgItem(h,572),t,80);check(!wcscmp(t,L"30")&&SendMessageW(GetDlgItem(h,570),CB_GETCURSEL,0,0)==0,"defaults reset controls to documented values");
+  check(SendMessageW(GetDlgItem(h,574),BM_GETCHECK,0,0)==BST_CHECKED&&GetWindowTextLengthW(GetDlgItem(h,574))>0,"paired brackets are on by default");
   SendMessageW(h,WM_COMMAND,2,0);return 0;
  }
  int before=shownBoxes;SetWindowTextW(GetDlgItem(h,572),L"0");prefsPage(h,1);PostMessageW(h,WM_COMMAND,1,0);
@@ -1253,6 +1254,42 @@ static DWORD WINAPI watcher(void*arg){
   check((int)SendMessageW(ra,EM_GETLINECOUNT,0,0)==n0+1,"Ctrl+D duplicates the line of the caret");
   SendMessageW(ra,EM_UNDO,0,0);SendMessageW(ra,EM_SETMODIFY,m0,0);
   check((int)SendMessageW(ra,EM_GETLINECOUNT,0,0)==n0,"one undo takes the duplicated line back");
+  caretTo(1);}
+ /* Enter in an editor pane keeps the indent of the line (rich_keys.inc) */
+ {int n0=(int)SendMessageW(ra,EM_GETLINECOUNT,0,0),m0=(int)SendMessageW(ra,EM_GETMODIFY,0,0),l0=GetWindowTextLengthW(ra);
+  wchar_t c[4]={0};CHARRANGE r;TEXTRANGEW t;
+  SendMessageW(ra,EM_REPLACESEL,1,(LPARAM)L"	zz");
+  PostMessageW(ra,WM_KEYDOWN,VK_RETURN,0);Sleep(300);
+  SendMessageW(ra,EM_EXGETSEL,0,(LPARAM)&r);t.chrg.cpMin=r.cpMin-2;t.chrg.cpMax=r.cpMin;t.lpstrText=c;
+  if(r.cpMin>=2)SendMessageW(ra,EM_GETTEXTRANGE,0,(LPARAM)&t);
+  check((int)SendMessageW(ra,EM_GETLINECOUNT,0,0)==n0+1&&c[0]==13&&c[1]==9,"Enter starts the new line with the indent of the line");
+  SendMessageW(ra,EM_UNDO,0,0);SendMessageW(ra,EM_UNDO,0,0);SendMessageW(ra,EM_SETMODIFY,m0,0);
+  check((int)SendMessageW(ra,EM_GETLINECOUNT,0,0)==n0&&GetWindowTextLengthW(ra)==l0,"two undos take the new line and the typed text back");
+  caretTo(1);}
+ /* ( in an editor pane brings its closing partner; typing ) steps over it (rich_keys.inc) */
+ {int m0=(int)SendMessageW(ra,EM_GETMODIFY,0,0),l0=GetWindowTextLengthW(ra);
+  wchar_t c[4]={0};CHARRANGE r,q;TEXTRANGEW t;
+  SendMessageW(ra,EM_EXGETSEL,0,(LPARAM)&r);SendMessageW(ra,EM_REPLACESEL,1,(LPARAM)L" ");
+  q.cpMin=q.cpMax=r.cpMin;SendMessageW(ra,EM_EXSETSEL,0,(LPARAM)&q);
+  PostMessageW(ra,WM_CHAR,'(',0);Sleep(300);
+  t.chrg.cpMin=r.cpMin;t.chrg.cpMax=r.cpMin+2;t.lpstrText=c;SendMessageW(ra,EM_GETTEXTRANGE,0,(LPARAM)&t);
+  SendMessageW(ra,EM_EXGETSEL,0,(LPARAM)&q);
+  check(c[0]=='('&&c[1]==')'&&q.cpMin==r.cpMin+1,"( puts the closing bracket behind the caret");
+  PostMessageW(ra,WM_CHAR,')',0);Sleep(300);
+  SendMessageW(ra,EM_EXGETSEL,0,(LPARAM)&q);
+  check(q.cpMin==r.cpMin+2&&GetWindowTextLengthW(ra)==l0+3,") steps over the closing bracket");
+  SendMessageW(ra,EM_UNDO,0,0);SendMessageW(ra,EM_UNDO,0,0);SendMessageW(ra,EM_SETMODIFY,m0,0);
+  check(GetWindowTextLengthW(ra)==l0,"two undos take the pair and the blank back");
+  caretTo(1);}
+ /* Home in an editor pane stops at the first character of an indented line, then goes on to the line start */
+ {int m0=(int)SendMessageW(ra,EM_GETMODIFY,0,0),l0=GetWindowTextLengthW(ra);CHARRANGE r,q;
+  SendMessageW(ra,EM_EXGETSEL,0,(LPARAM)&r);SendMessageW(ra,EM_REPLACESEL,1,(LPARAM)L"	zz");
+  PostMessageW(ra,WM_KEYDOWN,VK_HOME,0);Sleep(300);SendMessageW(ra,EM_EXGETSEL,0,(LPARAM)&q);
+  check(q.cpMin==r.cpMin+1&&q.cpMax==q.cpMin,"Home goes to the first character behind the indent");
+  PostMessageW(ra,WM_KEYDOWN,VK_HOME,0);Sleep(300);SendMessageW(ra,EM_EXGETSEL,0,(LPARAM)&q);
+  check(q.cpMin==r.cpMin,"Home again goes to the line start");
+  SendMessageW(ra,EM_UNDO,0,0);SendMessageW(ra,EM_SETMODIFY,m0,0);
+  check(GetWindowTextLengthW(ra)==l0,"the typed indent is taken back");
   caretTo(1);}
  /* a caret inside a block: F7 leaves the block, Shift+F7 from below returns to its first row */
  caretTo(4);

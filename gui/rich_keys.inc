@@ -13,11 +13,21 @@
 ;   Shift+Tab           take one level of indent off the line of the caret / the selected lines
 ;   Ctrl+Shift+M        move the caret to the bracket that matches the one at the caret (or, away from a
 ;                       bracket, to the opening bracket around the caret)
+;   Enter               the new line starts with the indent of the line it comes from; behind ( [ { one
+;                       level more, and a closing partner at the caret goes to a line of its own below
+;   Home                to the first character of the line that is not a blank; from there to the line start
+;   Shift+Enter         start a new line below the line of the caret, wherever the caret is in it
+;   Ctrl+Alt+Enter      start a new line above the line of the caret
+;   Ctrl+Enter          split the line at the caret; the caret stays where it is
+;   ( [ { " '           put the closing partner behind the caret (rich_char); typing that closing character
+;                       steps over it, Backspace on the opening one takes both away
 ;
 ;   Every action is one replacement through EM_REPLACESEL, so the editor's own undo takes it back in one
 ;   step. A read-only pane (folded / unified view, the merge inputs) does not take the keys.
 
 extern GetClassNameW, _wcsicmp, memcpy, IsCharLowerW, CharUpperBuffW, CharLowerBuffW
+extern GetKeyState, GetPrivateProfileIntW, g_ini
+global rich_char
 extern GetParent, GetDlgCtrlID, GetDlgItem, GetWindowTextW, wcsrchr, wcsncmp, _snwprintf, wcsstr, wcscpy
 
 global rich_key
@@ -37,6 +47,8 @@ global rich_key
 %define RK_C    200
 
 section .rdata
+WSTR s_rk_editor, "Editor"
+WSTR s_rk_autopair, "AutoPair"
 WSTR s_rk_slash, "//"
 WSTR s_rk_hash, "#"
 WSTR s_rk_semi, ";"
@@ -445,6 +457,289 @@ rk_swap:
     mov rax, rbx
     EPILOG 64
 
+; ---------------------------------------------------------------- paired brackets and quotes
+; The closing characters this file typed itself are remembered as their distance from the end of the
+; text (typing in front of one does not change it). Only such a character is typed over or taken away
+; together with its opening one; a bracket the user typed is never skipped.
+section .bss
+rk_ap_h:    resq 1                   ; the pane the list belongs to
+rk_ap_n:    resd 1
+rk_ap_tail: resd 8
+section .text
+
+; rk_ap_find(rcx = pane, edx = distance from the end) -> eax index in the list, -1 when it is not there
+rk_ap_find:
+    mov eax, -1
+    cmp [rk_ap_h], rcx
+    jne .d
+    lea r8, [rk_ap_tail]
+    mov eax, [rk_ap_n]
+.l:
+    dec eax
+    js .d
+    cmp [r8+rax*4], edx
+    jne .l
+.d:
+    ret
+
+; rk_ctx(h, out dword[4]): caret (-1 with a selection), length of the text, character in front of the
+;   caret (0 at the start), character at the caret (0 at the end)
+rk_ctx:
+    PROLOG 96
+    mov rbx, rcx
+    mov rsi, rdx
+    invoke SendMessageW, rbx, EM_EXGETSEL, 0, &rsp+64
+    mov r12d, [rsp+64]
+    mov dword [rsi], -1
+    cmp r12d, [rsp+68]
+    jne .d
+    mov [rsi], r12d
+    mov dword [rsp+72], 0            ; GETTEXTLENGTHEX: characters, UTF-16
+    mov dword [rsp+76], 1200
+    invoke SendMessageW, rbx, 0x045F, &rsp+72, 0
+    mov [rsi+4], eax
+    xor eax, eax
+    mov [rsi+8], rax
+    mov edx, r12d
+    test edx, edx
+    jz .get
+    dec edx
+.get:
+    lea r8d, [r12+1]
+    cmp r8d, [rsi+4]
+    jbe .rng
+    mov r8d, [rsi+4]
+.rng:
+    invoke rk_get, rbx, rdx, r8
+    mov rdi, rax
+    movzx eax, word [rdi]
+    test r12d, r12d
+    jz .first
+    mov [rsi+8], eax
+    test eax, eax
+    jz .free
+    movzx eax, word [rdi+2]
+.first:
+    mov [rsi+12], eax
+.free:
+    invoke free, rdi
+.d:
+    EPILOG 96
+
+; rk_pair_on() -> eax 0 when [Editor] AutoPair=0 switches the pairs off
+rk_pair_on:
+    PROLOG 64
+    invoke GetPrivateProfileIntW, &s_rk_editor, &s_rk_autopair, 1, &g_ini
+    EPILOG 64
+
+; rk_pane(h) -> eax 1 for an editable RichEdit pane
+rk_pane:
+    PROLOG 128
+    mov rbx, rcx
+    xor esi, esi
+    invoke GetClassNameW, rbx, &rsp+64, 32
+    invoke _wcsicmp, &rsp+64, &cn_rich
+    test eax, eax
+    jnz .d
+    invoke GetWindowLongPtrW, rbx, GWL_STYLE
+    test eax, 0x800                  ; ES_READONLY
+    jnz .d
+    mov esi, 1
+.d:
+    mov eax, esi
+    EPILOG 128
+
+; rich_char(hwnd, character) -> eax 1 when the character was used up: called for WM_CHAR before the pane
+;   sees it.  ( [ { and, away from a word, " ' put their closing partner behind the caret; typing a closing
+;   character that was put there that way steps over it.
+rich_char:
+    PROLOG 128
+    mov rbx, rcx
+    mov r12d, edx
+    xor r13d, r13d                   ; the closing partner; 0: the character is a closing bracket
+    mov esi, 1                       ; 1 opening bracket, 2 closing bracket, 3 quote
+    mov r13d, ')'
+    cmp r12d, '('
+    je .is
+    mov r13d, ']'
+    cmp r12d, '['
+    je .is
+    mov r13d, '}'
+    cmp r12d, '{'
+    je .is
+    mov esi, 3
+    mov r13d, r12d
+    cmp r12d, '"'
+    je .is
+    cmp r12d, 39
+    je .is
+    mov esi, 2
+    cmp r12d, ')'
+    je .is
+    cmp r12d, ']'
+    je .is
+    cmp r12d, '}'
+    jne .no
+.is:
+    invoke rk_pane, rbx
+    test eax, eax
+    jz .no
+    call rk_pair_on
+    test eax, eax
+    jz .no
+    invoke rk_ctx, rbx, &rsp+64      ; +64 caret, +68 length, +72 before, +76 at
+    mov r14d, [rsp+64]
+    cmp r14d, -1
+    je .no
+    cmp esi, 1
+    je .open
+    cmp r12d, [rsp+76]               ; a closing character this file put there: step over it
+    jne .notover
+    mov edx, [rsp+68]
+    sub edx, r14d
+    mov rcx, rbx
+    call rk_ap_find
+    test eax, eax
+    js .notover
+    mov [rk_ap_n], eax
+    lea eax, [r14+1]
+    mov [rsp+80], eax
+    mov [rsp+84], eax
+    invoke SendMessageW, rbx, EM_EXSETSEL, 0, &rsp+80
+    invoke SendMessageW, rbx, EM_SCROLLCARET, 0, 0
+    mov eax, 1
+    EPILOG 128
+.notover:
+    cmp esi, 2
+    je .no
+    mov ecx, [rsp+72]                ; a quote behind a word, a quote or a backslash stands alone
+    cmp ecx, r12d
+    je .no
+    cmp ecx, 92
+    je .no
+    call rk_isword
+    test eax, eax
+    jnz .no
+.open:
+    mov eax, [rsp+76]                ; only in front of a blank, a closing bracket, ; , or the line end
+    test eax, eax
+    jz .pair
+    cmp eax, 13
+    je .pair
+    cmp eax, 10
+    je .pair
+    cmp eax, 32
+    je .pair
+    cmp eax, 9
+    je .pair
+    cmp eax, ')'
+    je .pair
+    cmp eax, ']'
+    je .pair
+    cmp eax, '}'
+    je .pair
+    cmp eax, ';'
+    je .pair
+    cmp eax, ','
+    jne .no
+.pair:
+    mov [rsp+96], r12w
+    mov [rsp+98], r13w
+    mov word [rsp+100], 0
+    mov [rsp+80], r14d
+    mov [rsp+84], r14d
+    lea eax, [r14+1]
+    mov [rsp+88], eax
+    mov [rsp+92], eax
+    invoke rk_put, rbx, &rsp+80, &rsp+96, &rsp+88
+    cmp [rk_ap_h], rbx               ; remember the closing character
+    je .same
+    mov [rk_ap_h], rbx
+    mov dword [rk_ap_n], 0
+.same:
+    mov eax, [rk_ap_n]
+    lea r8, [rk_ap_tail]
+    cmp eax, 8
+    jb .push
+    mov rdx, [r8+4]                  ; the list is full: the oldest one goes
+    mov [r8], rdx
+    mov rdx, [r8+12]
+    mov [r8+8], rdx
+    mov rdx, [r8+20]
+    mov [r8+16], rdx
+    mov edx, [r8+28]
+    mov [r8+24], edx
+    mov eax, 7
+.push:
+    mov edx, [rsp+68]
+    sub edx, r14d
+    inc edx
+    mov [r8+rax*4], edx
+    inc eax
+    mov [rk_ap_n], eax
+    mov eax, 1
+    EPILOG 128
+.no:
+    xor eax, eax
+    EPILOG 128
+
+; rk_pair_back(h) -> eax 1 when Backspace took an opening character away together with the closing
+;   partner this file had put behind it
+rk_pair_back:
+    PROLOG 128
+    mov rbx, rcx
+    invoke rk_ctx, rbx, &rsp+64
+    mov r14d, [rsp+64]
+    cmp r14d, 1
+    jl .no
+    mov ecx, [rsp+72]
+    mov eax, [rsp+76]
+    cmp ecx, '('
+    jne .b1
+    cmp eax, ')'
+    je .have
+.b1:
+    cmp ecx, '['
+    jne .b2
+    cmp eax, ']'
+    je .have
+.b2:
+    cmp ecx, '{'
+    jne .b3
+    cmp eax, '}'
+    je .have
+.b3:
+    cmp ecx, eax
+    jne .no
+    cmp ecx, '"'
+    je .have
+    cmp ecx, 39
+    jne .no
+.have:
+    mov edx, [rsp+68]
+    sub edx, r14d
+    mov rcx, rbx
+    call rk_ap_find
+    test eax, eax
+    js .no
+    mov [rk_ap_n], eax
+    call rk_pair_on
+    test eax, eax
+    jz .no
+    lea eax, [r14-1]
+    mov [rsp+80], eax
+    mov [rsp+88], eax
+    mov [rsp+92], eax
+    lea eax, [r14+1]
+    mov [rsp+84], eax
+    mov word [rsp+96], 0
+    invoke rk_put, rbx, &rsp+80, &rsp+96, &rsp+88
+    mov eax, 1
+    EPILOG 128
+.no:
+    xor eax, eax
+    EPILOG 128
+
 ; rich_key(hwnd, virtual key, modifiers 1 Ctrl | 2 Shift | 4 Alt) -> eax 1 when the key was one of the
 ;   line editing keys and the window is an editable RichEdit pane (the key is used up then)
 rich_key:
@@ -453,10 +748,19 @@ rich_key:
     mov r12d, edx
     mov r13d, r8d
     xor esi, esi                     ; 1 duplicate, 2 join, 3 case, 4 up, 5 down, 6 comment, 7 indent, 8 unindent, 9 bracket
-    test r13d, r13d
+    test r13d, r13d                  ; 10 new line, 11 line below, 12 line above, 13 split
     jnz .k1
     mov esi, 7
     cmp r12d, 9                      ; VK_TAB
+    je .is
+    mov esi, 10
+    cmp r12d, 13                     ; VK_RETURN
+    je .is
+    mov esi, 14                      ; 14 Backspace between a pair
+    cmp r12d, 8                      ; VK_BACK
+    je .is
+    mov esi, 15                      ; 15 Home
+    cmp r12d, 0x24                   ; VK_HOME
     je .is
     jmp .no
 .k1:
@@ -470,12 +774,22 @@ rich_key:
     je .is
     cmp r12d, 0x6F                   ; VK_DIVIDE
     je .is
-    jmp .no
+    cmp r12d, 13
+    jne .no
+    invoke GetKeyState, 0x12         ; VK_MENU: Ctrl+Alt+Enter, else Ctrl+Enter
+    mov esi, 12
+    test ax, ax
+    js .is
+    mov esi, 13
+    jmp .is
 .k2:
     cmp r13d, 2
     jne .k3
     mov esi, 8
     cmp r12d, 9
+    je .is
+    mov esi, 11
+    cmp r12d, 13
     je .is
     jmp .no
 .k3:
@@ -532,7 +846,16 @@ rich_key:
     je .indent
     cmp esi, 8
     je .unindent
-    jmp .brace
+    cmp esi, 9
+    je .brace
+    cmp esi, 15
+    je .home
+    cmp esi, 14
+    jne .nl
+    invoke rk_pair_back, rbx         ; ---- Backspace
+    test eax, eax
+    jz .pass
+    jmp .done
 
     ; ---- Ctrl+D
 .dup:
@@ -971,6 +1294,161 @@ rich_key:
     invoke SendMessageW, rbx, EM_EXSETSEL, 0, &rsp+RK_SEL
     invoke SendMessageW, rbx, EM_SCROLLCARET, 0, 0
     jmp .done
+
+    ; ---- Home
+.home:
+    cmp r14d, r15d
+    jne .pass
+    invoke rk_get, rbx, #[rsp+RK_BLK+8], #[rsp+RK_BLK+12]
+    mov [rsp+RK_T], rax
+    xor edi, edi                     ; blanks and tabs the line starts with
+.hc:
+    movzx ecx, word [rax+rdi*2]
+    cmp ecx, 32
+    je .hc1
+    cmp ecx, 9
+    jne .hce
+.hc1:
+    inc edi
+    jmp .hc
+.hce:
+    test edi, edi                    ; no indent: the key does what it always did
+    jz .pass
+    mov eax, [rsp+RK_BLK+8]
+    lea ecx, [rax+rdi]
+    cmp r14d, ecx                    ; already at the first character: on to the line start
+    je .hset
+    mov eax, ecx
+.hset:
+    mov [rsp+RK_SEL], eax
+    mov [rsp+RK_SEL+4], eax
+    invoke SendMessageW, rbx, EM_EXSETSEL, 0, &rsp+RK_SEL
+    invoke SendMessageW, rbx, EM_SCROLLCARET, 0, 0
+    jmp .done
+
+    ; ---- Enter, Shift+Enter, Ctrl+Alt+Enter, Ctrl+Enter
+.nl:
+    invoke GetWindowLongPtrW, rbx, GWL_STYLE
+    test eax, 4                      ; ES_MULTILINE
+    jz .pass
+    mov edi, [rsp+RK_BLK+8]          ; the indent is read from edi..r8d
+    mov r8d, r14d                    ; Enter, Ctrl+Enter: only the blanks in front of the caret count
+    cmp esi, 10
+    je .nlget
+    cmp esi, 13
+    je .nlget
+    mov r8d, [rsp+RK_BLK+12]
+    cmp esi, 12
+    je .nlget
+    invoke SendMessageW, rbx, EM_LINEINDEX, #[rsp+RK_BLK+4], 0   ; Shift+Enter: the last line of the block
+    mov edi, eax
+    mov r8d, [rsp+RK_BLK+12]
+.nlget:
+    invoke rk_get, rbx, rdi, r8
+    mov [rsp+RK_T], rax
+    xor edi, edi                     ; blanks and tabs the line starts with
+.nlc:
+    movzx ecx, word [rax+rdi*2]
+    cmp ecx, 32
+    je .nlc1
+    cmp ecx, 9
+    jne .nlce
+.nlc1:
+    inc edi
+    jmp .nlc
+.nlce:
+    xor eax, eax
+    mov [rsp+RK_A], eax              ; characters of one more level (behind an opening bracket)
+    mov [rsp+RK_C], eax              ; 1: the closing partner at the caret gets a line of its own
+    cmp esi, 10
+    jne .nlalloc
+    invoke rk_ctx, rbx, &rsp+RK_CLS  ; caret, length, character in front, character at the caret
+    cmp dword [rsp+RK_CLS], -1
+    je .nlalloc
+    mov ecx, [rsp+RK_CLS+8]
+    mov edx, ')'
+    cmp ecx, '('
+    je .nlblk
+    mov edx, ']'
+    cmp ecx, '['
+    je .nlblk
+    mov edx, '}'
+    cmp ecx, '{'
+    jne .nlalloc
+.nlblk:
+    mov dword [rsp+RK_A], 4          ; four blanks; a tab when the line is indented with tabs
+    mov dword [rsp+RK_B], 32
+    test edi, edi
+    jz .nlb1
+    mov rax, [rsp+RK_T]
+    cmp word [rax], 9
+    jne .nlb1
+    mov dword [rsp+RK_A], 1
+    mov dword [rsp+RK_B], 9
+.nlb1:
+    cmp edx, [rsp+RK_CLS+12]
+    jne .nlalloc
+    mov dword [rsp+RK_C], 1
+.nlalloc:
+    lea rcx, [rdi*4+32]              ; at most: break, indent, level, break, indent
+    call malloc
+    mov [rsp+RK_N], rax
+    cmp esi, 12
+    je .nlup
+    mov word [rax], 13               ; a line break, then the indent
+    lea rcx, [rax+2]
+    lea r8, [rdi*2]
+    invoke memcpy, rcx, [rsp+RK_T], r8
+    mov rax, [rsp+RK_N]
+    lea rdx, [rax+rdi*2+2]
+    mov ecx, [rsp+RK_A]
+    mov r8d, [rsp+RK_B]
+.nlu:
+    test ecx, ecx
+    jz .nlu1
+    mov [rdx], r8w
+    add rdx, 2
+    dec ecx
+    jmp .nlu
+.nlu1:
+    mov word [rdx], 0
+    cmp dword [rsp+RK_C], 0
+    je .nlz
+    mov word [rdx], 13               ; the closing bracket: on the next line, at the indent of this one
+    lea rcx, [rdx+2]
+    lea r8, [rdi*2]
+    mov word [rcx+r8], 0
+    invoke memcpy, rcx, [rsp+RK_T], r8
+.nlz:
+    add edi, [rsp+RK_A]              ; the caret goes behind the indent and the level
+    cmp esi, 11
+    je .nlafter
+    mov [rsp+RK_RNG], r14d           ; the selection is replaced
+    mov [rsp+RK_RNG+4], r15d
+    mov eax, r14d
+    cmp esi, 13                      ; split: the caret stays in front of the break
+    je .nlsel
+    lea eax, [r14+rdi+1]
+    jmp .nlsel
+.nlafter:
+    mov eax, [rsp+RK_BLK+12]         ; behind the line, whatever follows the caret stays on it
+    mov [rsp+RK_RNG], eax
+    mov [rsp+RK_RNG+4], eax
+    lea eax, [rax+rdi+1]
+    jmp .nlsel
+.nlup:
+    lea r8, [rdi*2]                  ; the indent, then a line break, in front of the line
+    invoke memcpy, rax, [rsp+RK_T], r8
+    mov rax, [rsp+RK_N]
+    mov word [rax+rdi*2], 13
+    mov word [rax+rdi*2+2], 0
+    mov eax, [rsp+RK_BLK+8]
+    mov [rsp+RK_RNG], eax
+    mov [rsp+RK_RNG+4], eax
+    add eax, edi
+.nlsel:
+    mov [rsp+RK_SEL], eax
+    mov [rsp+RK_SEL+4], eax
 
 .put:
     invoke rk_put, rbx, &rsp+RK_RNG, [rsp+RK_N], &rsp+RK_SEL

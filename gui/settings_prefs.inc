@@ -11,6 +11,8 @@ WSTR sp_dark, "Dark"
 WSTR sp_text, "TextCompare"
 WSTR sp_history, "History"
 WSTR sp_enabled, "Enabled"
+WSTR sp_editor, "Editor"
+WSTR sp_autopair, "AutoPair"
 WSTR sp_max, "MaxVersions"
 WSTR sp_mb, "MaxFileMB"
 WSTR sp_fold, "Fold"
@@ -33,6 +35,7 @@ WSTR sp_lws, "공백 문자 표시"
 WSTR sp_lnumbers, "줄 번호 표시"
 WSTR sp_lblank, "빈 줄 차이 무시"
 WSTR sp_lhistory, "저장 전 로컬 기록 보관"
+WSTR sp_lautopair, "괄호·따옴표 짝 자동 입력"
 WSTR sp_intro, "텍스트 비교 기본값 (다음에 여는 비교 탭부터 적용)"
 WSTR sp_ltheme, "화면 테마:"
 WSTR sp_lmax, "파일당 보관 개수 (1~100):"
@@ -62,6 +65,7 @@ sp_bools:
     dq 567, sp_text, sp_numbers, 1, sp_lnumbers
     dq 568, sp_text, sp_blank, 0, sp_lblank
     dq 569, sp_history, sp_enabled, 1, sp_lhistory
+    dq 574, sp_editor, sp_autopair, 1, sp_lautopair
 section .text
 
 sg_prefs_create:
@@ -90,6 +94,8 @@ sg_prefs_create:
     mov r15, rax
     cmp ebp, 9
     je .history
+    cmp ebp, 10
+    je .pairs
     imul eax, ebp, 30
     add eax, 96
     mov [rsp+152], eax
@@ -99,9 +105,13 @@ sg_prefs_create:
 .history:
     mov rax, r15
     SPLACE 400, 146, 300, 24
+    jmp .next
+.pairs:                              ; typing in the editor panes: under the text compare defaults
+    mov rax, r15
+    SPLACE 24, 424, 360, 24
 .next:
     inc ebp
-    cmp ebp, 10
+    cmp ebp, 11
     jb .checks
     invoke mk_lbl, rsi, &sp_intro, 580
     SPLACE 24, 60, 700, 26
@@ -204,7 +214,7 @@ sg_prefs_fill:
     invoke GetDlgItem, rsi, [rdi]
     invoke SendMessageW, rax, BM_SETCHECK, r12, 0
     inc ebp
-    cmp ebp, 10
+    cmp ebp, 11
     jb .bool
     xor r12d, r12d
     test r15d, r15d
@@ -310,7 +320,7 @@ sg_prefs_save:
     invoke _snwprintf, &rsp+96, 12, &sp_decimal, r12
     invoke WritePrivateProfileStringW, [rdi+8], [rdi+16], &rsp+96, &g_ini
     inc ebp
-    cmp ebp, 10
+    cmp ebp, 11
     jb .bool
     invoke GetDlgItem, rsi, 570
     invoke SendMessageW, rax, 0x147, 0, 0

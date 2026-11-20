@@ -3,7 +3,7 @@
 %include "inc/win.inc"
 %include "inc/app.inc"
 
-extern rich_key
+extern rich_key, rich_char
 extern SetTimer, KillTimer, EnableWindow
 extern OleInitialize, InitCommonControlsEx, LoadLibraryW, GetModuleHandleW
 extern CreateWindowExW, ShowWindow, UpdateWindow, GetMessageW, TranslateMessage, DispatchMessageW, LoadImageW
@@ -315,6 +315,13 @@ WinMain:
     mov eax, [rbx+MSG_MSG]
     cmp eax, WM_KEYDOWN
     je .key
+    cmp eax, 0x0102                  ; WM_CHAR: paired brackets and quotes in an editor pane
+    jne .nochar
+    invoke rich_char, [rbx+MSG_HWND], [rbx+MSG_WPARAM]
+    test eax, eax
+    jnz .loop
+    jmp .disp
+.nochar:
     cmp eax, 0x0104                  ; WM_SYSKEYDOWN: Alt+Shift+Up / Down moves lines in an editor pane
     jne .disp
     invoke GetKeyState, VK_SHIFT
