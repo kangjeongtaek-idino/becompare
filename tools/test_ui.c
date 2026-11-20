@@ -1249,6 +1249,17 @@ static DWORD WINAPI watcher(void*arg){
   SendMessageW(ra,EM_UNDO,0,0);SendMessageW(ra,EM_SETMODIFY,m0,0);
   check((int)SendMessageW(ra,EM_GETLINECOUNT,0,0)==n0,"one undo takes the duplicated line back");
   caretTo(1);}
+ /* Enter in an editor pane keeps the indent of the line (rich_keys.inc) */
+ {int n0=(int)SendMessageW(ra,EM_GETLINECOUNT,0,0),m0=(int)SendMessageW(ra,EM_GETMODIFY,0,0),l0=GetWindowTextLengthW(ra);
+  wchar_t c[4]={0};CHARRANGE r;TEXTRANGEW t;
+  SendMessageW(ra,EM_REPLACESEL,1,(LPARAM)L"	zz");
+  PostMessageW(ra,WM_KEYDOWN,VK_RETURN,0);Sleep(300);
+  SendMessageW(ra,EM_EXGETSEL,0,(LPARAM)&r);t.chrg.cpMin=r.cpMin-2;t.chrg.cpMax=r.cpMin;t.lpstrText=c;
+  if(r.cpMin>=2)SendMessageW(ra,EM_GETTEXTRANGE,0,(LPARAM)&t);
+  check((int)SendMessageW(ra,EM_GETLINECOUNT,0,0)==n0+1&&c[0]==13&&c[1]==9,"Enter starts the new line with the indent of the line");
+  SendMessageW(ra,EM_UNDO,0,0);SendMessageW(ra,EM_UNDO,0,0);SendMessageW(ra,EM_SETMODIFY,m0,0);
+  check((int)SendMessageW(ra,EM_GETLINECOUNT,0,0)==n0&&GetWindowTextLengthW(ra)==l0,"two undos take the new line and the typed text back");
+  caretTo(1);}
  /* a caret inside a block: F7 leaves the block, Shift+F7 from below returns to its first row */
  caretTo(4);
  check(key(VK_F7,0,5),"F7 from an unchanged row goes to the next difference below");

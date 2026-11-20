@@ -13,11 +13,16 @@
 ;   Shift+Tab           take one level of indent off the line of the caret / the selected lines
 ;   Ctrl+Shift+M        move the caret to the bracket that matches the one at the caret (or, away from a
 ;                       bracket, to the opening bracket around the caret)
+;   Enter               the new line starts with the indent of the line it comes from
+;   Shift+Enter         start a new line below the line of the caret, wherever the caret is in it
+;   Ctrl+Alt+Enter      start a new line above the line of the caret
+;   Ctrl+Enter          split the line at the caret; the caret stays where it is
 ;
 ;   Every action is one replacement through EM_REPLACESEL, so the editor's own undo takes it back in one
 ;   step. A read-only pane (folded / unified view, the merge inputs) does not take the keys.
 
 extern GetClassNameW, _wcsicmp, memcpy, IsCharLowerW, CharUpperBuffW, CharLowerBuffW
+extern GetKeyState
 extern GetParent, GetDlgCtrlID, GetDlgItem, GetWindowTextW, wcsrchr, wcsncmp, _snwprintf, wcsstr, wcscpy
 
 global rich_key
@@ -453,10 +458,13 @@ rich_key:
     mov r12d, edx
     mov r13d, r8d
     xor esi, esi                     ; 1 duplicate, 2 join, 3 case, 4 up, 5 down, 6 comment, 7 indent, 8 unindent, 9 bracket
-    test r13d, r13d
+    test r13d, r13d                  ; 10 new line, 11 line below, 12 line above, 13 split
     jnz .k1
     mov esi, 7
     cmp r12d, 9                      ; VK_TAB
+    je .is
+    mov esi, 10
+    cmp r12d, 13                     ; VK_RETURN
     je .is
     jmp .no
 .k1:
@@ -470,12 +478,22 @@ rich_key:
     je .is
     cmp r12d, 0x6F                   ; VK_DIVIDE
     je .is
-    jmp .no
+    cmp r12d, 13
+    jne .no
+    invoke GetKeyState, 0x12         ; VK_MENU: Ctrl+Alt+Enter, else Ctrl+Enter
+    mov esi, 12
+    test ax, ax
+    js .is
+    mov esi, 13
+    jmp .is
 .k2:
     cmp r13d, 2
     jne .k3
     mov esi, 8
     cmp r12d, 9
+    je .is
+    mov esi, 11
+    cmp r12d, 13
     je .is
     jmp .no
 .k3:
@@ -532,7 +550,9 @@ rich_key:
     je .indent
     cmp esi, 8
     je .unindent
-    jmp .brace
+    cmp esi, 9
+    je .brace
+    jmp .nl
 
     ; ---- Ctrl+D
 .dup:
@@ -971,6 +991,77 @@ rich_key:
     invoke SendMessageW, rbx, EM_EXSETSEL, 0, &rsp+RK_SEL
     invoke SendMessageW, rbx, EM_SCROLLCARET, 0, 0
     jmp .done
+
+    ; ---- Enter, Shift+Enter, Ctrl+Alt+Enter, Ctrl+Enter
+.nl:
+    invoke GetWindowLongPtrW, rbx, GWL_STYLE
+    test eax, 4                      ; ES_MULTILINE
+    jz .pass
+    mov edi, [rsp+RK_BLK+8]          ; the indent is read from edi..r8d
+    mov r8d, r14d                    ; Enter, Ctrl+Enter: only the blanks in front of the caret count
+    cmp esi, 10
+    je .nlget
+    cmp esi, 13
+    je .nlget
+    mov r8d, [rsp+RK_BLK+12]
+    cmp esi, 12
+    je .nlget
+    invoke SendMessageW, rbx, EM_LINEINDEX, #[rsp+RK_BLK+4], 0   ; Shift+Enter: the last line of the block
+    mov edi, eax
+    mov r8d, [rsp+RK_BLK+12]
+.nlget:
+    invoke rk_get, rbx, rdi, r8
+    mov [rsp+RK_T], rax
+    xor edi, edi                     ; blanks and tabs the line starts with
+.nlc:
+    movzx ecx, word [rax+rdi*2]
+    cmp ecx, 32
+    je .nlc1
+    cmp ecx, 9
+    jne .nlce
+.nlc1:
+    inc edi
+    jmp .nlc
+.nlce:
+    lea rcx, [rdi*2+8]
+    call malloc
+    mov [rsp+RK_N], rax
+    cmp esi, 12
+    je .nlup
+    mov word [rax], 13               ; a line break, then the indent
+    lea rcx, [rax+2]
+    lea r8, [rdi*2]
+    invoke memcpy, rcx, [rsp+RK_T], r8
+    mov rax, [rsp+RK_N]
+    mov word [rax+rdi*2+2], 0
+    cmp esi, 11
+    je .nlafter
+    mov [rsp+RK_RNG], r14d           ; the selection is replaced
+    mov [rsp+RK_RNG+4], r15d
+    mov eax, r14d
+    cmp esi, 13                      ; split: the caret stays in front of the break
+    je .nlsel
+    lea eax, [r14+rdi+1]
+    jmp .nlsel
+.nlafter:
+    mov eax, [rsp+RK_BLK+12]         ; behind the line, whatever follows the caret stays on it
+    mov [rsp+RK_RNG], eax
+    mov [rsp+RK_RNG+4], eax
+    lea eax, [rax+rdi+1]
+    jmp .nlsel
+.nlup:
+    lea r8, [rdi*2]                  ; the indent, then a line break, in front of the line
+    invoke memcpy, rax, [rsp+RK_T], r8
+    mov rax, [rsp+RK_N]
+    mov word [rax+rdi*2], 13
+    mov word [rax+rdi*2+2], 0
+    mov eax, [rsp+RK_BLK+8]
+    mov [rsp+RK_RNG], eax
+    mov [rsp+RK_RNG+4], eax
+    add eax, edi
+.nlsel:
+    mov [rsp+RK_SEL], eax
+    mov [rsp+RK_SEL+4], eax
 
 .put:
     invoke rk_put, rbx, &rsp+RK_RNG, [rsp+RK_N], &rsp+RK_SEL
