@@ -4,7 +4,7 @@
 %include "inc/app.inc"
 
 extern rich_key, rich_char
-extern GetModuleFileNameW, ShellExecuteW
+extern GetModuleFileNameW, help_show, help_translate
 extern SetTimer, KillTimer, EnableWindow
 extern OleInitialize, InitCommonControlsEx, LoadLibraryW, GetModuleHandleW
 extern CreateWindowExW, ShowWindow, UpdateWindow, GetMessageW, TranslateMessage, DispatchMessageW, LoadImageW
@@ -71,7 +71,6 @@ WSTR m_sess, "세션(&S)"
 WSTR m_help, "도움말(&H)"
 WSTR m_guide, `사용 설명서\tF1`
 WSTR s_guide_path, "help\index.html"
-WSTR s_guide_open, "open"
 WSTR s_guide_fail, "도움말을 열 수 없습니다. 프로그램과 함께 제공된 help 폴더가 bcgui.exe 옆에 있는지 확인하세요."
 WSTR m_nf, "새 폴더 비교"
 WSTR m_nt, "새 텍스트 비교"
@@ -317,6 +316,11 @@ WinMain:
     invoke GetMessageW, rbx, 0, 0, 0
     test eax, eax
     jle .exit
+    invoke help_translate, rbx
+    cmp eax, 1
+    je .loop
+    cmp eax, 2
+    je .disp                       ; help keys never trigger actions on the underlying session
     mov eax, [rbx+MSG_MSG]
     cmp eax, WM_KEYDOWN
     je .key
@@ -377,9 +381,9 @@ help_open:
     je .fail
     test eax, 0x10
     jnz .fail
-    invoke ShellExecuteW, rbx, &s_guide_open, &rsp+96, 0, 0, 1
-    cmp rax, 32
-    jbe .fail
+    invoke help_show, rbx, &rsp+96
+    test eax, eax
+    jz .fail
     EPILOG 1280
 .fail:
     invoke msgbox, rbx, &s_guide_fail, MB_OK|MB_ICONWARNING

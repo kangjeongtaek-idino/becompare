@@ -456,9 +456,16 @@ static void preferencesChecks(void){
 
 /* close the current tab and then the application through those buttons */
 static void closeThroughButtons(void){
- {int before=shCalls;wchar_t guide[1200];GetModuleFileNameW(NULL,guide,1200);wchar_t*slash=wcsrchr(guide,L'\\');if(slash)wcscpy(slash+1,L"help\\index.html");
+ {int before=shCalls;
   SendMessageW(frame,WM_COMMAND,1051,0);
-  check(shCalls==before+1&&!wcscmp(shVerb,L"open")&&!wcscmp(shFile,guide),"Help menu opens the offline manual relative to the executable");}
+  HWND help=FindWindowW(L"BCHelp",NULL);
+  check(help&&GetWindow(help,GW_OWNER)==frame&&FindWindowExW(help,NULL,L"AtlAxWin",NULL)&&shCalls==before,"Help opens an owned in-app HTML browser without launching an external browser");
+  if(help){RECT r;GetClientRect(help,&r);check(GetDlgItem(help,901)&&GetDlgItem(help,902)&&GetDlgItem(help,903)&&GetDlgItem(help,904),"Help provides back, forward, contents and close buttons");
+   Sleep(800);prefsSnapshot(help,L"help-browser.bmp");
+   SendMessageW(frame,WM_COMMAND,1051,0);check(FindWindowW(L"BCHelp",NULL)==help,"Repeated F1 reuses the help window");
+   SetWindowPos(help,NULL,0,0,700,500,SWP_NOMOVE|SWP_NOZORDER);RECT child,client;GetWindowRect(FindWindowExW(help,NULL,L"AtlAxWin",NULL),&child);GetClientRect(help,&client);
+   check(child.right-child.left==client.right&&child.bottom-child.top==client.bottom-44,"Embedded browser follows help window resizing");
+   SendMessageW(help,WM_COMMAND,903,0);SendMessageW(help,WM_COMMAND,904,0);check(!IsWindow(help),"Help closes independently of the application");}}
  uint64_t before=g_nsess;
  SendMessageW(GetDlgItem(frame,IDM_CLOSE_TAB),BM_CLICK,0,0);
  for(int i=0;i<40&&g_nsess==before;i++)Sleep(50);

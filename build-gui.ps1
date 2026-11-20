@@ -21,6 +21,9 @@ $objs += '..\build\app.res.o'
 gcc -std=c11 -O2 -Wall -Wextra -c concurrency.c -o ..\build\concurrency.obj
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 $objs += '..\build\concurrency.obj'
-gcc -mwindows @objs -o ..\bcgui.exe -luser32 -lgdi32 -lcomctl32 -lcomdlg32 -lshell32 -lole32 -ldwmapi -lwininet -lgdiplus -luxtheme -lshlwapi -lversion -ladvapi32 -lnormaliz
+gcc -std=c11 -O2 -Wall -Wextra -c help.c -o ..\build\help.obj
+if ($LASTEXITCODE) { exit $LASTEXITCODE }
+$objs += '..\build\help.obj'
+gcc -mwindows @objs -o ..\bcgui.exe -luser32 -lgdi32 -lcomctl32 -lcomdlg32 -lshell32 -lole32 -loleaut32 -ldwmapi -lwininet -lgdiplus -luxtheme -lshlwapi -lversion -ladvapi32 -lnormaliz
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 Write-Host 'built bcgui.exe'

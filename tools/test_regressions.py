@@ -19,7 +19,7 @@ def _mods():
 
 
 MODS = _mods()
-LIBS = ["-l"+s for s in "user32 gdi32 comctl32 comdlg32 shell32 ole32 dwmapi wininet gdiplus uxtheme shlwapi version advapi32 normaliz".split()]
+LIBS = ["-l"+s for s in "user32 gdi32 comctl32 comdlg32 shell32 ole32 oleaut32 dwmapi wininet gdiplus uxtheme shlwapi version advapi32 normaliz".split()]
 LOG = []
 def run(args, cwd=ROOT, timeout=30, expected=0, env=None):
     r = subprocess.run([str(a) for a in args], cwd=cwd, timeout=timeout, capture_output=True, text=True, errors="replace", env=env, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -31,6 +31,8 @@ for m in MODS:
     run(["nasm","-f","win64","-I","./",m+".asm","-o",OUT/(m+".obj")],ROOT/"gui")
 run(["gcc","-std=c11","-O2","-Wall","-Wextra","-c",ROOT/"gui/concurrency.c","-o",OUT/"concurrency.obj"])
 MODS.append("concurrency")
+run(["gcc","-std=c11","-O2","-Wall","-Wextra","-c",ROOT/"gui/help.c","-o",OUT/"help.obj"])
+MODS.append("help")
 run(["windres","res/app.rc","-O","coff","-o",OUT/"app.res.o"],ROOT/"gui")
 run(["gcc","-mwindows",*[OUT/(m+".obj") for m in MODS],OUT/"app.res.o","-o",OUT/"bcgui.exe",*LIBS])
 r=run(["python","tools/hazard.py"])
