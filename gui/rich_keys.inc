@@ -13,7 +13,9 @@
 ;   Shift+Tab           take one level of indent off the line of the caret / the selected lines
 ;   Ctrl+Shift+M        move the caret to the bracket that matches the one at the caret (or, away from a
 ;                       bracket, to the opening bracket around the caret)
-;   Enter               the new line starts with the indent of the line it comes from
+;   Enter               the new line starts with the indent of the line it comes from; behind ( [ { one
+;                       level more, and a closing partner at the caret goes to a line of its own below
+;   Home                to the first character of the line that is not a blank; from there to the line start
 ;   Shift+Enter         start a new line below the line of the caret, wherever the caret is in it
 ;   Ctrl+Alt+Enter      start a new line above the line of the caret
 ;   Ctrl+Enter          split the line at the caret; the caret stays where it is
@@ -757,6 +759,9 @@ rich_key:
     mov esi, 14                      ; 14 Backspace between a pair
     cmp r12d, 8                      ; VK_BACK
     je .is
+    mov esi, 15                      ; 15 Home
+    cmp r12d, 0x24                   ; VK_HOME
+    je .is
     jmp .no
 .k1:
     cmp r13d, 1
@@ -843,6 +848,8 @@ rich_key:
     je .unindent
     cmp esi, 9
     je .brace
+    cmp esi, 15
+    je .home
     cmp esi, 14
     jne .nl
     invoke rk_pair_back, rbx         ; ---- Backspace
@@ -1288,6 +1295,37 @@ rich_key:
     invoke SendMessageW, rbx, EM_SCROLLCARET, 0, 0
     jmp .done
 
+    ; ---- Home
+.home:
+    cmp r14d, r15d
+    jne .pass
+    invoke rk_get, rbx, #[rsp+RK_BLK+8], #[rsp+RK_BLK+12]
+    mov [rsp+RK_T], rax
+    xor edi, edi                     ; blanks and tabs the line starts with
+.hc:
+    movzx ecx, word [rax+rdi*2]
+    cmp ecx, 32
+    je .hc1
+    cmp ecx, 9
+    jne .hce
+.hc1:
+    inc edi
+    jmp .hc
+.hce:
+    test edi, edi                    ; no indent: the key does what it always did
+    jz .pass
+    mov eax, [rsp+RK_BLK+8]
+    lea ecx, [rax+rdi]
+    cmp r14d, ecx                    ; already at the first character: on to the line start
+    je .hset
+    mov eax, ecx
+.hset:
+    mov [rsp+RK_SEL], eax
+    mov [rsp+RK_SEL+4], eax
+    invoke SendMessageW, rbx, EM_EXSETSEL, 0, &rsp+RK_SEL
+    invoke SendMessageW, rbx, EM_SCROLLCARET, 0, 0
+    jmp .done
+
     ; ---- Enter, Shift+Enter, Ctrl+Alt+Enter, Ctrl+Enter
 .nl:
     invoke GetWindowLongPtrW, rbx, GWL_STYLE
@@ -1319,7 +1357,40 @@ rich_key:
     inc edi
     jmp .nlc
 .nlce:
-    lea rcx, [rdi*2+8]
+    xor eax, eax
+    mov [rsp+RK_A], eax              ; characters of one more level (behind an opening bracket)
+    mov [rsp+RK_C], eax              ; 1: the closing partner at the caret gets a line of its own
+    cmp esi, 10
+    jne .nlalloc
+    invoke rk_ctx, rbx, &rsp+RK_CLS  ; caret, length, character in front, character at the caret
+    cmp dword [rsp+RK_CLS], -1
+    je .nlalloc
+    mov ecx, [rsp+RK_CLS+8]
+    mov edx, ')'
+    cmp ecx, '('
+    je .nlblk
+    mov edx, ']'
+    cmp ecx, '['
+    je .nlblk
+    mov edx, '}'
+    cmp ecx, '{'
+    jne .nlalloc
+.nlblk:
+    mov dword [rsp+RK_A], 4          ; four blanks; a tab when the line is indented with tabs
+    mov dword [rsp+RK_B], 32
+    test edi, edi
+    jz .nlb1
+    mov rax, [rsp+RK_T]
+    cmp word [rax], 9
+    jne .nlb1
+    mov dword [rsp+RK_A], 1
+    mov dword [rsp+RK_B], 9
+.nlb1:
+    cmp edx, [rsp+RK_CLS+12]
+    jne .nlalloc
+    mov dword [rsp+RK_C], 1
+.nlalloc:
+    lea rcx, [rdi*4+32]              ; at most: break, indent, level, break, indent
     call malloc
     mov [rsp+RK_N], rax
     cmp esi, 12
@@ -1329,7 +1400,27 @@ rich_key:
     lea r8, [rdi*2]
     invoke memcpy, rcx, [rsp+RK_T], r8
     mov rax, [rsp+RK_N]
-    mov word [rax+rdi*2+2], 0
+    lea rdx, [rax+rdi*2+2]
+    mov ecx, [rsp+RK_A]
+    mov r8d, [rsp+RK_B]
+.nlu:
+    test ecx, ecx
+    jz .nlu1
+    mov [rdx], r8w
+    add rdx, 2
+    dec ecx
+    jmp .nlu
+.nlu1:
+    mov word [rdx], 0
+    cmp dword [rsp+RK_C], 0
+    je .nlz
+    mov word [rdx], 13               ; the closing bracket: on the next line, at the indent of this one
+    lea rcx, [rdx+2]
+    lea r8, [rdi*2]
+    mov word [rcx+r8], 0
+    invoke memcpy, rcx, [rsp+RK_T], r8
+.nlz:
+    add edi, [rsp+RK_A]              ; the caret goes behind the indent and the level
     cmp esi, 11
     je .nlafter
     mov [rsp+RK_RNG], r14d           ; the selection is replaced
