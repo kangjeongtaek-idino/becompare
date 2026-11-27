@@ -331,12 +331,15 @@ WinMain:
     jnz .loop
     jmp .disp
 .nochar:
-    cmp eax, 0x0104                  ; WM_SYSKEYDOWN: Alt+Shift+Up / Down moves lines in an editor pane
-    jne .disp
+    cmp eax, 0x0104                  ; WM_SYSKEYDOWN: Alt+Shift+Up / Down moves lines in an editor pane,
+    jne .disp                        ;   Alt+Up / Down extends / shrinks the selection
     invoke GetKeyState, VK_SHIFT
+    mov r8d, 4
     test ax, ax
-    jns .disp
-    invoke rich_key, [rbx+MSG_HWND], [rbx+MSG_WPARAM], 6
+    jns .alt
+    mov r8d, 6
+.alt:
+    invoke rich_key, [rbx+MSG_HWND], [rbx+MSG_WPARAM], r8
     test eax, eax
     jnz .loop
     jmp .disp
