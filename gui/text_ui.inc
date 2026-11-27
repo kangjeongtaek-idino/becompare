@@ -1223,6 +1223,7 @@ tv_save:
     invoke save_error, rsi
     jmp .fail
 .saved:
+    invoke rc_saved, rbx             ; what was recovered into this tab is no longer needed
     invoke SendMessageW, rdi, EM_SETMODIFY, 0, 0
     invoke set_status, &s_saved
     mov eax, 1

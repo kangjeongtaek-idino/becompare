@@ -677,6 +677,7 @@ hx_save:
     invoke save_error, rsi
     jmp .d
 .saved:
+    invoke rc_saved, rbx             ; what was recovered into this tab is no longer needed
     mov qword [r15], 0
     invoke set_status, &s_saved
     jmp .d

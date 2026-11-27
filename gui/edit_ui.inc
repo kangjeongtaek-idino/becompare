@@ -349,6 +349,7 @@ ed_save:
     invoke save_error, rsi
     jmp .d
 .saved:
+    invoke rc_saved, rbx             ; what was recovered into this tab is no longer needed
     invoke SendMessageW, [rbx+E_HR], EM_SETMODIFY, 0, 0
     invoke set_status, &s_saved
     invoke ed_syn, rsi, rbx

@@ -32,7 +32,7 @@ extern int msgbox(HWND,const wchar_t*,uint64_t);
 extern UINT WINAPI settings_read_int(const wchar_t*,const wchar_t*,INT,const wchar_t*);   /* aware of a settings transaction */
 
 enum {T_TEXT=2,T_HEX=4,T_EDIT=10};
-enum {SS_HVIEW=8,ID_EDIT_A=101,BC_RUN=WM_APP+11};
+enum {SS_HVIEW=8,SS_DATA=16,ID_EDIT_A=101,BC_RUN=WM_APP+11};
 typedef struct { wchar_t dir[600], data[700], path[520]; unsigned slot,type,bytes; uint64_t time; } RcItem;
 typedef struct Own { struct Own *next; const void *owner; wchar_t dir[600]; uint64_t hash[2]; int has[2]; } Own;
 static Own *owns;
@@ -124,7 +124,25 @@ void rc_drop_slot(const void *owner,unsigned slot){
     }
     if(!o->has[0]&&!o->has[1]){ remove_dir(o->dir); forget(o); }
 }
-void rc_drop(const void *owner){ rc_drop_slot(owner,0); rc_drop_slot(owner,1); }
+/* A recovered snapshot stays until the tab it was opened in saves: closing that tab without saving, or a
+   second crash, must not lose it. It is then offered again by the next start. */
+typedef struct Kept { struct Kept *next; const void *owner; RcItem item; } Kept;
+static Kept *kept;
+void rc_discard(const RcItem *it);
+static void release(const void *owner,int discard){
+    Kept **p=&kept;
+    while(*p){
+        Kept *k=*p;
+        if(k->owner!=owner){ p=&k->next; continue; }
+        *p=k->next;
+        if(discard)rc_discard(&k->item);
+        free(k);
+    }
+}
+/* rc_saved(owner): that view wrote a file - what was recovered into it has served its purpose */
+void rc_saved(const void *owner){ release(owner,1); }
+/* rc_drop(owner): the view is closing in the ordinary way */
+void rc_drop(const void *owner){ rc_drop_slot(owner,0); rc_drop_slot(owner,1); release(owner,0); }
 
 /* 1: written, or the same as the last time. 0: not kept (off, too large, cannot be written). */
 static int put(const void *owner,unsigned slot,unsigned type,const wchar_t *path,int bytes,
@@ -225,7 +243,8 @@ void rc_discard(const RcItem *it){
 }
 /* rc_restore(item) -> 1 opened. The file itself is never written: the kept content is opened next to it
    (a copy in the temporary folder on the left, the file on the right). A document that had no file, or
-   whose file is gone, opens in the editor with an empty path, so that saving asks for a name. */
+   whose file is gone, opens in the editor with an empty path, so that saving asks for a name.
+   The snapshot is not removed here: it stays until the opened tab saves. */
 int rc_restore(const RcItem *it){
     static unsigned serial;
     wchar_t tmp[700]; const wchar_t *name=wcsrchr(it->path,L'\\');
@@ -253,7 +272,9 @@ int rc_restore(const RcItem *it){
         }
     }
     if(!sess)return 0;
-    rc_discard(it);
+    const void *owner=*(void**)((char*)sess+SS_DATA);        /* the view's data: what it passes as owner */
+    Kept *k=owner?calloc(1,sizeof *k):NULL;
+    if(k){ k->owner=owner; k->item=*it; k->next=kept; kept=k; }   /* gone once that view saves (rc_saved) */
     return 1;
 }
 

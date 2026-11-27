@@ -1302,12 +1302,16 @@ static void recoverChecks(void){
  check(dlg&&rcRows(dlg)==3&&rcRowNamed(dlg,L"rc_b.txt")<0,"the discarded one is not offered again");
  if(!dlg)return;
  PostMessageW(dlg,WM_COMMAND,1,0);
- rcGone_(dlg);for(int i=0;i<200&&(g_nsess!=4||rcFolders(L"_c",NULL));i++)Sleep(25);
- check(rcGone_(dlg)&&g_nsess==4&&rcFolders(L"_c",NULL)==0,"Recover opens a tab for each and removes the snapshots");
+ rcGone_(dlg);for(int i=0;i<200&&g_nsess!=4;i++)Sleep(25);
+ check(rcGone_(dlg)&&g_nsess==4&&rcFolders(L"_c",NULL)==3,"Recover opens a tab for each; the snapshots stay until those tabs save");
  {char*s=rcSessionOfType(2,1);
   check(s&&!wcscmp((wchar_t*)(s+1072),rcA)&&rcFile((wchar_t*)(s+32),"RECOVERED\r\n")&&rcFile(rcA,rcLong),"a text opens as a compare of the kept content against the file, which is unchanged");
   s=rcSessionOfType(4,1);
   check(s&&!wcscmp((wchar_t*)(s+1072),rcH)&&rcFile((wchar_t*)(s+32),"0123456789ABCDEF")&&rcFile(rcH,"0123456789abcdef"),"bytes open as a hex compare against the file");
+  /* saving in the tab a snapshot was recovered into removes that snapshot, and only that one */
+  if(s){char*hx=NULL;for(int i=0;i<200;i++){hx=*(char**)(s+16);if(hx&&*(unsigned char**)(hx+16)&&*(uint64_t*)(hx+24)==16)break;Sleep(20);}
+   *(uint64_t*)(hx+120)=1;SendMessageW(rcViewOf(s),WM_APP+13,0,0);
+   check(!*(uint64_t*)(hx+120)&&rcFolders(L"_c",NULL)==2&&rcFile(rcH,"0123456789abcdef"),"saving in a recovered tab removes its snapshot and leaves the others");}
   s=rcSessionOfType(10,1);HWND v=s?rcViewOf(s):NULL,pane=v?FindWindowExW(v,NULL,L"RICHEDIT50W",NULL):NULL;wchar_t text[64]={0};
   if(pane)GetWindowTextW(pane,text,63);if(v)GetWindowTextW(GetDlgItem(v,101),t,500);
   check(s&&!t[0]&&!wcsncmp(text,L"LOST FILE",9)&&SendMessageW(v,WM_APP+14,0,0)&&GetFileAttributesW(rcGone)==INVALID_FILE_ATTRIBUTES,"content whose file is gone opens in the editor: modified, and without a path, so that saving asks for a name");
@@ -1547,7 +1551,7 @@ int main(int argc,char**argv){
  bc_winmain(GetModuleHandleW(NULL));
  check(WaitForSingleObject(w,5000)==WAIT_OBJECT_0,"application closed normally");
  check(boxes==0,"no message box appeared");
- if(recoverMode)check(rcOwn(NULL)==0&&rcFolders(L"_",NULL)==0,"an ordinary exit leaves no snapshot behind");
+ if(recoverMode)check(rcOwn(NULL)==0&&rcFolders(L"_c",NULL)==2&&rcFolders(L"_",NULL)==2,"an ordinary exit drops the snapshots of its own panes; what was recovered but never saved stays for the next start");
  check(GetFileAttributesW(ownTemp)==INVALID_FILE_ATTRIBUTES,"temporary folder of this process is removed on exit");
  printf("%d checks, %d failures\n",checks,failed);fflush(stdout);
  ExitProcess(failed?1:0);

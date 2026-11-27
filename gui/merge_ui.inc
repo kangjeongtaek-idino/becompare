@@ -523,6 +523,7 @@ mg_save:
     invoke save_error, rsi
     jmp .no
 .saved:
+    invoke rc_saved, rbx             ; what was recovered into this tab is no longer needed
     invoke SendMessageW, [rbx+MG_HM], EM_SETMODIFY, 0, 0
     invoke set_status, &s_saved
     mov eax, 1

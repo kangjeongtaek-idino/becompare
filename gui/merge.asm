@@ -20,7 +20,7 @@ extern pb_create, pb_layout, pb_load, pb_collect, pb_command
 extern rich_create, rich_set_text, rich_get_text, rich_bk, rich_theme, rich_unsel, rich_batch
 extern text_load, text_load_raw, text_save, lines_split, compare_lines, hunk_free, lower_w
 extern fs_watch, fs_forget, guarded_text_save, lh_keep
-extern rc_put_text, rc_drop_slot, rc_drop
+extern rc_put_text, rc_drop_slot, rc_drop, rc_saved
 extern sb_init, sb_append, sb_free, vec_push
 extern set_tab_title
 extern browse_open, browse_save
