@@ -4,3 +4,4 @@ build/
 *.o
 *.log
 __pycache__/
+.idea/
