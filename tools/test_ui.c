@@ -6,6 +6,7 @@
    "test_ui folderpv" checks the preview under the list: showing a pair, differences, files, merge, save, the strip.
    "test_ui fmerge" runs a folder merge into an output folder and checks what it reports and writes.
    "test_ui browse" opens the folder dialog from a window hanging off the screen and checks where it lands.
+   "test_ui recover" checks the snapshots of modified panes and the recovery list of a start after a crash.
    "test_ui find" searches a small folder tree through the file search of the Home tab.
    "test_ui findmft" lists the whole drive of the working folder by parsing its file table (needs administrator
    rights, skipped otherwise) and looks for a file created just before; "test_ui findusn" does the same with the
@@ -406,6 +407,8 @@ static DWORD WINAPI prefsDriver(void*arg){
  if(phase==0){SetWindowTextW(GetDlgItem(h,572),L"7");SendMessageW(h,WM_COMMAND,2,0);return 0;}
  if(phase==2){
   GetWindowTextW(GetDlgItem(h,572),t,80);check(!wcscmp(t,L"3"),"saved history limit appears when preferences reopen");
+  GetWindowTextW(GetDlgItem(h,576),t,80);check(!wcscmp(t,L"60")&&SendMessageW(GetDlgItem(h,575),BM_GETCHECK,0,0)==BST_UNCHECKED,"saved crash recovery settings appear when preferences reopen");
+  SendMessageW(h,WM_COMMAND,3,0);GetWindowTextW(GetDlgItem(h,576),t,80);check(!wcscmp(t,L"30")&&SendMessageW(GetDlgItem(h,575),BM_GETCHECK,0,0)==BST_CHECKED,"defaults turn crash recovery on, every 30 seconds");
   SendMessageW(h,WM_COMMAND,3,0);GetWindowTextW(GetDlgItem(h,572),t,80);check(!wcscmp(t,L"30")&&SendMessageW(GetDlgItem(h,570),CB_GETCURSEL,0,0)==0,"defaults reset controls to documented values");
   check(SendMessageW(GetDlgItem(h,574),BM_GETCHECK,0,0)==BST_CHECKED&&GetWindowTextLengthW(GetDlgItem(h,574))>0,"paired brackets are on by default");
   SendMessageW(h,WM_COMMAND,2,0);return 0;
@@ -414,6 +417,11 @@ static DWORD WINAPI prefsDriver(void*arg){
  for(int i=0;i<100&&shownBoxes==before;i++)Sleep(10);
  check(shownBoxes==before+1&&IsWindow(h)&&SendMessageW(GetDlgItem(h,550),TCM_GETCURSEL,0,0)==0,"invalid history limits show an error and return to the field's tab without closing preferences");
  SetWindowTextW(GetDlgItem(h,572),L"3");SetWindowTextW(GetDlgItem(h,573),L"1");
+ before=shownBoxes;SetWindowTextW(GetDlgItem(h,576),L"3");PostMessageW(h,WM_COMMAND,1,0);
+ for(int i=0;i<100&&shownBoxes==before;i++)Sleep(10);
+ Sleep(50);check(shownBoxes==before+1&&IsWindow(h)&&wcsstr(lastBox,L"5~600"),"a recovery interval outside 5 to 600 seconds is refused with its own message");
+ check((GetWindowLongPtrW(GetDlgItem(h,575),GWL_STYLE)&WS_VISIBLE)&&(GetWindowLongPtrW(GetDlgItem(h,576),GWL_STYLE)&WS_VISIBLE)&&GetWindowTextLengthW(GetDlgItem(h,586))>0,"crash recovery has its switch and its interval on the general page");
+ SetWindowTextW(GetDlgItem(h,576),L"60");SendMessageW(GetDlgItem(h,575),BM_SETCHECK,BST_UNCHECKED,0);
  SendMessageW(GetDlgItem(h,560),BM_SETCHECK,BST_CHECKED,0);SendMessageW(GetDlgItem(h,563),BM_SETCHECK,BST_CHECKED,0);
  SendMessageW(GetDlgItem(h,565),BM_SETCHECK,BST_UNCHECKED,0);SendMessageW(GetDlgItem(h,567),BM_SETCHECK,BST_UNCHECKED,0);
  SendMessageW(GetDlgItem(h,569),BM_SETCHECK,BST_CHECKED,0);SendMessageW(GetDlgItem(h,570),CB_SETCURSEL,1,0);SendMessageW(GetDlgItem(h,571),CB_SETCURSEL,4,0);
@@ -436,6 +444,7 @@ static void preferencesChecks(void){
  }
  expectBoxes=0;
  check(GetPrivateProfileIntW(L"History",L"MaxVersions",0,g_ini)==3&&GetPrivateProfileIntW(L"History",L"MaxFileMB",0,g_ini)==1,"history limits persist and cancelling Defaults preserves them");
+ check(GetPrivateProfileIntW(L"Recover",L"Enabled",1,g_ini)==0&&GetPrivateProfileIntW(L"Recover",L"IntervalSec",0,g_ini)==60,"crash recovery switch and interval persist");
  check(g_dark==1&&GetPrivateProfileIntW(L"UI",L"Dark",0,g_ini)==1,"theme preference persists and applies immediately");
  uint64_t before=g_nsess;SendMessageW(frame,WM_COMMAND,1002,0);for(int i=0;i<100&&g_nsess==before;i++)Sleep(10);
  HWND text=FindWindowExW(frame,NULL,L"BCText",NULL);
@@ -1191,6 +1200,168 @@ static void pvChecks(void){
   pvClick(PID_TOG);Sleep(300);check((GetWindowLongPtrW(GetDlgItem(fv,PID_PREV),GWL_STYLE)&WS_VISIBLE)!=0,"and shows it again");}
  SendMessageW(pvPane(201),EM_SETMODIFY,FALSE,0);SendMessageW(pvPane(202),EM_SETMODIFY,FALSE,0);
 }
+/* ---- crash recovery ("test_ui recover"): what the modified panes hold is kept under <settings folder>\recover
+   on the frame's timer, dropped on a save or an ordinary close, and what a run that is gone left behind is
+   offered when the application starts. */
+typedef struct { wchar_t dir[600], data[700], path[520]; unsigned slot,type,bytes; uint64_t time; } RcItem;
+extern void rc_startup(HWND);
+extern void *add_session(uint64_t,const wchar_t*,const wchar_t*,const wchar_t*);
+extern void *g_sess[];
+static int recoverMode;
+static wchar_t rcRoot[600],rcA[400],rcB[400],rcE[400],rcGone[400],rcH[400],rcH2[400];
+static char rcLong[200];             /* 30 lines: enough to fold with any context setting the other modes left */
+/* a snapshot folder as a process that is gone left it */
+static void rcFake(const wchar_t*name,const wchar_t*path,const char*content,int bytes){
+ wchar_t dir[700],p[800];swprintf(dir,700,L"%ls\\%ls",rcRoot,name);SHCreateDirectoryExW(NULL,dir,NULL);
+ swprintf(p,800,L"%ls\\0.dat",dir);putfile(p,content);
+ swprintf(p,800,L"%ls\\info.ini",dir);{FILE*f=_wfopen(p,L"wb");fputs("\xff\xfe",f);fclose(f);}
+ WritePrivateProfileStringW(L"Owner",L"Started",L"5",p);WritePrivateProfileStringW(L"0",L"Path",path,p);
+ WritePrivateProfileStringW(L"0",L"Type",bytes?L"4":L"10",p);WritePrivateProfileStringW(L"0",L"Bytes",bytes?L"1":L"0",p);
+ WritePrivateProfileStringW(L"0",L"Time",L"133000000000000000",p);WritePrivateProfileStringW(NULL,NULL,NULL,p);
+}
+static void recoverFixture(void){
+ wchar_t base[500],ini[600];GetEnvironmentVariableW(L"LOCALAPPDATA",base,500);swprintf(rcRoot,600,L"%ls\\BeCompareAsm\\recover",base);
+ /* the other modes share these settings: recording on, the default size limit */
+ swprintf(ini,600,L"%ls\\BeCompareAsm",base);SHCreateDirectoryExW(NULL,ini,NULL);wcscat(ini,L"\\settings.ini");
+ if(GetFileAttributesW(ini)!=INVALID_FILE_ATTRIBUTES){WritePrivateProfileStringW(L"Recover",NULL,NULL,ini);WritePrivateProfileStringW(L"History",L"MaxFileMB",NULL,ini);WritePrivateProfileStringW(NULL,NULL,NULL,ini);}
+ GetFullPathNameW(L"rc_a.txt",400,rcA,NULL);GetFullPathNameW(L"rc_b.txt",400,rcB,NULL);GetFullPathNameW(L"rc_e.txt",400,rcE,NULL);
+ GetFullPathNameW(L"rc_gone.txt",400,rcGone,NULL);GetFullPathNameW(L"rc_h.bin",400,rcH,NULL);GetFullPathNameW(L"rc_h2.bin",400,rcH2,NULL);
+ rcLong[0]=0;for(int i=1;i<=30;i++)sprintf(rcLong+strlen(rcLong),"l%d\r\n",i);
+ putfile(rcA,rcLong);putfile(rcB,rcLong);putfile(rcE,"alpha\r\nbeta\r\n");putfile(rcH,"0123456789abcdef");putfile(rcH2,"0123456789abcdef");
+ rcFake(L"FFFFFFF0_1",rcA,"RECOVERED\r\n",0);rcFake(L"FFFFFFF0_2",rcGone,"LOST FILE\r\n",0);
+ rcFake(L"FFFFFFF0_3",rcH,"0123456789ABCDEF",1);rcFake(L"FFFFFFF0_4",rcB,"UNWANTED\r\n",0);
+}
+/* the snapshot folders under recover\ whose name has that part; the last one found is copied to dir */
+static int rcFolders(const wchar_t*part,wchar_t*dir){
+ wchar_t pat[700];swprintf(pat,700,L"%ls\\*",rcRoot);WIN32_FIND_DATAW d;int n=0;HANDLE f=FindFirstFileW(pat,&d);if(f==INVALID_HANDLE_VALUE)return 0;
+ do{if((d.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)&&d.cFileName[0]!=L'.'&&wcsstr(d.cFileName,part)){n++;if(dir)swprintf(dir,600,L"%ls\\%ls",rcRoot,d.cFileName);}}while(FindNextFileW(f,&d));
+ FindClose(f);return n;
+}
+/* the folders this process records into are <pid>_<n>; those it took over from an earlier run are <pid>_c... */
+static int rcOwn(wchar_t*dir){
+ wchar_t pre[40],pat[700];swprintf(pre,40,L"%X_",(unsigned)GetCurrentProcessId());swprintf(pat,700,L"%ls\\%ls*",rcRoot,pre);
+ WIN32_FIND_DATAW d;int n=0;HANDLE f=FindFirstFileW(pat,&d);if(f==INVALID_HANDLE_VALUE)return 0;
+ do{if((d.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)&&d.cFileName[wcslen(pre)]!=L'c'){n++;if(dir)swprintf(dir,600,L"%ls\\%ls",rcRoot,d.cFileName);}}while(FindNextFileW(f,&d));
+ FindClose(f);return n;
+}
+static int rcData(const wchar_t*dir,int slot,const char*want,int n){
+ wchar_t p[700];char b[256]={0};swprintf(p,700,L"%ls\\%d.dat",dir,slot);FILE*f=_wfopen(p,L"rb");if(!f)return want==NULL;
+ int got=(int)fread(b,1,255,f);fclose(f);return want&&got==n&&!memcmp(b,want,n);
+}
+static uint64_t rcWritten(const wchar_t*dir,int slot){
+ wchar_t p[700];WIN32_FILE_ATTRIBUTE_DATA a;swprintf(p,700,L"%ls\\%d.dat",dir,slot);if(!GetFileAttributesExW(p,GetFileExInfoStandard,&a))return 0;
+ return ((uint64_t)a.ftLastWriteTime.dwHighDateTime<<32)|a.ftLastWriteTime.dwLowDateTime;
+}
+static void rcIni(const wchar_t*dir,const wchar_t*sec,const wchar_t*key,wchar_t*out){wchar_t p[700];swprintf(p,700,L"%ls\\info.ini",dir);GetPrivateProfileStringW(sec,key,L"",out,520,p);}
+/* things that create windows run on the thread of the application */
+static WNDPROC frameProc;static void*madeSession;static uint64_t mkType;static const wchar_t*mkA,*mkB;
+static LRESULT CALLBACK rcHook(HWND h,UINT m,WPARAM w,LPARAM l){
+ if(m==WM_APP+900){rc_startup(h);return 0;}
+ if(m==WM_APP+901){madeSession=add_session(mkType,mkA,mkB,NULL);return 0;}
+ return CallWindowProcW(frameProc,h,m,w,l);
+}
+static void*rcOpen(uint64_t type,const wchar_t*a,const wchar_t*b){mkType=type;mkA=a;mkB=b;SendMessageW(frame,WM_APP+901,0,0);return madeSession;}
+static HWND rcViewOf(void*sess){return *(HWND*)((char*)sess+8);}
+static void*rcSessionOfType(uint64_t type,uint64_t from){for(uint64_t i=from;i<g_nsess;i++)if(*(uint64_t*)g_sess[i]==type)return g_sess[i];return NULL;}
+static void rcTick(void){SendMessageW(frame,WM_TIMER,92,0);}
+static HWND recWindow;
+static BOOL CALLBACK onRecover(HWND h,LPARAM p){wchar_t c[40];(void)p;GetClassNameW(h,c,40);if(!wcscmp(c,L"BCRecover")){recWindow=h;return FALSE;}return TRUE;}
+static HWND rcDialog(void){for(int i=0;i<200;i++){recWindow=NULL;EnumThreadWindows(mainTid,onRecover,0);if(recWindow&&GetDlgItem(recWindow,3))return recWindow;Sleep(25);}return NULL;}
+static int rcGone_(HWND h){for(int i=0;i<200&&IsWindow(h);i++)Sleep(25);return !IsWindow(h);}
+static int rcRows(HWND dlg){return (int)SendMessageW(GetDlgItem(dlg,10),LVM_GETITEMCOUNT,0,0);}
+static void rcCell(HWND dlg,int row,int col,wchar_t*out){LVITEMW it;memset(&it,0,sizeof it);it.iSubItem=col;it.pszText=out;it.cchTextMax=300;out[0]=0;SendMessageW(GetDlgItem(dlg,10),LVM_GETITEMTEXTW,row,(LPARAM)&it);}
+static int rcRowNamed(HWND dlg,const wchar_t*name){wchar_t t[300];for(int i=0;i<rcRows(dlg);i++){rcCell(dlg,i,0,t);if(!wcscmp(t,name))return i;}return -1;}
+static void rcTick1(HWND dlg,int row,int on){LVITEMW it;memset(&it,0,sizeof it);it.stateMask=LVIS_STATEIMAGEMASK;it.state=INDEXTOSTATEIMAGEMASK(on?2:1);SendMessageW(GetDlgItem(dlg,10),LVM_SETITEMSTATE,row,(LPARAM)&it);}
+static int rcFile(const wchar_t*p,const char*want){char b[256]={0};FILE*f=_wfopen(p,L"rb");if(!f)return 0;size_t n=fread(b,1,255,f);fclose(f);return n==strlen(want)&&!memcmp(b,want,n);}
+static void recoverChecks(void){
+ wchar_t dir[600],t[520];HWND dlg;
+ frameProc=(WNDPROC)SetWindowLongPtrW(frame,GWLP_WNDPROC,(LONG_PTR)rcHook);
+ /* ---- the start found four snapshots of a process that is gone */
+ dlg=rcDialog();
+ check(dlg&&GetWindow(dlg,GW_OWNER)==frame&&!IsWindowEnabled(frame),"a start with leftover snapshots opens the recovery list over the disabled frame");
+ if(!dlg)return;
+ check(rcRows(dlg)==4&&rcRowNamed(dlg,L"rc_a.txt")>=0&&rcRowNamed(dlg,L"rc_gone.txt")>=0&&rcRowNamed(dlg,L"rc_h.bin")>=0&&rcRowNamed(dlg,L"rc_b.txt")>=0,"the list names every file with unsaved content");
+ {int r=rcRowNamed(dlg,L"rc_a.txt");wchar_t folder[300],when[300],want[400];rcCell(dlg,r,1,folder);rcCell(dlg,r,2,when);wcscpy(want,rcA);*wcsrchr(want,L'\\')=0;
+  check(!wcscmp(folder,want)&&wcslen(when)==16,"with its folder and the time it was kept");
+  check((SendMessageW(GetDlgItem(dlg,10),LVM_GETITEMSTATE,r,LVIS_STATEIMAGEMASK)>>12)==2,"every row starts checked");}
+ PostMessageW(dlg,WM_COMMAND,2,0);
+ check(rcGone_(dlg)&&IsWindowEnabled(frame)&&g_nsess==1&&rcFolders(L"_c",NULL)==4&&rcFolders(L"FFFFFFF0",NULL)==0,"Later closes the list and keeps everything, taken over by this process");
+ /* ---- discard: only what is checked, and only after the question */
+ PostMessageW(frame,WM_APP+900,0,0);dlg=rcDialog();
+ check(dlg&&rcRows(dlg)==4,"what was left for later is offered again");
+ if(!dlg)return;
+ for(int i=0;i<4;i++)rcTick1(dlg,i,i==rcRowNamed(dlg,L"rc_b.txt"));
+ expectBoxes=1;shownBoxes=0;boxAnswer=IDNO;SendMessageW(dlg,WM_COMMAND,3,0);
+ check(shownBoxes==1&&IsWindow(dlg)&&rcFolders(L"_c",NULL)==4,"Discard asks first; No keeps the list open and everything in place");
+ boxAnswer=IDYES;PostMessageW(dlg,WM_COMMAND,3,0);
+ rcGone_(dlg);for(int i=0;i<200&&rcFolders(L"_c",NULL)!=3;i++)Sleep(25);   /* the list closes first, then the choice is carried out */
+ check(rcGone_(dlg)&&shownBoxes==2&&rcFolders(L"_c",NULL)==3&&g_nsess==1,"Discard removes the checked snapshot only and opens nothing");
+ expectBoxes=0;boxAnswer=0;
+ /* ---- recover: next to the file, the file itself untouched */
+ PostMessageW(frame,WM_APP+900,0,0);dlg=rcDialog();
+ check(dlg&&rcRows(dlg)==3&&rcRowNamed(dlg,L"rc_b.txt")<0,"the discarded one is not offered again");
+ if(!dlg)return;
+ PostMessageW(dlg,WM_COMMAND,1,0);
+ rcGone_(dlg);for(int i=0;i<200&&(g_nsess!=4||rcFolders(L"_c",NULL));i++)Sleep(25);
+ check(rcGone_(dlg)&&g_nsess==4&&rcFolders(L"_c",NULL)==0,"Recover opens a tab for each and removes the snapshots");
+ {char*s=rcSessionOfType(2,1);
+  check(s&&!wcscmp((wchar_t*)(s+1072),rcA)&&rcFile((wchar_t*)(s+32),"RECOVERED\r\n")&&rcFile(rcA,rcLong),"a text opens as a compare of the kept content against the file, which is unchanged");
+  s=rcSessionOfType(4,1);
+  check(s&&!wcscmp((wchar_t*)(s+1072),rcH)&&rcFile((wchar_t*)(s+32),"0123456789ABCDEF")&&rcFile(rcH,"0123456789abcdef"),"bytes open as a hex compare against the file");
+  s=rcSessionOfType(10,1);HWND v=s?rcViewOf(s):NULL,pane=v?FindWindowExW(v,NULL,L"RICHEDIT50W",NULL):NULL;wchar_t text[64]={0};
+  if(pane)GetWindowTextW(pane,text,63);if(v)GetWindowTextW(GetDlgItem(v,101),t,500);
+  check(s&&!t[0]&&!wcsncmp(text,L"LOST FILE",9)&&SendMessageW(v,WM_APP+14,0,0)&&GetFileAttributesW(rcGone)==INVALID_FILE_ATTRIBUTES,"content whose file is gone opens in the editor: modified, and without a path, so that saving asks for a name");
+  if(v&&pane){rcTick();check(rcOwn(dir)==1&&(rcIni(dir,L"0",L"Path",t),!t[0])&&rcData(dir,0,"LOST FILE\r\n",11),"and is kept again while it stays unsaved");SendMessageW(pane,EM_SETMODIFY,0,0);rcTick();}}
+ check(rcOwn(NULL)==0,"an unmodified pane has no snapshot");
+ /* ---- recording: the editor */
+ {void*s=rcOpen(10,rcE,NULL);HWND v=rcViewOf(s),pane=NULL;
+  for(int i=0;i<100;i++){pane=FindWindowExW(v,NULL,L"RICHEDIT50W",NULL);if(pane&&GetWindowTextLengthW(pane)>0)break;Sleep(20);}
+  rcTick();check(rcOwn(NULL)==0,"a file that was only opened is not recorded");
+  SendMessageW(pane,EM_SETSEL,0,0);SendMessageW(pane,EM_REPLACESEL,1,(LPARAM)L"X");rcTick();
+  check(rcOwn(dir)==1&&rcData(dir,0,"Xalpha\r\nbeta\r\n",14)&&rcData(dir,1,NULL,0),"the next interval keeps the modified text as a save would write it");
+  rcIni(dir,L"0",L"Path",t);{wchar_t ty[520];rcIni(dir,L"0",L"Type",ty);check(!wcscmp(t,rcE)&&!wcscmp(ty,L"10")&&rcFile(rcE,"alpha\r\nbeta\r\n"),"with the path of its file, which is not touched");}
+  uint64_t w0=rcWritten(dir,0);Sleep(30);rcTick();check(w0&&rcWritten(dir,0)==w0,"an interval without changes writes nothing");
+  SendMessageW(pane,EM_REPLACESEL,1,(LPARAM)L"Y");rcTick();check(rcData(dir,0,"XYalpha\r\nbeta\r\n",15),"a further change replaces the snapshot");
+  SendMessageW(v,WM_APP+13,0,0);check(rcFile(rcE,"XYalpha\r\nbeta\r\n")&&rcOwn(NULL)==1,"saving writes the file");
+  rcTick();check(rcOwn(NULL)==0,"and the snapshot of a saved pane is dropped");
+  SendMessageW(pane,EM_REPLACESEL,1,(LPARAM)L"Z");rcTick();check(rcOwn(NULL)==1,"modified again: kept again");
+  uint64_t before=g_nsess;expectBoxes=1;shownBoxes=0;boxAnswer=IDNO;SendMessageW(GetDlgItem(frame,IDM_CLOSE_TAB),BM_CLICK,0,0);
+  for(int i=0;i<40&&g_nsess==before;i++)Sleep(50);expectBoxes=0;boxAnswer=0;
+  check(g_nsess==before-1&&shownBoxes==1&&rcOwn(NULL)==0&&rcFile(rcE,"XYalpha\r\nbeta\r\n"),"closing the tab without saving drops its snapshot");}
+ /* ---- recording: one side of a text compare, also while the panes show a folded view */
+ {char*s=rcOpen(2,rcA,rcB);HWND v=rcViewOf(s),pa=GetDlgItem(v,ID_RA),pb=GetDlgItem(v,ID_RB);char want[200];wchar_t shown[600]={0};
+  for(int i=0;i<200&&GetWindowTextLengthW(pb)<20;i++)Sleep(20);
+  SendMessageW(GetDlgItem(v,217),BM_SETCHECK,BST_UNCHECKED,0);SendMessageW(v,WM_COMMAND,105,0);   /* the saved default may be a folded view: edit the plain one */
+  SendMessageW(pb,EM_SETSEL,0,0);SendMessageW(pb,EM_REPLACESEL,1,(LPARAM)L"R");
+  SendMessageW(GetDlgItem(v,217),BM_SETCHECK,BST_CHECKED,0);SendMessageW(v,WM_COMMAND,105,0);
+  GetWindowTextW(pb,shown,599);
+  check(wcschr(shown,0x22EF)&&(GetWindowLongPtrW(pb,GWL_STYLE)&ES_READONLY)&&SendMessageW(pb,EM_GETMODIFY,0,0)&&!SendMessageW(pa,EM_GETMODIFY,0,0),"the edited side is shown folded: its pane no longer holds the file text");
+  rcTick();sprintf(want,"R%s",rcLong);
+  check(rcOwn(dir)==1&&rcData(dir,1,want,(int)strlen(want))&&rcData(dir,0,NULL,0),"only the modified side is kept, as the whole text and not as the folded rows");
+  rcIni(dir,L"1",L"Path",t);
+  check(!wcscmp(t,rcB)&&SendMessageW(GetDlgItem(v,217),BM_GETCHECK,0,0)==BST_CHECKED&&(GetWindowLongPtrW(pb,GWL_STYLE)&ES_READONLY)&&rcFile(rcB,rcLong),"keeping it leaves the folded view and the file as they are");
+  /* turned off in the settings: the next interval drops what was kept */
+  WritePrivateProfileStringW(L"Recover",L"Enabled",L"0",g_ini);rcTick();check(rcOwn(NULL)==0,"turned off: the snapshot is dropped and nothing is recorded");
+  WritePrivateProfileStringW(L"Recover",L"Enabled",NULL,g_ini);rcTick();check(rcOwn(NULL)==1,"turned on again: recorded again");}
+ /* ---- recording: the output of a merge, the bytes of a hex pane */
+ {char*s=rcOpen(6,rcE,rcA);HWND v=rcViewOf(s);for(int i=0;i<200&&!SendMessageW(v,WM_APP+14,0,0);i++)Sleep(20);
+  int before=rcOwn(NULL);rcTick();wchar_t ty[520]=L"";
+  int found=0;{wchar_t pat[700];swprintf(pat,700,L"%ls\\%X_*",rcRoot,(unsigned)GetCurrentProcessId());WIN32_FIND_DATAW d;HANDLE f=FindFirstFileW(pat,&d);
+   if(f!=INVALID_HANDLE_VALUE){do{swprintf(dir,600,L"%ls\\%ls",rcRoot,d.cFileName);rcIni(dir,L"0",L"Type",ty);if(!wcscmp(ty,L"6"))found=1;}while(!found&&FindNextFileW(f,&d));FindClose(f);}}
+  check(SendMessageW(v,WM_APP+14,0,0)&&rcOwn(NULL)==before+1&&found&&rcWritten(dir,0),"a merge output that is not saved is kept");}
+ {char*s=rcOpen(4,rcH,rcH2);HWND v=rcViewOf(s);char*hx=NULL;
+  for(int i=0;i<200;i++){hx=*(char**)(s+16);if(hx&&*(unsigned char**)hx&&*(uint64_t*)(hx+8)==16)break;Sleep(20);}
+  int before=rcOwn(NULL);rcTick();check(rcOwn(NULL)==before,"an unmodified hex compare is not recorded");
+  (*(unsigned char**)hx)[0]='#';*(uint64_t*)(hx+112)=1;rcTick();
+  int found=0;wchar_t ty[520];{wchar_t pat[700];swprintf(pat,700,L"%ls\\%X_*",rcRoot,(unsigned)GetCurrentProcessId());WIN32_FIND_DATAW d;HANDLE f=FindFirstFileW(pat,&d);
+   if(f!=INVALID_HANDLE_VALUE){do{swprintf(dir,600,L"%ls\\%ls",rcRoot,d.cFileName);rcIni(dir,L"0",L"Bytes",ty);if(!wcscmp(ty,L"1"))found=1;}while(!found&&FindNextFileW(f,&d));FindClose(f);}}
+  rcIni(dir,L"0",L"Path",t);
+  check(found&&rcData(dir,0,"#123456789abcdef",16)&&!wcscmp(t,rcH)&&rcFile(rcH,"0123456789abcdef"),"the modified bytes of a hex pane are kept");
+  *(uint64_t*)(hx+112)=0;rcTick();check(rcOwn(NULL)==before,"and dropped once the pane is not modified");(void)v;}
+ /* ---- an ordinary exit leaves nothing behind (checked by main); unsaved tabs are closed without saving */
+ expectBoxes=1;boxAnswer=IDNO;
+ PostMessageW(frame,WM_CLOSE,0,0);
+}
 static DWORD WINAPI watcher(void*arg){
  (void)arg;
  for(int i=0;i<200&&!frame;i++){EnumThreadWindows(mainTid,onTop,0);if(!frame)Sleep(50);}
@@ -1204,6 +1375,7 @@ static DWORD WINAPI watcher(void*arg){
   if(hv&&GetDlgItem(hv,ID_FIND_LIST)&&r.right-r.left>=16&&r.bottom-r.top>=12&&c.right-c.left>=16&&c.bottom-c.top>=12)break;
   Sleep(50);
  }
+ if(recoverMode){recoverChecks();return 0;}
  if(browseMode){tabRowChecks();tooltipChecks();browseChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
  if(settingsMode){tabRowChecks();preferencesChecks();tooltipChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
  if(findMode){findChecks();tooltipChecks();PostMessageW(frame,WM_CLOSE,0,0);return 0;}
@@ -1345,6 +1517,8 @@ int main(int argc,char**argv){
  fmergeMode=argc>1&&!strcmp(argv[1],"fmerge");
  browseMode=argc>1&&!strcmp(argv[1],"browse");
  settingsMode=argc>1&&!strcmp(argv[1],"settings");
+ recoverMode=argc>1&&!strcmp(argv[1],"recover");
+ if(recoverMode)recoverFixture();
  findMode=argc>1&&!strcmp(argv[1],"find");
  folderMode=argc>1&&!strcmp(argv[1],"folder");
  if(folderMode)folderFixture();
@@ -1359,7 +1533,7 @@ int main(int argc,char**argv){
  fixture();
  GetFullPathNameW(L"ui_a.c",400,a,NULL);GetFullPathNameW(L"ui_b.c",400,b,NULL);
  swprintf(cmdline,1200,L"bcgui.exe %ls \"%ls\" \"%ls\"",mergeMode?L"merge":L"text",a,b);
- if(browseMode||findMode||mftMode||settingsMode)wcscpy(cmdline,L"bcgui.exe");
+ if(browseMode||findMode||mftMode||settingsMode||recoverMode)wcscpy(cmdline,L"bcgui.exe");
  if(pvMode){wchar_t fa[400],fb[400];GetFullPathNameW(L"fp\\a",400,fa,NULL);GetFullPathNameW(L"fp\\b",400,fb,NULL);swprintf(cmdline,1200,L"bcgui.exe folder \"%ls\" \"%ls\"",fa,fb);}
  if(folderMode){wchar_t fa[400],fb[400];GetFullPathNameW(L"fc\\a",400,fa,NULL);GetFullPathNameW(L"fc\\b",400,fb,NULL);swprintf(cmdline,1200,L"bcgui.exe folder \"%ls\" \"%ls\"",fa,fb);}
  if(fmergeMode){
@@ -1373,6 +1547,7 @@ int main(int argc,char**argv){
  bc_winmain(GetModuleHandleW(NULL));
  check(WaitForSingleObject(w,5000)==WAIT_OBJECT_0,"application closed normally");
  check(boxes==0,"no message box appeared");
+ if(recoverMode)check(rcOwn(NULL)==0&&rcFolders(L"_",NULL)==0,"an ordinary exit leaves no snapshot behind");
  check(GetFileAttributesW(ownTemp)==INVALID_FILE_ATTRIBUTES,"temporary folder of this process is removed on exit");
  printf("%d checks, %d failures\n",checks,failed);fflush(stdout);
  ExitProcess(failed?1:0);

@@ -1079,6 +1079,112 @@ tv_copy:
     EPILOG 192
 
 ; ---------------------------------------------------------------- save
+; tv_side_text(hwnd, tv, side, out {length, options}) -> rax the text of that side as a save writes it (to be
+; freed), 0 when it cannot be read. The options are those of text_save. A display only view (folded, unified,
+; white space shown) does not hold the file text in its panes: there the stored text is the one.
+tv_side_text:
+    PROLOG 128
+    mov rsi, rcx
+    mov rbx, rdx
+    mov r12d, r8d
+    mov r14, r9
+    mov r13d, ID_RA
+    lea r15, [rbx+TV_TXA]
+    test r12d, r12d
+    jz .ids
+    mov r13d, ID_RB
+    lea r15, [rbx+TV_TXB]
+.ids:
+    cmp qword [rbx+TV_FOLDED], 0
+    jne .stored
+    invoke GetDlgItem, rsi, r13
+    invoke rich_get_text, rax, &rsp+64
+    test rax, rax
+    jz .d
+    mov rbp, rax
+    invoke strip_fillers, rbp, [rsp+64], #[rbx+r12*4+TV_ZW]
+    mov r13, rax
+    cmp dword [r15+24], 0            ; the original ended with a line break
+    je .eol
+    mov word [rbp+r13*2], 13
+    inc r13
+    mov word [rbp+r13*2], 0
+    jmp .eol
+.stored:
+    xor eax, eax
+    cmp qword [r15], 0
+    je .d
+    mov r13, [r15+8]
+    lea rcx, [r13*2+8]
+    call malloc
+    test rax, rax
+    jz .d
+    mov rbp, rax
+    lea rdi, [r13*2]
+    invoke memcpy, rbp, [r15], rdi
+    mov word [rbp+r13*2], 0
+.eol:
+    mov eax, [r15+20]                ; crlf
+    mov [rsp+72], eax
+    mov rax, r12                     ; a file with mixed line ends: every line gets its own back
+    shl rax, 4
+    lea rdi, [rbx+rax+TV_ORG]
+    cmp qword [rdi], 0
+    je .opts
+    invoke eol_restore, [rdi], [rdi+8], rbp, r13, #[r15+20]
+    test rax, rax
+    jz .opts
+    mov rdi, rax
+    mov r13, rdx
+    invoke free, rbp
+    mov rbp, rdi
+    mov dword [rsp+72], 2            ; the text holds its line ends as they are to be written
+.opts:
+    mov rcx, r15                     ; the encoding it was read with
+    mov edx, [rsp+72]
+    call text_opts
+    mov eax, eax
+    mov [r14+8], rax
+    mov [r14], r13
+    mov rax, rbp
+.d:
+    EPILOG 128
+
+; tv_snap(hwnd, tv): crash recovery - keep each side while it is not saved, drop what was kept once it is.
+; Nothing of the view changes: not its folding, its caret or its modified marks.
+tv_snap:
+    PROLOG 1216
+    mov rsi, rcx
+    mov rbx, rdx
+    xor r12d, r12d
+.side:
+    mov r13d, ID_EDIT_A
+    mov rdi, [rbx+TV_HA]
+    test r12d, r12d
+    jz .have
+    mov r13d, ID_EDIT_B
+    mov rdi, [rbx+TV_HB]
+.have:
+    invoke SendMessageW, rdi, EM_GETMODIFY, 0, 0
+    test eax, eax
+    jz .drop
+    invoke GetDlgItem, rsi, r13
+    invoke GetWindowTextW, rax, &rsp+96, 519
+    invoke tv_side_text, rsi, rbx, r12, &rsp+1160
+    test rax, rax
+    jz .next
+    mov rbp, rax
+    invoke rc_put_text, rbx, r12, T_TEXT, &rsp+96, rbp, [rsp+1160], [rsp+1168]
+    invoke free, rbp
+    jmp .next
+.drop:
+    invoke rc_drop_slot, rbx, r12
+.next:
+    inc r12d
+    cmp r12d, 2
+    jb .side
+    EPILOG 1216
+
 ; tv_save(hwnd, tv, side) -> eax 1 saved
 tv_save:
     PROLOG 1216
@@ -1101,40 +1207,13 @@ tv_save:
     je .nopath
     invoke GetDlgItem, rsi, r14
     mov rdi, rax
-    invoke rich_get_text, rdi, &rsp+1140
+    invoke tv_side_text, rsi, rbx, r12, &rsp+1160
     test rax, rax
     jz .fail
     mov rbp, rax
-    invoke strip_fillers, rbp, [rsp+1140], #[rbx+r12*4+TV_ZW]
-    mov r13, rax
-    cmp dword [r15+24], 0            ; the original ended with a line break
-    je .nofinal
-    mov word [rbp+r13*2], 13
-    inc r13
-    mov word [rbp+r13*2], 0
-.nofinal:
-    mov eax, [r15+20]                ; crlf
-    mov [rsp+1160], eax
-    mov rax, r12                     ; a file with mixed line ends: every line gets its own back
-    shl rax, 4
-    lea r14, [rbx+rax+TV_ORG]
-    cmp qword [r14], 0
-    je .opts
-    invoke eol_restore, [r14], [r14+8], rbp, r13, #[r15+20]
-    test rax, rax
-    jz .opts
-    mov [rsp+1168], rdx
-    mov r14, rax
-    invoke free, rbp
-    mov rbp, r14
-    mov r13, [rsp+1168]
-    mov dword [rsp+1160], 2          ; the text holds its line ends as they are to be written
-.opts:
-    mov rcx, r15                     ; the encoding it was read with
-    mov edx, [rsp+1160]
-    call text_opts
-    mov r9d, eax
-    mov [rsp+1176], r9
+    mov r13, [rsp+1160]
+    mov rax, [rsp+1168]
+    mov [rsp+1176], rax
     invoke lh_keep, &rsp+96          ; local history: what the file holds now
     invoke guarded_text_save, r15, &rsp+96, rbp, r13, [rsp+1176]
     mov r14d, eax
@@ -1428,6 +1507,8 @@ tv_proc:
     je .collect
     cmp edi, BC_ISDIRTY
     je .isdirty
+    cmp edi, BC_SNAPSHOT
+    je .snapshot
     cmp edi, BC_SAVE
     je .saveall
     cmp edi, BC_THEME
@@ -1867,7 +1948,11 @@ tv_proc:
     invoke SendMessageW, [r15+TV_HB], EM_GETMODIFY, 0, 0
     or eax, ebx
     EPILOG 320
+.snapshot:
+    invoke tv_snap, rsi, r15
+    jmp .zero
 .destroy:
+    invoke rc_drop, r15              ; closed in the ordinary way: nothing to recover
     invoke fs_forget, &r15+TV_TXA
     invoke fs_forget, &r15+TV_TXB
     invoke free, [r15+TV_ROWS]

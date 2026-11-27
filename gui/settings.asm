@@ -6,6 +6,7 @@
 extern CreateWindowExW, DefWindowProcW, SendMessageW, MoveWindow, GetClientRect, GetDlgItem, EnableWindow, GetWindowRect
 extern SetWindowLongPtrW, GetWindowLongPtrW, FillRect, SetFocus, GetWindowTextW, SetWindowTextW, DestroyWindow
 extern GetMessageW, TranslateMessage, DispatchMessageW, PostQuitMessage
+extern g_hframe, PostMessageW
 extern GetPrivateProfileStringW, GetPrivateProfileIntW, WritePrivateProfileStringW, GetPrivateProfileSectionW
 extern RegOpenKeyExW, RegQueryValueExW, RegCloseKey, CreateProcessW, CloseHandle, GetFileAttributesW
 extern malloc, calloc, free, memset, wcslen, wcscpy, wcscat, wcsncpy, wcsrchr, wcschr, _wcsicmp, _wcsnicmp, _snwprintf, wcstoul
@@ -701,6 +702,9 @@ st_save:
     call cfg_end
     test eax, eax
     jz .failed
+    mov rbx, [g_hframe]              ; crash recovery follows its settings at once (interval, on / off)
+    invoke PostMessageW, rbx, WM_TIMER, 92, 0
+    mov eax, 1
     EPILOG 512
 .failed:
     invoke msgbox, rsi, &s_settings_conflict, MB_OK|MB_ICONWARNING

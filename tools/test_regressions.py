@@ -33,12 +33,15 @@ run(["gcc","-std=c11","-O2","-Wall","-Wextra","-c",ROOT/"gui/concurrency.c","-o"
 MODS.append("concurrency")
 run(["gcc","-std=c11","-O2","-Wall","-Wextra","-c",ROOT/"gui/help.c","-o",OUT/"help.obj"])
 MODS.append("help")
+run(["gcc","-std=c11","-O2","-Wall","-Wextra","-c",ROOT/"gui/recover.c","-o",OUT/"recover.obj"])
+MODS.append("recover")
 run(["windres","res/app.rc","-O","coff","-o",OUT/"app.res.o"],ROOT/"gui")
 run(["gcc","-mwindows",*[OUT/(m+".obj") for m in MODS],OUT/"app.res.o","-o",OUT/"bcgui.exe",*LIBS])
 r=run(["python","tools/hazard.py"])
 assert "hazards: 0" in r.stdout
 run(["gcc",ROOT/"tools/test_safe_save.c",OUT/"engine.obj",OUT/"textlib.obj",OUT/"mem.obj",OUT/"concurrency.obj",*["-Wl,--wrap="+x for x in ["WriteFile","FlushFileBuffers","ReplaceFileW","ReadFile"]],"-luser32","-lshell32","-o",OUT/"test_safe_save.exe"])
 run(["gcc","-municode",ROOT/"tools/test_archives.c",*[OUT/(m+".obj") for m in ["engine","textlib","mem","concurrency","vtab","inflate"]],"-Wl,--wrap=WriteFile","-Wl,--wrap=FlushFileBuffers","-luser32","-lshell32","-o",OUT/"test_archives.exe"])
+run(["gcc","-municode","-Wall","-Wextra",ROOT/"tools/test_recover.c",*[OUT/(m+".obj") for m in ["recover","engine","textlib","mem","concurrency"]],"-luser32","-lgdi32","-lshell32","-o",OUT/"test_recover.exe"])
 defs={}
 for name in ["inc/app.inc","text.asm","edit_ui.inc","hex.asm","merge.asm","folder.asm","fmerge.asm"]:
     for line in (ROOT/"gui"/name).read_text(encoding="utf-8").splitlines():
@@ -67,6 +70,10 @@ for d in ["left","right","emptyA","emptyB","dirLeft/only-left","dirRight","local
 # every run gets its own temporary folder too: the application cleans %TEMP%\\BeCompareAsm when it ends
 tmp=fixtures/"tmp"; tmp.mkdir()
 ui_env=dict(os.environ,LOCALAPPDATA=str(fixtures/"ui/local-app-data"),TEMP=str(tmp),TMP=str(tmp))
+recover_dir=fixtures/"recover";recover_dir.mkdir()
+r=run([OUT/"test_recover.exe"],recover_dir,timeout=60,env=ui_env)
+(fixtures/"test_recover.log").write_text(r.stdout,encoding="utf-8")
+recover_checks=int(re.search(r"(\d+) checks, 0 failures",r.stdout).group(1))
 from test_archives import archive_checks
 archive_count=archive_checks(OUT/"test_archives.exe",fixtures/"archives",ui_env)
 concurrency_dir=fixtures/"concurrency";concurrency_dir.mkdir()
@@ -76,7 +83,7 @@ concurrency_checks=int(re.search(r"(\d+) checks, 0 failures",r.stdout).group(1))
 from test_concurrency import process_checks
 concurrency_checks+=process_checks(OUT/"test_concurrency.exe",fixtures/"processes",ui_env)
 ui_checks=0
-for mode in ["text","merge","fmerge","browse","folder","folderpv","find","findmft","findusn","settings"]:
+for mode in ["text","merge","fmerge","browse","folder","folderpv","find","findmft","findusn","settings","recover"]:
     r=run([OUT/"test_ui.exe",mode],fixtures/"ui",timeout=200 if mode.startswith("find") else 90,env=ui_env)
     if "SKIP" in r.stdout: print(r.stdout.splitlines()[0])
     (fixtures/("test_ui_"+mode+".log")).write_text(r.stdout,encoding="utf-8")
@@ -90,6 +97,9 @@ bct=tmp/"BeCompareAsm"
 gone=bct/"FFFFFFF0_1A2B"/"A"/"sub"; gone.mkdir(parents=True); (gone/"x.txt").write_text("stale")
 alive=bct/f"{os.getpid():X}_1A2B"/"B"; alive.mkdir(parents=True); (alive/"y.txt").write_text("in use")
 (bct/"clipboard_12AB.txt").write_text("old layout"); (bct/"notes").mkdir()
+# a snapshot that a crashed run left behind: an unattended run neither offers it (no window to wait on) nor removes it
+rec=fixtures/"local-app-data"/"BeCompareAsm"/"recover"/"FFFFFFF0_1"; rec.mkdir(parents=True)
+(rec/"0.dat").write_text("kept"); (rec/"info.ini").write_text("[Owner]\nStarted=5\n[0]\nPath=\nType=10\nBytes=0\nTime=1\n")
 def cli(name,args,expected):
     r=run([OUT/"bcgui.exe",*args],fixtures,timeout=10,expected=expected,env=env)
     LOG.append(dict(name=name,exit=r.returncode,pass_=True))
@@ -245,5 +255,7 @@ assert not any((ex/f).exists() for f in ["w1.xlsx","w2.docx","w3.xlsx","w4.xlsx"
 # a compare that could not read its inputs leaves no report of an empty result
 assert not any((ex/f).exists() for f in ["e4.docx","e7.docx"])
 print("PASS export file contents")
+assert (rec/"0.dat").read_text()=="kept" and len(list(rec.parent.iterdir()))==1, "an unattended run must leave crash recovery snapshots alone"
+print("PASS unattended runs neither offer nor remove a crash recovery snapshot")
 (fixtures/"cli-results.json").write_text(json.dumps(LOG,indent=2),encoding="utf-8")
-print("All regression checks passed:",unit_checks["test_safe_save"],"save +",unit_checks["test_view_state"],"state/worker +",concurrency_checks,"concurrency +",ui_checks,"UI +",archive_count,"archive +",len(LOG),"CLI cases + 1 temporary-folder check")
+print("All regression checks passed:",unit_checks["test_safe_save"],"save +",unit_checks["test_view_state"],"state/worker +",concurrency_checks,"concurrency +",recover_checks,"recovery +",ui_checks,"UI +",archive_count,"archive +",len(LOG),"CLI cases + 1 temporary-folder check")

@@ -2714,6 +2714,8 @@ fold_proc:
     je .setcur
     cmp edi, BC_ISDIRTY
     je .isdirty
+    cmp edi, BC_SNAPSHOT
+    je .snapshot
     cmp edi, BC_SAVE
     je .savepv
     cmp edi, BC_NEXTDIFF
@@ -3180,6 +3182,12 @@ fold_proc:
 .isdirty:
     invoke fold_pv_dirty, r15
     EPILOG 320
+.snapshot:                           ; crash recovery: the preview is a text view of its own
+    mov rax, [r15+F_PVVIEW]
+    test rax, rax
+    jz .zero
+    invoke SendMessageW, rax, BC_SNAPSHOT, 0, 0
+    jmp .zero
 .btn_undo:                           ; the toolbar buttons do what Ctrl+Z / Ctrl+Y do
     invoke SendMessageW, rsi, BC_UNDO, 0, 0
     jmp .zero

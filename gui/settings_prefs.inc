@@ -14,6 +14,11 @@ WSTR sp_enabled, "Enabled"
 WSTR sp_editor, "Editor"
 WSTR sp_autopair, "AutoPair"
 WSTR sp_max, "MaxVersions"
+WSTR sp_recover, "Recover"
+WSTR sp_interval, "IntervalSec"
+WSTR sp_lrecover, "비정상 종료에 대비해 편집 내용 자동 보관"
+WSTR sp_linterval, "보관 간격 (초, 5~600):"
+WSTR sp_invalid_rc, "자동 보관 간격은 5~600초의 정수로 입력하세요."
 WSTR sp_mb, "MaxFileMB"
 WSTR sp_fold, "Fold"
 WSTR sp_unified, "Unified"
@@ -66,6 +71,7 @@ sp_bools:
     dq 568, sp_text, sp_blank, 0, sp_lblank
     dq 569, sp_history, sp_enabled, 1, sp_lhistory
     dq 574, sp_editor, sp_autopair, 1, sp_lautopair
+    dq 575, sp_recover, sp_enabled, 1, sp_lrecover
 section .text
 
 sg_prefs_create:
@@ -96,6 +102,8 @@ sg_prefs_create:
     je .history
     cmp ebp, 10
     je .pairs
+    cmp ebp, 11
+    je .recover
     imul eax, ebp, 30
     add eax, 96
     mov [rsp+152], eax
@@ -109,10 +117,18 @@ sg_prefs_create:
 .pairs:                              ; typing in the editor panes: under the text compare defaults
     mov rax, r15
     SPLACE 24, 424, 360, 24
+    jmp .next
+.recover:                            ; crash recovery: under the local history limits
+    mov rax, r15
+    SPLACE 400, 360, 320, 24
 .next:
     inc ebp
-    cmp ebp, 11
+    cmp ebp, 12
     jb .checks
+    invoke mk_lbl, rsi, &sp_linterval, 586
+    SPLACE 400, 398, 244, 24
+    invoke mk_edit, rsi, 576
+    SPLACE 650, 394, 64, 24
     invoke mk_lbl, rsi, &sp_intro, 580
     SPLACE 24, 60, 700, 26
     invoke mk_lbl, rsi, &sp_ltheme, 581
@@ -181,7 +197,7 @@ sg_page:
     invoke GetDlgItem, rsi, rbp
     invoke ShowWindow, rax, r12
     inc ebp
-    cmp ebp, 586
+    cmp ebp, 587
     jb .general
     xor r12d, r12d
     cmp r15d, 2
@@ -214,8 +230,21 @@ sg_prefs_fill:
     invoke GetDlgItem, rsi, [rdi]
     invoke SendMessageW, rax, BM_SETCHECK, r12, 0
     inc ebp
-    cmp ebp, 11
+    cmp ebp, 12
     jb .bool
+    mov r12d, 30                    ; crash recovery interval, seconds
+    test r15d, r15d
+    jnz .interval
+    invoke GetPrivateProfileIntW, &sp_recover, &sp_interval, 30, &g_ini
+    cmp eax, 5
+    jb .interval
+    cmp eax, 600
+    ja .interval
+    mov r12d, eax
+.interval:
+    invoke _snwprintf, &rsp+96, 12, &sp_decimal, r12
+    invoke GetDlgItem, rsi, 576
+    invoke SetWindowTextW, rax, &rsp+96
     xor r12d, r12d
     test r15d, r15d
     jnz .theme
@@ -287,6 +316,7 @@ sg_number:
 sg_prefs_validate:
     PROLOG 64
     mov rsi, rcx
+    lea r13, [sp_invalid]
     mov edi, 572
     invoke sg_number, rsi, rdi, 100
     cmp rax, -1
@@ -295,6 +325,13 @@ sg_prefs_validate:
     invoke sg_number, rsi, rdi, 1024
     cmp rax, -1
     je .bad
+    mov edi, 576                     ; crash recovery interval: 5 to 600 seconds
+    lea r13, [sp_invalid_rc]
+    invoke sg_number, rsi, rdi, 600
+    cmp rax, -1
+    je .bad
+    cmp rax, 5
+    jb .bad
     mov eax, 1
     EPILOG 64
 .bad:
@@ -303,7 +340,7 @@ sg_prefs_validate:
     invoke sg_page, rsi
     invoke GetDlgItem, rsi, rdi
     invoke SetFocus, rax
-    invoke msgbox, rsi, &sp_invalid, MB_OK|MB_ICONWARNING
+    invoke msgbox, rsi, r13, MB_OK|MB_ICONWARNING
     xor eax, eax
     EPILOG 64
 
@@ -320,8 +357,12 @@ sg_prefs_save:
     invoke _snwprintf, &rsp+96, 12, &sp_decimal, r12
     invoke WritePrivateProfileStringW, [rdi+8], [rdi+16], &rsp+96, &g_ini
     inc ebp
-    cmp ebp, 11
+    cmp ebp, 12
     jb .bool
+    invoke sg_number, rsi, 576, 600
+    mov r12, rax
+    invoke _snwprintf, &rsp+96, 12, &sp_decimal, r12
+    invoke WritePrivateProfileStringW, &sp_recover, &sp_interval, &rsp+96, &g_ini
     invoke GetDlgItem, rsi, 570
     invoke SendMessageW, rax, 0x147, 0, 0
     mov r12d, eax

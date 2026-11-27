@@ -608,6 +608,41 @@ hx_find:
 .d:
     EPILOG 512
 
+; hx_snap(hwnd, hx): crash recovery - keep the bytes of each pane while they are not saved, drop what was kept
+; once they are
+hx_snap:
+    PROLOG 1216
+    mov rsi, rcx
+    mov rbx, rdx
+    xor r12d, r12d
+.pane:
+    mov r13d, ID_EDIT_A
+    mov rdi, [rbx+HX_BUFA]
+    mov r14, [rbx+HX_SZA]
+    mov r15, [rbx+HX_MODA]
+    test r12d, r12d
+    jz .have
+    mov r13d, ID_EDIT_B
+    mov rdi, [rbx+HX_BUFB]
+    mov r14, [rbx+HX_SZB]
+    mov r15, [rbx+HX_MODB]
+.have:
+    test r15, r15
+    jz .drop
+    test rdi, rdi
+    jz .drop
+    invoke GetDlgItem, rsi, r13
+    invoke GetWindowTextW, rax, &rsp+96, 519
+    invoke rc_put_bytes, rbx, r12, T_HEX, &rsp+96, rdi, r14
+    jmp .next
+.drop:
+    invoke rc_drop_slot, rbx, r12
+.next:
+    inc r12d
+    cmp r12d, 2
+    jb .pane
+    EPILOG 1216
+
 ; hx_save(hwnd, hx, pane)
 hx_save:
     PROLOG 1200
@@ -755,6 +790,8 @@ hx_proc:
     je .collect
     cmp edi, BC_ISDIRTY
     je .isdirty
+    cmp edi, BC_SNAPSHOT
+    je .snapshot
     cmp edi, BC_SAVE
     je .saveall
     cmp edi, BC_THEME
@@ -921,7 +958,11 @@ hx_proc:
     mov rax, [r15+HX_MODA]
     or rax, [r15+HX_MODB]
     EPILOG 320
+.snapshot:
+    invoke hx_snap, rsi, r15
+    jmp .zero
 .destroy:
+    invoke rc_drop, r15              ; closed in the ordinary way: nothing to recover
     invoke hx_free, r15
     invoke free, [r15+HX_VROWS]
     invoke free, r15

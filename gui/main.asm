@@ -6,6 +6,7 @@
 extern rich_key, rich_char
 extern GetModuleFileNameW, help_show, help_translate
 extern SetTimer, KillTimer, EnableWindow
+extern rc_interval_ms, rc_startup
 extern OleInitialize, InitCommonControlsEx, LoadLibraryW, GetModuleHandleW
 extern CreateWindowExW, ShowWindow, UpdateWindow, GetMessageW, TranslateMessage, DispatchMessageW, LoadImageW
 extern DefWindowProcW, PostQuitMessage, DestroyWindow, SendMessageW, PostMessageW
@@ -310,6 +311,12 @@ WinMain:
     test qword [g_batch], 4
     jnz .loop
     call update_start
+    cmp qword [g_batch], 0
+    jne .loop
+    call rc_interval_ms              ; crash recovery: the modified panes are kept every interval ...
+    mov r12d, eax
+    invoke SetTimer, rsi, 92, r12, 0
+    invoke rc_startup, rsi           ; ... and what an earlier run left behind is offered now
 
 .loop:
     lea rbx, [rsp+96]
@@ -2143,6 +2150,8 @@ frame_proc:
     EPILOG 256
 
 .close_timer:
+    cmp r12d, 92
+    je .snap_timer
     cmp r12d, 91
     jne .def
     cmp qword [g_close_all], 0
@@ -2162,6 +2171,19 @@ frame_proc:
     je .ok0
     call bulk_run                    ; carry on with the remaining tabs
     jmp .ok0
+.snap_timer:                         ; crash recovery: every view keeps or drops the content of its panes
+    call rc_interval_ms              ; the interval of the settings, also after they changed
+    mov r14d, eax
+    invoke SetTimer, rsi, 92, r14, 0
+    xor ebx, ebx
+.snap_next:
+    cmp rbx, [g_nsess]
+    jae .ok0
+    lea rax, [g_sess]
+    mov rdi, [rax+rbx*8]
+    invoke SendMessageW, [rdi+SS_HVIEW], BC_SNAPSHOT, 0, 0
+    inc rbx
+    jmp .snap_next
 .close:
     cmp qword [g_close_all], 0
     jne .stop_workers
