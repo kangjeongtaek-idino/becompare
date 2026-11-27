@@ -11,6 +11,7 @@ extern BeginPaint, EndPaint, TextOutW, SetBkColor, SetTextColor, SetBkMode, SetS
 extern GetSysColor, GetKeyState, SetCapture
 extern safe_write2
 extern fs_watch, guarded_binary_save, fs_forget
+extern rc_put_bytes, rc_drop_slot, rc_drop, rc_saved
 extern sb_free, PostMessageW, g_batch, g_xl_path, g_exitcode, g_hframe, batch_done
 extern CreateFileW, WriteFile, CloseHandle
 extern malloc, calloc, realloc, free, memset, memcpy, wcslen, wcsrchr, _snwprintf

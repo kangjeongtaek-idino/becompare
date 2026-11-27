@@ -35,6 +35,7 @@
 %define BC_SAVE    (WM_APP+13)
 %define BC_ISDIRTY (WM_APP+14)
 %define BC_STOPPING (WM_APP+15) ; request cancellation; return nonzero until workers exit
+%define BC_SNAPSHOT (WM_APP+16) ; crash recovery: keep what the modified panes hold (recover.c), drop what is saved
 %define BC_THEME   (WM_APP+20)
 %define BC_NEXTDIFF (WM_APP+30)
 %define BC_PREVDIFF (WM_APP+31)

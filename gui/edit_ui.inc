@@ -241,6 +241,66 @@ ed_hist:
     invoke lh_show, rsi, &rsp+96
     EPILOG 1216
 
+; ed_text(E, out {length, options}) -> rax the text as a save writes it (to be freed), 0 when it cannot be read.
+; The options are those of text_save: the encoding and line ends the file was read with.
+ed_text:
+    PROLOG 96
+    mov rbx, rcx
+    mov r14, rdx
+    invoke rich_get_text, [rbx+E_HR], &rsp+64
+    test rax, rax
+    jz .d
+    mov rbp, rax
+    mov r13, [rsp+64]
+    mov qword [r14+8], 0x101         ; a text that was never read from a file: UTF-8, CR LF
+    cmp qword [rbx+E_LOADED], 0
+    je .len
+    mov eax, [rbx+E_TXT+20]
+    mov [rsp+72], eax
+    test dword [rbx+E_TXT+28], 2     ; mixed line ends: every line gets its own back (E_TXT is the text as read)
+    jz .opts
+    invoke eol_restore, [rbx+E_TXT], [rbx+E_TXT+8], rbp, r13, #[rbx+E_TXT+20]
+    test rax, rax
+    jz .opts
+    mov r12, rax
+    mov r13, rdx
+    invoke free, rbp
+    mov rbp, r12
+    mov dword [rsp+72], 2
+.opts:
+    lea rcx, [rbx+E_TXT]             ; the encoding it was read with
+    mov edx, [rsp+72]
+    call text_opts
+    mov eax, eax
+    mov [r14+8], rax
+.len:
+    mov [r14], r13
+    mov rax, rbp
+.d:
+    EPILOG 96
+
+; ed_snap(hwnd, E): crash recovery - keep the text while it is not saved, drop what was kept once it is
+ed_snap:
+    PROLOG 1216
+    mov rsi, rcx
+    mov rbx, rdx
+    invoke SendMessageW, [rbx+E_HR], EM_GETMODIFY, 0, 0
+    test eax, eax
+    jz .drop
+    invoke GetDlgItem, rsi, ID_EDIT_A
+    invoke GetWindowTextW, rax, &rsp+96, 519
+    invoke ed_text, rbx, &rsp+1160
+    test rax, rax
+    jz .d
+    mov rbp, rax
+    invoke rc_put_text, rbx, 0, T_EDIT, &rsp+96, rbp, [rsp+1160], [rsp+1168]
+    invoke free, rbp
+    jmp .d
+.drop:
+    invoke rc_drop_slot, rbx, 0
+.d:
+    EPILOG 1216
+
 ; ed_save(hwnd, E, saveas)
 ed_save:
     PROLOG 1216
@@ -273,30 +333,13 @@ ed_save:
     mov dword [rbx+E_TXT+24], 0
     mov dword [rbx+E_TXT+28], 0
 .go:
-    invoke rich_get_text, [rbx+E_HR], &rsp+1144
+    invoke ed_text, rbx, &rsp+1144
     test rax, rax
     jz .d
     mov rbp, rax
     mov r13, [rsp+1144]
-    mov eax, [rbx+E_TXT+20]
-    mov [rsp+1160], eax
-    test dword [rbx+E_TXT+28], 2     ; mixed line ends: every line gets its own back (E_TXT is the text as read)
-    jz .opts
-    invoke eol_restore, [rbx+E_TXT], [rbx+E_TXT+8], rbp, r13, #[rbx+E_TXT+20]
-    test rax, rax
-    jz .opts
-    mov [rsp+1168], rdx
-    mov r14, rax
-    invoke free, rbp
-    mov rbp, r14
-    mov r13, [rsp+1168]
-    mov dword [rsp+1160], 2
-.opts:
-    lea rcx, [rbx+E_TXT]             ; the encoding it was read with
-    mov edx, [rsp+1160]
-    call text_opts
-    mov r9d, eax
-    mov [rsp+1176], r9
+    mov rax, [rsp+1152]
+    mov [rsp+1176], rax
     invoke lh_keep, &rsp+96          ; local history: what the file holds now
     invoke guarded_text_save, &rbx+E_TXT, &rsp+96, rbp, r13, [rsp+1176]
     mov r14d, eax
@@ -306,6 +349,7 @@ ed_save:
     invoke save_error, rsi
     jmp .d
 .saved:
+    invoke rc_saved, rbx             ; what was recovered into this tab is no longer needed
     invoke SendMessageW, [rbx+E_HR], EM_SETMODIFY, 0, 0
     invoke set_status, &s_saved
     invoke ed_syn, rsi, rbx
@@ -492,6 +536,8 @@ ed_proc:
     je .collect
     cmp edi, BC_ISDIRTY
     je .isdirty
+    cmp edi, BC_SNAPSHOT
+    je .snapshot
     cmp edi, BC_SAVE
     je .saveall
     cmp edi, BC_THEME
@@ -509,6 +555,9 @@ ed_proc:
 .def:
     invoke DefWindowProcW, rsi, rdi, r12, r13
     EPILOG 320
+.snapshot:
+    invoke ed_snap, rsi, r15
+    jmp .zero
 
 .create:
     mov r14, [r13]
@@ -665,6 +714,7 @@ ed_proc:
     invoke SendMessageW, [r15+E_HR], EM_GETMODIFY, 0, 0
     EPILOG 320
 .destroy:
+    invoke rc_drop, r15              ; closed in the ordinary way: nothing to recover
     invoke fs_forget, &r15+E_TXT
     invoke free, [r15+E_TXT]
     invoke free, r15

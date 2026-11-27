@@ -442,6 +442,54 @@ mg_resolve_all:
 .q:
     EPILOG 64
 
+; mg_out_text(mg, out {length, options}) -> rax the output as a save writes it (to be freed), 0 when it cannot
+; be read. The options are those of text_save.
+mg_out_text:
+    PROLOG 64
+    mov rbx, rcx
+    mov rsi, rdx
+    invoke rich_get_text, [rbx+MG_HM], rsi
+    test rax, rax
+    jz .d
+    mov r13, rax
+    mov r14, [rsi]
+    cmp dword [rbx+MG_EOL], 0
+    je .nofinal
+    mov word [r13+r14*2], 13
+    inc r14
+    mov word [r13+r14*2], 0
+.nofinal:
+    mov [rsi], r14
+    mov eax, [rbx+MG_CRLF]
+    shl eax, 8
+    or eax, [rbx+MG_ENC]
+    mov [rsi+8], rax
+    mov rax, r13
+.d:
+    EPILOG 64
+
+; mg_snap(hwnd, mg): crash recovery - keep the output while it is not saved, drop what was kept once it is
+mg_snap:
+    PROLOG 1216
+    mov rsi, rcx
+    mov rbx, rdx
+    invoke SendMessageW, [rbx+MG_HM], EM_GETMODIFY, 0, 0
+    test eax, eax
+    jz .drop
+    invoke GetDlgItem, rsi, ID_EDIT_O
+    invoke GetWindowTextW, rax, &rsp+96, 519
+    invoke mg_out_text, rbx, &rsp+1160
+    test rax, rax
+    jz .d
+    mov rbp, rax
+    invoke rc_put_text, rbx, 0, T_MERGE, &rsp+96, rbp, [rsp+1160], [rsp+1168]
+    invoke free, rbp
+    jmp .d
+.drop:
+    invoke rc_drop_slot, rbx, 0
+.d:
+    EPILOG 1216
+
 ; mg_save(hwnd, mg, sess) -> eax 1 saved
 mg_save:
     PROLOG 256
@@ -461,21 +509,11 @@ mg_save:
     cmp eax, IDYES
     jne .no
 .write:
-    invoke rich_get_text, [rbx+MG_HM], &rsp+96
+    invoke mg_out_text, rbx, &rsp+96
     test rax, rax
     jz .no
     mov r13, rax
     mov r14, [rsp+96]
-    cmp dword [rbx+MG_EOL], 0
-    je .nofinal
-    mov word [r13+r14*2], 13
-    inc r14
-    mov word [r13+r14*2], 0
-.nofinal:
-    mov r9d, [rbx+MG_CRLF]
-    shl r9d, 8
-    or r9d, [rbx+MG_ENC]
-    mov [rsp+104], r9
     invoke lh_keep, &r12+SS_PATHO    ; local history: what the output file holds now
     invoke guarded_text_save, rbx, &r12+SS_PATHO, r13, r14, [rsp+104]
     mov r15d, eax
@@ -485,6 +523,7 @@ mg_save:
     invoke save_error, rsi
     jmp .no
 .saved:
+    invoke rc_saved, rbx             ; what was recovered into this tab is no longer needed
     invoke SendMessageW, [rbx+MG_HM], EM_SETMODIFY, 0, 0
     invoke set_status, &s_saved
     mov eax, 1
@@ -696,6 +735,8 @@ mg_proc:
     je .collect
     cmp edi, BC_ISDIRTY
     je .isdirty
+    cmp edi, BC_SNAPSHOT
+    je .snapshot
     cmp edi, BC_SAVE
     je .save
     cmp edi, BC_UNDO
@@ -1023,7 +1064,11 @@ mg_proc:
     invoke mg_undo, rsi, r15, r8
     mov eax, 1
     EPILOG 320
+.snapshot:
+    invoke mg_snap, rsi, r15
+    jmp .zero
 .destroy:
+    invoke rc_drop, r15              ; closed in the ordinary way: nothing to recover
     invoke mg_unscan, r15
     invoke mg_free_texts, r15
     invoke free, [r15+MG_ANCB]
