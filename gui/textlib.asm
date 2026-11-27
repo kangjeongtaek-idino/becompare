@@ -994,6 +994,7 @@ rules_apply:
     mov rsi, rcx
     mov rdi, rdx
     mov r12, r8
+    mov [rsp+112], rsi               ; the start of the line: ^ of a regular expression
     xor r13d, r13d                   ; written chars
 .l:
     movzx eax, word [rsi]
@@ -1005,6 +1006,37 @@ rules_apply:
 .rule:
     cmp word [r14], 0
     je .plain
+    ; a regular expression rule: /pattern/=new (regex.inc). The pattern ends at the first / without a
+    ; backslash, so it may hold = and ; . Anything else that starts with / is an ordinary rule.
+    mov qword [rsp+120], 0
+    cmp word [r14], '/'
+    jne .ordinary
+    lea r8, [r14+2]
+.rx:
+    movzx eax, word [r8]
+    test eax, eax
+    jz .ordinary
+    cmp eax, '/'
+    je .rxend
+    cmp eax, 0x5C
+    jne .rxn
+    cmp word [r8+2], 0
+    je .ordinary
+    add r8, 2
+.rxn:
+    add r8, 2
+    jmp .rx
+.rxend:
+    lea rax, [r14+2]
+    cmp r8, rax
+    je .ordinary                     ; "//...": no pattern
+    cmp word [r8+2], '='
+    jne .ordinary
+    mov qword [rsp+120], 1
+    lea r10, [r8+4]                  ; new text
+    mov r11, r10
+    jmp .nl
+.ordinary:
     ; one rule: old up to '=', new up to ';'
     mov r8, r14
 .ol:
@@ -1034,7 +1066,13 @@ rules_apply:
     shr r15, 1                       ; new length
     mov [rsp+96], r10
     mov [rsp+104], r11
+    cmp qword [rsp+120], 0
+    je .wild
+    invoke re_match, &r14+2, r8, rsi, [rsp+112]
+    jmp .tried
+.wild:
     invoke pat_match, r14, r8, rsi
+.tried:
     mov r10, [rsp+96]
     mov r11, [rsp+104]
     cmp rax, rsi
@@ -1230,6 +1268,7 @@ run_flush:
     EPILOG 64
 
 %include "myers.inc"
+%include "regex.inc"
 
 %macro RUNSET 1
     cmp dword [rsp+L_RUN], %1
