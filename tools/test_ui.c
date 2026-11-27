@@ -1507,6 +1507,19 @@ static DWORD WINAPI watcher(void*arg){
  SetWindowTextW(GetDlgItem(view,232),L"");
  SendMessageW(view,WM_COMMAND,105,0);
  check(info(L"차이 4개"),"clearing the substitution rule restores all 4 differences");
+ /* regular expression rules: /pattern/=text; an empty text ignores what the pattern matches */
+ SetWindowTextW(GetDlgItem(view,232),L"/(count|total)/=N");
+ SendMessageW(view,WM_COMMAND,105,0);
+ check(info(L"차이 4개"),"there are no groups or alternatives: such a pattern matches nothing and the compare goes on");
+ SetWindowTextW(GetDlgItem(view,232),L"/int [a-z]+ = \\d+; \\/\\/ [a-z]+/=");
+ SendMessageW(view,WM_COMMAND,105,0);
+ check(info(L"차이 3개"),"a regular expression rule with an empty replacement ignores the line that differs only there");
+ SetWindowTextW(GetDlgItem(view,232),L"/^int .*$/=X;/OLD|NEW!/=Y");
+ SendMessageW(view,WM_COMMAND,105,0);
+ check(info(L"차이 3개"),"anchored regular expression rule, together with a second rule");
+ SetWindowTextW(GetDlgItem(view,232),L"");
+ SendMessageW(view,WM_COMMAND,105,0);
+ check(info(L"차이 4개"),"clearing the regular expression rules restores all 4 differences");
 
  check(!SendMessageW(ra,EM_GETMODIFY,0,0)&&!SendMessageW(rb,EM_GETMODIFY,0,0),"colouring and navigation leave the panes unmodified");
  tabRowChecks();

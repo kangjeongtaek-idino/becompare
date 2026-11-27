@@ -42,6 +42,8 @@ assert "hazards: 0" in r.stdout
 run(["gcc",ROOT/"tools/test_safe_save.c",OUT/"engine.obj",OUT/"textlib.obj",OUT/"mem.obj",OUT/"concurrency.obj",*["-Wl,--wrap="+x for x in ["WriteFile","FlushFileBuffers","ReplaceFileW","ReadFile"]],"-luser32","-lshell32","-o",OUT/"test_safe_save.exe"])
 run(["gcc","-municode",ROOT/"tools/test_archives.c",*[OUT/(m+".obj") for m in ["engine","textlib","mem","concurrency","vtab","inflate"]],"-Wl,--wrap=WriteFile","-Wl,--wrap=FlushFileBuffers","-luser32","-lshell32","-o",OUT/"test_archives.exe"])
 run(["gcc","-municode","-Wall","-Wextra",ROOT/"tools/test_recover.c",*[OUT/(m+".obj") for m in ["recover","engine","textlib","mem","concurrency"]],"-luser32","-lgdi32","-lshell32","-o",OUT/"test_recover.exe"])
+run(["objcopy","--globalize-symbol=rules_apply",OUT/"textlib.obj",OUT/"textlib.rules.obj"])
+run(["gcc","-Wall","-Wextra",ROOT/"tools/test_rules.c",OUT/"textlib.rules.obj",*[OUT/(m+".obj") for m in ["engine","mem","concurrency"]],"-luser32","-lshell32","-o",OUT/"test_rules.exe"])
 defs={}
 for name in ["inc/app.inc","text.asm","edit_ui.inc","hex.asm","merge.asm","folder.asm","fmerge.asm"]:
     for line in (ROOT/"gui"/name).read_text(encoding="utf-8").splitlines():
@@ -60,7 +62,7 @@ run(["gcc",ROOT/"tools/test_concurrency.c",*[OUT/(m+(".ui" if m=="main" else ".t
 fixtures=Path(tempfile.mkdtemp(prefix="fixtures-",dir=OUT))
 print("Fixtures:",fixtures)
 unit_checks={}
-for name in ["test_safe_save","test_view_state"]:
+for name in ["test_safe_save","test_view_state","test_rules"]:
     r=run([OUT/(name+".exe")],fixtures)
     (fixtures/(name+".log")).write_text(r.stdout,encoding="utf-8")
     unit_checks[name]=int(re.search(r"(\d+) checks, 0 failures",r.stdout).group(1))
@@ -258,4 +260,4 @@ print("PASS export file contents")
 assert (rec/"0.dat").read_text()=="kept" and len(list(rec.parent.iterdir()))==1, "an unattended run must leave crash recovery snapshots alone"
 print("PASS unattended runs neither offer nor remove a crash recovery snapshot")
 (fixtures/"cli-results.json").write_text(json.dumps(LOG,indent=2),encoding="utf-8")
-print("All regression checks passed:",unit_checks["test_safe_save"],"save +",unit_checks["test_view_state"],"state/worker +",concurrency_checks,"concurrency +",recover_checks,"recovery +",ui_checks,"UI +",archive_count,"archive +",len(LOG),"CLI cases + 1 temporary-folder check")
+print("All regression checks passed:",unit_checks["test_safe_save"],"save +",unit_checks["test_view_state"],"state/worker +",unit_checks["test_rules"],"substitution rule +",concurrency_checks,"concurrency +",recover_checks,"recovery +",ui_checks,"UI +",archive_count,"archive +",len(LOG),"CLI cases + 1 temporary-folder check")
