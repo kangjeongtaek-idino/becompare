@@ -4,7 +4,9 @@ No desktop input automation, user files or installed settings are used; the UI t
 """
 from pathlib import Path
 import re
-import os, re, subprocess, tempfile, json
+import os, re, subprocess, tempfile, json, sys
+# test names and paths hold Korean; the console of a CI runner is cp1252 and would fail to print them
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "build" / "regression"
 OUT.mkdir(parents=True, exist_ok=True)
